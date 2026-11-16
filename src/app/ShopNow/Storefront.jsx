@@ -641,6 +641,28 @@ export default function Storefront({ categories, products, offers = [], content,
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const updateHeaderHeight = () => {
+      if (storeHeaderRef.current) {
+        const height = storeHeaderRef.current.offsetHeight;
+        if (height > 0) {
+          document.documentElement.style.setProperty('--shop-header-height', `${height}px`);
+        }
+      }
+    };
+    updateHeaderHeight();
+    window.addEventListener('resize', updateHeaderHeight);
+    let observer = null;
+    if (typeof ResizeObserver !== 'undefined' && storeHeaderRef.current) {
+      observer = new ResizeObserver(updateHeaderHeight);
+      observer.observe(storeHeaderRef.current);
+    }
+    return () => {
+      window.removeEventListener('resize', updateHeaderHeight);
+      if (observer) observer.disconnect();
+    };
+  }, []);
+
   const activeCatObj = useMemo(() => {
     return categories.find((c) => String(c.id) === String(activeCategory)) || null;
   }, [categories, activeCategory]);
