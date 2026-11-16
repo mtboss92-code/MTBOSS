@@ -116,12 +116,12 @@ export default function ProductGalleryCarousel({ product }) {
   if (!hasMultiple) {
     return (
       <div className="product-carousel-root w-full flex items-center justify-center">
-        <div className="w-full aspect-square max-h-[460px] flex items-center justify-center bg-white dark:bg-zinc-900 rounded-xl overflow-hidden p-2 sm:p-4">
+        <div className="w-full aspect-square max-h-[460px] flex items-center justify-center bg-white rounded-xl overflow-hidden p-2 sm:p-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={images[0]}
             alt={product?.name || 'Product Image'}
-            className="w-full h-full object-contain max-h-[420px]"
+            className="w-full h-full object-contain max-h-[420px] mix-blend-multiply"
             loading="eager"
           />
         </div>
@@ -133,7 +133,7 @@ export default function ProductGalleryCarousel({ product }) {
   return (
     <div className="product-carousel-root w-full flex flex-col items-center">
       {/* Main Image Viewport */}
-      <div className="relative w-full aspect-square max-h-[440px] flex items-center justify-center bg-white dark:bg-zinc-900 rounded-xl overflow-hidden p-2">
+      <div className="relative w-full aspect-square max-h-[440px] flex items-center justify-center bg-white rounded-xl overflow-hidden p-2">
         <div className="overflow-hidden w-full h-full" ref={emblaRef}>
           <div className="flex h-full touch-pan-y">
             {images.map((src, idx) => (
@@ -145,7 +145,7 @@ export default function ProductGalleryCarousel({ product }) {
                 <img
                   src={src}
                   alt={`${product?.name || 'Product'} - View ${idx + 1}`}
-                  className="w-full h-full object-contain max-h-[400px]"
+                  className="w-full h-full object-contain max-h-[400px] mix-blend-multiply"
                   loading={idx === 0 ? 'eager' : 'lazy'}
                 />
               </div>
