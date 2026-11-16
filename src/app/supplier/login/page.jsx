@@ -430,7 +430,7 @@ export default function SupplierLoginPage() {
                       name="email"
                       value={formData.email}
                       onChange={handleChange}
-                      placeholder="supplier@example.com"
+                      placeholder="Vendor@example.com"
                       autoComplete="email"
                       required
                       className="sup-input"

@@ -10,7 +10,7 @@ import { notifyAdminSubmission, deliverMaterialOrderReceipt } from '@/lib/custom
 import { calculateShipping, getShippingSettings } from '@/lib/shipping';
 import { calculateCoupon, couponIsCurrentlyActive, productHasOffer } from '@/lib/coupon-calculations';
 import { evaluateCartPromotions } from '@/lib/promotion-calculations';
-import { getShopVendorCommissionPercent, recordShopVendorCommission, resolveCommissionRate } from '@/lib/shop-commissions';
+import { getShopVendorCommissionPercent, recordShopVendorCommission, resolveCommissionRate, ensureVendorForSupplier } from '@/lib/shop-commissions';
 import { snapshotOrderCashback, ensureCashbackSchema } from '@/lib/cashback/service';
 import { computeRedeemLimit, reserveWalletRedeem } from '@/lib/wallet/redeem';
 import { createPayURequest } from '@/lib/payu';
@@ -499,8 +499,25 @@ export async function POST(req) {
           actorName: cleanName,
         });
 
-        // Step 3: Check product source - apply fee calculation ONLY on vendor-sourced products (skip Admin)
-        const vendorId = product?.vendor_id ? Number(product.vendor_id) : null;
+        // Step 3: Check product source - apply fee calculation on vendor- and supplier-sourced products (skip Admin direct products)
+        let vendorId = product?.vendor_id ? Number(product.vendor_id) : null;
+        const supplierId = product?.supplier_id ? Number(product.supplier_id) : null;
+
+        // If vendorId is null but supplierId > 0 (supplier added the product), resolve matching vendor
+        if (!vendorId && supplierId && supplierId > 0) {
+          try {
+            vendorId = await ensureVendorForSupplier(supplierId, { client });
+            if (vendorId && item.product_id) {
+              await client.query(
+                'UPDATE supplier_materials SET vendor_id = $1 WHERE id = $2 AND (vendor_id IS NULL OR vendor_id = 0)',
+                [vendorId, item.product_id]
+              );
+            }
+          } catch (vErr) {
+            console.warn('Could not auto-link vendor for supplier in order:', vErr.message);
+          }
+        }
+
         if (vendorId && vendorId > 0) {
           const vendorExists = await client.query('SELECT 1 FROM vendors WHERE id = $1', [vendorId]);
           if (vendorExists.rows.length > 0) {

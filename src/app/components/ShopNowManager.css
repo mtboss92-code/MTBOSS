@@ -6,6 +6,7 @@
   --shop-admin-bg: #ffffff;
   --shop-admin-card-bg: #ffffff;
   --shop-admin-bg-hover: #f8fafc;
+  --shop-admin-subtle: #f1f5f9;
   --shop-admin-text: #0f172a;
   --shop-admin-muted: #64748b;
   --shop-admin-border: #dce3eb;
@@ -32,6 +33,7 @@
   --shop-admin-bg: #18181b;
   --shop-admin-card-bg: #18181b;
   --shop-admin-bg-hover: #27272a;
+  --shop-admin-subtle: #27272a;
   --shop-admin-text: #f4f4f5;
   --shop-admin-muted: #a1a1aa;
   --shop-admin-border: #27272a;
@@ -122,10 +124,19 @@
 .shop-admin-notice{border:1px solid rgba(37, 99, 235, 0.35);background:var(--brand-blue-soft);color:var(--brand-blue-deep);padding:12px 16px;border-radius:8px;font-size:13px;font-weight:600;margin:0 0 16px}
 .shop-admin-table-wrap{overflow:auto}
 .shop-admin-table-wrap table{border-collapse:collapse;width:100%;min-width:730px;text-align:left;font-size:12px}
-.shop-admin-table-wrap th,.shop-admin-table-wrap td{padding:12px 10px;border-bottom:1px solid var(--shop-admin-border);vertical-align:top;color:var(--shop-admin-text)}
+.shop-admin-table-wrap th,.shop-admin-table-wrap td{padding:12px 10px;border-bottom:1px solid var(--shop-admin-border);vertical-align:middle;color:var(--shop-admin-text)}
 .shop-admin-table-wrap th{color:var(--shop-admin-muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em}
 .shop-admin-table-wrap td strong{display:block}
 .shop-admin-table-wrap td small{display:block;max-width:230px;margin-top:3px;color:var(--shop-admin-muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shop-admin-table-wrap tbody tr{transition:background-color 0.15s ease}
+.shop-admin-table-wrap tbody tr:hover td,
+.commission-record-row:hover td{background-color:var(--shop-admin-bg-hover, #f8fafc)!important}
+:is(html.dark-mode, html.dark, .dark-mode, .dark) .shop-admin-table-wrap tbody tr:hover td,
+:is(html.dark-mode, html.dark, .dark-mode, .dark) .commission-record-row:hover td,
+.shop-admin-root.dark-mode .shop-admin-table-wrap tbody tr:hover td,
+.shop-admin-root.dark-mode .commission-record-row:hover td,
+.shop-admin-root.dark .shop-admin-table-wrap tbody tr:hover td,
+.shop-admin-root.dark .commission-record-row:hover td{background-color:var(--shop-admin-bg-hover, #27272a)!important}
 .shop-admin-actions{display:flex;gap:5px}
 .shop-admin-root .shop-admin-actions button{border:1px solid var(--shop-admin-border)!important;background:var(--shop-admin-bg)!important;color:var(--brand-blue-deep)!important;border-radius:5px!important;padding:6px 8px!important;font:700 11px Arial,sans-serif!important}
 .shop-admin-promo{padding:15px;border:1px solid var(--shop-admin-border);border-radius:9px;display:flex;flex-direction:column;gap:12px}
@@ -723,4 +734,112 @@
   color: var(--shop-admin-muted);
   margin-top: 4px;
 }
+
+/* ── Live Commission & Platform Fee Breakdown Card ── */
+.shop-commission-calculator-card {
+  background: var(--shop-admin-spec-box-bg);
+  border: 1.5px solid var(--shop-admin-border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin: 8px 0 16px;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+}
+.shop-commission-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.shop-commission-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.shop-commission-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--shop-admin-text);
+  margin: 0;
+}
+.shop-commission-subtitle {
+  font-size: 11.5px;
+  color: var(--shop-admin-muted);
+  display: block;
+}
+.shop-commission-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.shop-commission-badge.badge-rate {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+  border: 1px solid rgba(37, 99, 235, 0.25);
+}
+:is(html.dark-mode, html.dark, .dark-mode, .dark) .shop-commission-badge.badge-rate {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.3);
+}
+.shop-commission-badge.badge-zero {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+:is(html.dark-mode, html.dark, .dark-mode, .dark) .shop-commission-badge.badge-zero {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.3);
+}
+.shop-commission-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.shop-commission-col {
+  background: var(--shop-admin-spec-card-bg);
+  border: 1px solid var(--shop-admin-border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.shop-commission-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--shop-admin-muted);
+}
+.shop-commission-val {
+  font-size: 15.5px;
+  font-weight: 800;
+  color: var(--shop-admin-text);
+}
+.shop-commission-val.text-red {
+  color: #dc2626;
+}
+:is(html.dark-mode, html.dark, .dark-mode, .dark) .shop-commission-val.text-red {
+  color: #f87171;
+}
+.shop-commission-val.text-green {
+  color: #16a34a;
+}
+:is(html.dark-mode, html.dark, .dark-mode, .dark) .shop-commission-val.text-green {
+  color: #34d399;
+}
+.shop-commission-footer {
+  font-size: 11.5px;
+  color: var(--shop-admin-muted);
+  line-height: 1.5;
+  padding-top: 10px;
+  border-top: 1px dashed var(--shop-admin-border);
+}
+
 

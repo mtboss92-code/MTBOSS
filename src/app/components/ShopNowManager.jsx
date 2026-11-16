@@ -160,6 +160,42 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
   const [isCustomSubcategory, setIsCustomSubcategory] = useState(false);
   const [formAttributes, setFormAttributes] = useState({ thickness: '', size: '', type: '', color: '', material: '', grade: '', pack_size: '' });
   const [isDark, setIsDark] = useState(isDarkMode);
+  const [commissionInfo, setCommissionInfo] = useState({ rate: 0, rateSource: 'default', loaded: false, loading: false });
+
+  // Resolve admin commission rate whenever category or editing product changes
+  useEffect(() => {
+    let isCancelled = false;
+    async function fetchCommissionRate() {
+      if (!form.category) {
+        setCommissionInfo({ rate: 0, rateSource: 'default', loaded: false, loading: false });
+        return;
+      }
+      setCommissionInfo((prev) => ({ ...prev, loading: true }));
+      try {
+        const params = new URLSearchParams({ category: form.category });
+        if (editingId) params.set('product_id', String(editingId));
+        const res = await fetch(`/api/shop-commissions/resolve?${params}`);
+        const data = await res.json();
+        if (!isCancelled && data?.success && data?.data) {
+          setCommissionInfo({
+            rate: Number(data.data.rate || 0),
+            rateSource: data.data.rateSource || 'default',
+            ruleId: data.data.ruleId || null,
+            loaded: true,
+            loading: false,
+          });
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setCommissionInfo((prev) => ({ ...prev, loading: false }));
+        }
+      }
+    }
+    fetchCommissionRate();
+    return () => {
+      isCancelled = true;
+    };
+  }, [form.category, editingId]);
 
   useEffect(() => {
     setIsDark(isDarkMode);
@@ -872,6 +908,85 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
           <input type="number" min="0" step="0.01" value={form.compare_at_price} onChange={(e) => setForm({ ...form, compare_at_price: e.target.value })} placeholder="Shows discount when above selling price" />
           <small>A discount badge is calculated automatically when this is above the Buy Now price.</small>
         </label>
+
+        {/* Live Platform Fee & Admin Commission Breakdown */}
+        {(() => {
+          const numPrice = Number(form.price) > 0 && Number.isFinite(Number(form.price)) ? Number(form.price) : 0;
+          const currentRate = Number(commissionInfo?.rate ?? 0);
+          const adminFee = Math.round((numPrice * (currentRate / 100)) * 100) / 100;
+          const vendorPayout = Math.max(0, Math.round((numPrice - adminFee) * 100) / 100);
+          const rateSourceText = commissionInfo.rateSource === 'product'
+            ? 'Product Rule'
+            : commissionInfo.rateSource === 'category'
+            ? `Category Rule (${form.category})`
+            : 'Default Platform Rate';
+
+          return (
+            <div className="shop-admin-wide shop-commission-calculator-card">
+              <div className="shop-commission-card-header">
+                <div className="shop-commission-header-left">
+                  <span style={{ fontSize: '1.25rem' }}>💰</span>
+                  <div>
+                    <h4 className="shop-commission-title">Platform Charges & Admin Commission</h4>
+                    <span className="shop-commission-subtitle">
+                      {commissionInfo.loading
+                        ? 'Calculating applicable admin platform rate...'
+                        : form.category
+                        ? `Live charges applied by Admin for ${form.category}`
+                        : 'Select a category above to view applicable charges'}
+                    </span>
+                  </div>
+                </div>
+                {form.category && (
+                  <span className={`shop-commission-badge ${currentRate > 0 ? 'badge-rate' : 'badge-zero'}`}>
+                    {commissionInfo.rateSource === 'product' ? '🎯' : commissionInfo.rateSource === 'category' ? '📂' : '⚙️'} {rateSourceText}: {currentRate.toFixed(2)}%
+                  </span>
+                )}
+              </div>
+
+              <div className="shop-commission-grid">
+                <div className="shop-commission-col">
+                  <span className="shop-commission-label">Product Selling Price (Customer Pays)</span>
+                  <span className="shop-commission-val">
+                    ₹{numPrice > 0 ? numPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </span>
+                </div>
+                <div className="shop-commission-col comm-charge">
+                  <span className="shop-commission-label">
+                    Admin Commission ({currentRate}%)
+                  </span>
+                  <span className={`shop-commission-val ${adminFee > 0 ? 'text-red' : ''}`}>
+                    {adminFee > 0 ? `- ₹${adminFee.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '₹0.00'}
+                  </span>
+                </div>
+                <div className="shop-commission-col comm-payout">
+                  <span className="shop-commission-label">
+                    {isSeller ? 'Your Net Earning (Vendor Receives)' : 'Vendor Net Payout'}
+                  </span>
+                  <span className="shop-commission-val text-green">
+                    ₹{numPrice > 0 ? vendorPayout.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="shop-commission-footer">
+                {!form.category ? (
+                  <span>⚠️ Please select a <strong>Category</strong> above to see the platform fee and admin commission for this product.</span>
+                ) : numPrice <= 0 ? (
+                  <span>ℹ️ Enter a <strong>Product Selling Price</strong> above to preview the live commission deduction and net vendor payout.</span>
+                ) : currentRate > 0 ? (
+                  <span>
+                    ✅ When a customer orders this product, <strong>₹{adminFee.toFixed(2)}</strong> ({currentRate}% commission) will go to <strong>Admin</strong> as platform fee, and <strong>₹{vendorPayout.toFixed(2)}</strong> will be paid to the vendor.
+                  </span>
+                ) : (
+                  <span>
+                    🎉 <strong>0.00% Platform Fee Active:</strong> No commission is deducted by Admin on this product (Vendor receives 100% of ₹{numPrice.toFixed(2)}).
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })()}
         <label>
           <span>Brand</span>
           <input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} placeholder="e.g. UltraTech" />
