@@ -2299,6 +2299,10 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
 
   const saveAllStaffAttendance = async () => {
     if (!project?.id) return;
+    if (!isEditableWithin48Hours(staffAttendanceDate)) {
+      setMessage('❌ Sirf pichle 48 hours (aaj aur pichle 2 din) ki attendance save ki ja sakti hai.');
+      return;
+    }
     setSavingStaffAttendance(true);
     try {
       const dirtyRows = staffDailyAttendance.filter((r) => r.dirty);
@@ -4423,8 +4427,8 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                             )}
                             <button
                               onClick={saveAllStaffAttendance}
-                              disabled={savingStaffAttendance || staffAttendanceDate !== today() || !staffDailyAttendance.some((row) => row.dirty)}
-                              style={{ opacity: staffAttendanceDate !== today() ? 0.6 : 1 }}
+                              disabled={savingStaffAttendance || !isEditableWithin48Hours(staffAttendanceDate) || !staffDailyAttendance.some((row) => row.dirty)}
+                              style={{ opacity: !isEditableWithin48Hours(staffAttendanceDate) ? 0.6 : 1 }}
                             >
                               {savingStaffAttendance
                                 ? 'Saving...'
@@ -4444,10 +4448,14 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                       </div>
 
                       {attendanceSubTab === 'labor' && laborAttendanceDate !== today() && (
-                        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 8, padding: '8px 14px', fontSize: 12, margin: '10px 0 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span>🔒</span>
+                        <div style={{ background: isEditableWithin48Hours(laborAttendanceDate) ? '#ecfdf5' : '#fffbeb', border: `1px solid ${isEditableWithin48Hours(laborAttendanceDate) ? '#86efac' : '#fde68a'}`, color: isEditableWithin48Hours(laborAttendanceDate) ? '#166534' : '#92400e', borderRadius: 8, padding: '8px 14px', fontSize: 12, margin: '10px 0 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span>{isEditableWithin48Hours(laborAttendanceDate) ? '✓' : '🔒'}</span>
                           <span>
-                            <b>Past Date View ({laborAttendanceDate}):</b> Sirf aaj ki date ({today()}) ki attendance mark/edit ki ja sakti hai. Purani date ki attendance view mode me locked hai.
+                            {isEditableWithin48Hours(laborAttendanceDate) ? (
+                              <><b>Back-date attendance ({laborAttendanceDate}):</b> Is date ki attendance aaj mark ya edit ki ja sakti hai. Pichle 48 hours (aaj aur pichle 2 din) tak editing allowed hai.</>
+                            ) : (
+                              <><b>Past Date View ({laborAttendanceDate}):</b> Yeh date 48 hours se purani hai, isliye attendance sirf view mode me available hai.</>
+                            )}
                           </span>
                           <button
                             type="button"
@@ -4464,10 +4472,14 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                       )}
 
                       {attendanceSubTab === 'staff' && staffAttendanceDate !== today() && (
-                        <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: '#f59e0b', borderRadius: 8, padding: '8px 14px', fontSize: 12, margin: '10px 0 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span>🔒</span>
+                        <div style={{ background: isEditableWithin48Hours(staffAttendanceDate) ? '#ecfdf5' : 'rgba(245,158,11,0.1)', border: `1px solid ${isEditableWithin48Hours(staffAttendanceDate) ? '#86efac' : 'rgba(245,158,11,0.3)'}`, color: isEditableWithin48Hours(staffAttendanceDate) ? '#166534' : '#f59e0b', borderRadius: 8, padding: '8px 14px', fontSize: 12, margin: '10px 0 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span>{isEditableWithin48Hours(staffAttendanceDate) ? '✓' : '🔒'}</span>
                           <span>
-                            <b>Past Date View ({staffAttendanceDate}):</b> Sirf aaj ki date ({today()}) ki attendance mark/edit ki ja sakti hai. Purani date ki attendance view mode me locked hai.
+                            {isEditableWithin48Hours(staffAttendanceDate) ? (
+                              <><b>Back-date attendance ({staffAttendanceDate}):</b> Is date ki attendance aaj mark ya edit ki ja sakti hai. Pichle 48 hours (aaj aur pichle 2 din) tak editing allowed hai.</>
+                            ) : (
+                              <><b>Past Date View ({staffAttendanceDate}):</b> Yeh date 48 hours se purani hai, isliye attendance sirf view mode me available hai.</>
+                            )}
                           </span>
                           <button
                             type="button"
@@ -4766,7 +4778,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                         });
                                       }}
                                     >
-                                      ✏️ Edit Today
+                                      ✏️ Edit Attendance
                                     </button>
                                   ) : (
                                     <button
@@ -5486,7 +5498,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                                 });
                                               }}
                                             >
-                                              ✏️ Edit Today
+                                              ✏️ Edit Attendance
                                             </button>
                                           ) : (
                                             <button
@@ -5778,16 +5790,17 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                     <td style={{ fontSize: 12, color: '#94a3b8' }}>{h.created_by || '—'}</td>
                                     <td style={{ fontSize: 12, color: '#94a3b8' }}>{h.note || '—'}</td>
                                     <td style={{ textAlign: 'right' }}>
-                                      {String(h.attendance_date).slice(0, 10) === today() ? (
+                                      {isEditableWithin48Hours(String(h.attendance_date).slice(0, 10)) ? (
                                         <button
                                           type="button"
                                           className="active-btn"
                                           style={{ padding: '3px 8px', fontSize: 11 }}
                                           onClick={() => {
-                                            setStaffAttendanceDate(today());
-                                            loadStaffAttendance(project.id, today());
+                                            const date = String(h.attendance_date).slice(0, 10);
+                                            setStaffAttendanceDate(date);
+                                            loadStaffAttendance(project.id, date);
                                           }}
-                                          title="Edit today's attendance"
+                                          title="Edit attendance"
                                         >
                                           ✏️ Edit
                                         </button>
