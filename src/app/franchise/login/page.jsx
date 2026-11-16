@@ -423,6 +423,9 @@ export default function FranchiseLoginPage() {
                     />
                     Remember me
                   </label>
+                  <Link href="/franchise/forgot-password" style={{ fontSize: '.8rem', fontWeight: 700, color: '#2563eb', textDecoration: 'none' }}>
+                    Forgot password?
+                  </Link>
                 </div>
 
                 <button type="submit" disabled={loading} className="fl-submit-btn">

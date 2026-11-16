@@ -395,6 +395,12 @@ export default function AgentLoginPage() {
                   </div>
                 </div>
 
+                <div style={{ textAlign: 'right', marginTop: '-0.25rem' }}>
+                  <Link href="/agent/forgot-password" style={{ fontSize: '0.8rem', fontWeight: 700, color: '#2563eb', textDecoration: 'none' }}>
+                    Forgot password?
+                  </Link>
+                </div>
+
                 <button type="submit" disabled={loading} className="al-submit-btn">
                   {loading ? 'Signing in...' : (
                     <>

@@ -109,7 +109,7 @@ export default function ForgotPasswordForm({ userType, loginHref, accentColor, a
       if (data.success) {
         setDone(true);
         const destination = allowAccountTypeSelection
-          ? selectedUserType === 'vendor' ? '/vendor/login' : selectedUserType === 'supplier' ? '/supplier/login' : '/login'
+          ? selectedUserType === 'vendor' ? '/vendor/login' : selectedUserType === 'supplier' ? '/supplier/login' : selectedUserType === 'agent' ? '/agent/login' : selectedUserType === 'franchise' ? '/franchise/login' : '/login'
           : loginHref;
         setTimeout(() => router.push(destination), 3000);
       } else {
@@ -223,6 +223,8 @@ export default function ForgotPasswordForm({ userType, loginHref, accentColor, a
                       <option value="user">Customer</option>
                       <option value="vendor">Vendor</option>
                       <option value="supplier">Supplier</option>
+                      <option value="agent">Agent</option>
+                      <option value="franchise">Franchise</option>
                     </select>
                   </div>
                 )}
