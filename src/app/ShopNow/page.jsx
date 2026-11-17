@@ -1,4 +1,5 @@
 "use client";
+import RequiredAsterisk from '../components/RequiredAsterisk';
 
 import { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
@@ -6,6 +7,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MapPin, Plus, Check, Trash2, Home, Building2, Briefcase } from "lucide-react";
 import { useCities } from "@/hooks/useCities";
+import { useShopLocation } from "@/hooks/useShopLocation";
+import LocationPromptModal from "./LocationPromptModal";
 import Storefront, { displayUnit } from "./Storefront";
 import { defaultShopStorefront } from "@/lib/shop-storefront-defaults";
 import { calculateCoupon } from "@/lib/coupon-calculations";
@@ -357,8 +360,17 @@ export default function ShopPage() {
   const [brandCompany, setBrandCompany]         = useState("");
   const [deliveryDate, setDeliveryDate]         = useState("");
 
-  // City selection
-  const [selectedCity, setSelectedCity] = useState("");
+  // City & Location selection
+  const {
+    selectedCity,
+    setSelectedCity,
+    isDetecting: isDetectingLocation,
+    detectionStatus: locationDetectionStatus,
+    showCityModal,
+    setShowCityModal,
+    detectLocation,
+    detectedInfo,
+  } = useShopLocation({ autoDetect: true });
   const [cityError, setCityError] = useState("");
   const [cityVerified, setCityVerified] = useState(false);
   const [checkingCity, setCheckingCity] = useState(false);
@@ -1024,7 +1036,7 @@ export default function ShopPage() {
   return (
     <div className={`min-h-screen ${pageBg} transition-colors duration-300`}>
 
-      <Storefront categories={categories} products={allProducts} content={storeContent} loading={catsLoading} cities={supportedCities} selectedCity={selectedCity} setSelectedCity={setSelectedCity} cart={cart} onAdd={addToCart} onChangeQty={changeCartQuantity} onQuote={(product) => openModal(product.category, product, "quote")} onBuy={(product) => { const pId = product.product_id || (String(product.id).startsWith('supplier-') ? product.id.replace('supplier-', '') : product.id); router.push('/ShopNow/' + pId + '/checkout?from=shop'); }} onCheckout={() => router.push('/ShopNow/checkout?mode=cart&from=shop')} activeCoupon={activeCoupon} couponCalculation={couponCalculation} couponOffers={couponOffers} onApplyCoupon={applyCouponCode} onSelectCoupon={selectCoupon} onClearCoupon={clearCoupon} shippingSettings={shippingSettings} shippingQuote={shippingQuote} promotions={promotions} />
+      <Storefront categories={categories} products={allProducts} content={storeContent} loading={catsLoading} cities={supportedCities} selectedCity={selectedCity} setSelectedCity={setSelectedCity} cart={cart} onAdd={addToCart} onChangeQty={changeCartQuantity} onQuote={(product) => openModal(product.category, product, "quote")} onBuy={(product) => { const pId = product.product_id || (String(product.id).startsWith('supplier-') ? product.id.replace('supplier-', '') : product.id); router.push('/ShopNow/' + pId + '/checkout?from=shop'); }} onCheckout={() => router.push('/ShopNow/checkout?mode=cart&from=shop')} activeCoupon={activeCoupon} couponCalculation={couponCalculation} couponOffers={couponOffers} onApplyCoupon={applyCouponCode} onSelectCoupon={selectCoupon} onClearCoupon={clearCoupon} shippingSettings={shippingSettings} shippingQuote={shippingQuote} promotions={promotions} onOpenLocationModal={() => setShowCityModal(true)} />
 
       {isModalOpen && mounted && createPortal(
         <div className="shop-checkout-modal fixed inset-0 flex items-center justify-center overflow-hidden bg-black/70 p-2 backdrop-blur-sm sm:p-4" style={{ zIndex: 99999 }}>
@@ -1109,7 +1121,7 @@ export default function ShopPage() {
             ) : (
               <form onSubmit={handleSubmit} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 font-sans sm:px-6">
                 <div className="mb-4">
-                  <label className={lbl}>Delivery City *</label>
+                  <label className={lbl}>Delivery City <RequiredAsterisk /></label>
                   <div className="flex gap-2 items-end">
                     <select
                       className={`flex-1 ${sel}`}
@@ -1286,7 +1298,7 @@ export default function ShopPage() {
                 {/* Material Type */}
                 {hasTypes && (
                   <div className="mb-3">
-                    <label className={lbl}>Type of Material *</label>
+                    <label className={lbl}>Type of Material <RequiredAsterisk /></label>
                     <select
                       value={materialType}
                       onChange={(e) => { setMaterialType(e.target.value); setCustomType(""); }}
@@ -1343,7 +1355,7 @@ export default function ShopPage() {
                 {/* Custom subcategory */}
                 {subcategoryVal === "Others" && (
                   <div className="mb-3">
-                    <label className={lbl}>Specify Sub-category *</label>
+                    <label className={lbl}>Specify Sub-category <RequiredAsterisk /></label>
                     <input
                       type="text"
                       value={customSubcategory}
@@ -1376,17 +1388,17 @@ export default function ShopPage() {
 
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   <div>
-                    <label className={lbl}>Full Name *</label>
+                    <label className={lbl}>Full Name <RequiredAsterisk /></label>
                     <input type="text" name="name" value={formData.name} onChange={handleInputChange} required placeholder="Your name" className={inp} />
                   </div>
                   <div>
-                    <label className={lbl}>Phone *</label>
+                    <label className={lbl}>Phone <RequiredAsterisk /></label>
                     <input type="tel" name="phone" value={formData.phone} onChange={handleInputChange} required placeholder="+91 XXXXX" className={inp} />
                   </div>
                 </div>
 
                 <div className="mb-3">
-                  <label className={lbl}>Email Address *</label>
+                  <label className={lbl}>Email Address <RequiredAsterisk /></label>
                   <input type="email" name="email" value={formData.email} onChange={handleInputChange} required placeholder="your@email.com" className={inp} />
                 </div>
 
@@ -1396,7 +1408,7 @@ export default function ShopPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
                   {modalMode !== "cart" && <>
                   <div>
-                    <label className={lbl}>Quantity Required *</label>
+                    <label className={lbl}>Quantity Required <RequiredAsterisk /></label>
                     <input type="number" min={modalMode === "buy" ? "1" : "0.01"} max={modalMode === "buy" ? "10000" : "100000000"} step={modalMode === "buy" ? "1" : "any"} name="quantity" value={formData.quantity} onChange={handleInputChange} required placeholder="e.g. 500" className={inp} />
                   </div>
                   <div>
@@ -1617,7 +1629,7 @@ export default function ShopPage() {
 
                       {/* Full delivery address */}
                       <div>
-                        <label className={lbl}>Street Address / Plot / Flat No. *</label>
+                        <label className={lbl}>Street Address / Plot / Flat No. <RequiredAsterisk /></label>
                         <textarea
                           name="address"
                           value={formData.address}
@@ -1887,6 +1899,21 @@ export default function ShopPage() {
         </div>,
         document.body
       )}
+
+      <LocationPromptModal
+        isOpen={showCityModal}
+        onClose={() => setShowCityModal(false)}
+        cities={supportedCities}
+        selectedCity={selectedCity}
+        onSelectCity={(city) => {
+          setSelectedCity(city);
+          setShowCityModal(false);
+        }}
+        onDetectLocation={detectLocation}
+        isDetecting={isDetectingLocation}
+        detectionStatus={locationDetectionStatus}
+        detectedInfo={detectedInfo}
+      />
     </div>
   );
 }

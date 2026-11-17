@@ -1,4 +1,5 @@
 "use client";
+import RequiredAsterisk from '../components/RequiredAsterisk';
 import { Suspense, useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -6,6 +7,7 @@ import { COMPANY_CONTACT } from "../lib/company";
 import { useCities } from "@/hooks/useCities";
 import { redirectToPayU } from "@/lib/payu-client";
 import { useFaqs } from "@/hooks/useFaqs";
+import { INDIAN_STATES } from "@/lib/pan-india";
 
 
 function useDarkMode() {
@@ -148,6 +150,34 @@ function FranchisePageContent() {
   const [feeLoading, setFeeLoading] = useState(false);
   const paymentStatus = searchParams.get("payment");
   const paymentMessage = searchParams.get("message");
+
+  const [dynamicContent, setDynamicContent] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/franchise/content")
+      .then(res => res.json())
+      .then(d => {
+        if (d.success && d.data) setDynamicContent(d.data);
+      })
+      .catch(() => {});
+  }, []);
+
+  const activeModels = dynamicContent?.models?.length ? dynamicContent.models : franchiseModels;
+  const activeHero = dynamicContent?.hero || {
+    tagline: "MTBOSS Construction",
+    title: "Franchise",
+    highlightTitle: "Opportunity",
+    subtitle: "Partner with India's trusted construction brand. Build a profitable business with MTBOSS's proven model, technical expertise, and 20+ years of legacy.",
+    backgroundImage: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=1600&q=80",
+    stats: [
+      { value: "50+", label: "Cities" },
+      { value: "20+", label: "Years Legacy" },
+      { value: "500+", label: "Projects Done" },
+      { value: "3", label: "Franchise Models" },
+    ],
+  };
+  const activeBenefits = dynamicContent?.benefits?.length ? dynamicContent.benefits : benefits;
+  const activeProcess = dynamicContent?.process?.length ? dynamicContent.process : process;
 
   const [form, setForm] = useState({
     // Personal
@@ -393,7 +423,7 @@ function FranchisePageContent() {
       <section
         className="relative flex items-center justify-center text-center py-28 px-6"
         style={{
-          backgroundImage: "url(https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=1600&q=80)",
+          backgroundImage: `url(${activeHero.backgroundImage || 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=1600&q=80'})`,
           backgroundSize: "cover",
           backgroundPosition: "center",
         }}
@@ -409,24 +439,19 @@ function FranchisePageContent() {
           }}
         >
           <span className="text-[var(--brand-blue)] text-[10px] font-black uppercase tracking-[0.4em] block mb-4">
-            MTBOSS Construction
+            {activeHero.tagline || 'MTBOSS Construction'}
           </span>
           <h1 className="text-4xl sm:text-6xl font-black uppercase text-white mb-4 tracking-tighter">
-            Franchise
-            <span className="block text-[var(--brand-blue)]">Opportunity</span>
+            {activeHero.title || 'Franchise'}
+            <span className="block text-[var(--brand-blue)]">{activeHero.highlightTitle || 'Opportunity'}</span>
           </h1>
           <p className="text-zinc-400 text-sm max-w-xl mx-auto mb-8 leading-relaxed">
-            Partner with India&apos;s trusted construction brand. Build a profitable business with MTBOSS&apos;s proven model, technical expertise, and 20+ years of legacy.
+            {activeHero.subtitle}
           </p>
 
           {/* Stats */}
           <div className="flex flex-wrap items-center justify-center gap-8 mt-6">
-            {[
-              { value: "50+", label: "Cities" },
-              { value: "20+", label: "Years Legacy" },
-              { value: "500+", label: "Projects Done" },
-              { value: "3", label: "Franchise Models" },
-            ].map((s) => (
+            {(activeHero.stats || []).map((s) => (
               <div key={s.label} className="text-center">
                 <p className="text-[var(--brand-blue)] text-2xl font-black">{s.value}</p>
                 <p className="text-zinc-500 text-[10px] uppercase tracking-widest font-bold">{s.label}</p>
@@ -467,8 +492,8 @@ function FranchisePageContent() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
-            {franchiseModels.map((model) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
+            {activeModels.map((model) => (
               <div
                 key={model.id}
                 className={`relative rounded-sm border-2 p-8 transition-all duration-300 flex flex-col ${model.color} ${dark ? "bg-zinc-800" : "bg-white shadow-lg"
@@ -510,7 +535,7 @@ function FranchisePageContent() {
                 </div>
 
                 <ul className="space-y-2 mb-8 flex-1">
-                  {model.features.map((f, i) => (
+                  {(Array.isArray(model.features) ? model.features : []).map((f, i) => (
                     <li key={i} className="flex items-start gap-2">
                       <svg className="w-3.5 h-3.5 text-[var(--brand-blue)] mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
@@ -559,7 +584,7 @@ function FranchisePageContent() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {benefits.map((b, i) => (
+            {activeBenefits.map((b, i) => (
               <div
                 key={i}
                 className={`group p-6 rounded-sm border transition-all duration-300 hover:border-[var(--brand-blue)] ${dark ? "bg-zinc-900 border-zinc-800 hover:bg-zinc-800" : "bg-white border-gray-100 hover:shadow-lg"
@@ -599,7 +624,7 @@ function FranchisePageContent() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {process.map((p, i) => (
+            {activeProcess.map((p, i) => (
               <div
                 key={i}
                 className={`relative p-6 rounded-sm border transition-all duration-300 group hover:border-[var(--brand-blue)] ${dark ? "bg-zinc-800 border-zinc-700" : "bg-gray-50 border-gray-100 hover:bg-white hover:shadow-md"
@@ -782,19 +807,19 @@ function FranchisePageContent() {
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className={labelClass}>Full Name *</label>
+                        <label className={labelClass}>Full Name <RequiredAsterisk /></label>
                         <input type="text" name="name" placeholder="As per government ID" value={form.name} onChange={handleChange} className={inputClass} />
                       </div>
                       <div>
-                        <label className={labelClass}>Father / Husband Name *</label>
+                        <label className={labelClass}>Father / Husband Name <RequiredAsterisk /></label>
                         <input type="text" name="fatherName" placeholder="Father's or husband's name" value={form.fatherName || ""} onChange={handleChange} className={inputClass} />
                       </div>
                       <div>
-                        <label className={labelClass}>Date of Birth *</label>
+                        <label className={labelClass}>Date of Birth <RequiredAsterisk /></label>
                         <input type="date" name="dob" max={new Date().toISOString().split("T")[0]} suppressHydrationWarning value={form.dob || ""} onChange={handleChange} className={inputClass} />
                       </div>
                       <div>
-                        <label className={labelClass}>Gender *</label>
+                        <label className={labelClass}>Gender <RequiredAsterisk /></label>
                         <select name="gender" value={form.gender || ""} onChange={handleChange} className={inputClass}>
                           <option value="">Select Gender</option>
                           <option value="Male">Male</option>
@@ -813,23 +838,23 @@ function FranchisePageContent() {
                         </select>
                       </div>
                       <div>
-                        <label className={labelClass}>Mobile Number *</label>
+                        <label className={labelClass}>Mobile Number <RequiredAsterisk /></label>
                         <input type="tel" name="phone" placeholder="10-digit mobile number" value={form.phone} onChange={handleChange} maxLength={10} inputMode="numeric" className={inputClass} />
                       </div>
                       <div>
-                        <label className={labelClass}>Email Address *</label>
+                        <label className={labelClass}>Email Address <RequiredAsterisk /></label>
                         <input type="email" name="email" placeholder="your@email.com" value={form.email} onChange={handleChange} className={inputClass} />
                       </div>
                       <div>
-                        <label className={labelClass}>Create Password *</label>
+                        <label className={labelClass}>Create Password <RequiredAsterisk /></label>
                         <input type="password" name="password" minLength={8} placeholder="Minimum 8 characters" value={form.password || ""} onChange={handleChange} className={inputClass} autoComplete="new-password" />
                       </div>
                       <div>
-                        <label className={labelClass}>Confirm Password *</label>
+                        <label className={labelClass}>Confirm Password <RequiredAsterisk /></label>
                         <input type="password" name="confirmPassword" minLength={8} placeholder="Re-enter password" value={form.confirmPassword || ""} onChange={handleChange} className={inputClass} autoComplete="new-password" />
                       </div>
                       <div>
-                        <label className={labelClass}>Current Occupation *</label>
+                        <label className={labelClass}>Current Occupation <RequiredAsterisk /></label>
                         <input type="text" name="occupation" placeholder="e.g. Business Owner, Contractor" value={form.occupation} onChange={handleChange} className={inputClass} />
                       </div>
                       <div>
@@ -862,7 +887,7 @@ function FranchisePageContent() {
                       <p className={`text-[10px] font-black uppercase tracking-widest mb-3 ${dark ? "text-zinc-400" : "text-zinc-500"}`}>Identity Proof</p>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
-                          <label className={labelClass}>ID Type *</label>
+                          <label className={labelClass}>ID Type <RequiredAsterisk /></label>
                           <select name="idType" value={form.idType || ""} onChange={handleChange} className={inputClass}>
                             <option value="">Select ID Type</option>
                             <option value="Aadhaar Card">Aadhaar Card</option>
@@ -872,11 +897,11 @@ function FranchisePageContent() {
                           </select>
                         </div>
                         <div>
-                          <label className={labelClass}>ID Number *</label>
+                          <label className={labelClass}>ID Number <RequiredAsterisk /></label>
                           <input type="text" name="idNumber" placeholder="Enter ID number" value={form.idNumber || ""} onChange={handleChange} className={inputClass} />
                         </div>
                         <div>
-                          <label className={labelClass}>PAN Number *</label>
+                          <label className={labelClass}>PAN Number <RequiredAsterisk /></label>
                           <input type="text" name="pan" placeholder="ABCDE1234F" value={form.pan || ""} onChange={handleChange} className={`${inputClass} uppercase`} />
                         </div>
                       </div>
@@ -900,35 +925,43 @@ function FranchisePageContent() {
                     </div>
                     <div className="grid grid-cols-1 gap-4">
                       <div>
-                        <label className={labelClass}>Full Permanent Address *</label>
+                        <label className={labelClass}>Full Permanent Address <RequiredAsterisk /></label>
                         <textarea name="address" rows={2} placeholder="House No., Street, Area, Landmark..." value={form.address || ""} onChange={handleChange} className={`${inputClass} resize-none`} />
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
-                          <label className={labelClass}>District *</label>
+                          <label className={labelClass}>District <RequiredAsterisk /></label>
                           <input type="text" name="district" placeholder="Your district" value={form.district || ""} onChange={handleChange} className={inputClass} />
                         </div>
                         <div>
-                          <label className={labelClass}>State *</label>
+                          <label className={labelClass}>State <RequiredAsterisk /></label>
                           <select name="state" value={form.state} onChange={handleChange} className={inputClass}>
                             <option value="">Select State</option>
-                            {["Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Delhi", "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal"].map((s) => (
+                            {INDIAN_STATES.map((s) => (
                               <option key={s} value={s}>{s}</option>
                             ))}
                           </select>
                         </div>
                         <div>
-                          <label className={labelClass}>PIN Code *</label>
+                          <label className={labelClass}>PIN Code <RequiredAsterisk /></label>
                           <input type="text" name="pinCode" placeholder="6-digit PIN" maxLength={6} value={form.pinCode || ""} onChange={handleChange} className={inputClass} />
                         </div>
                       </div>
                       <div>
-                        <label className={labelClass}>City *</label>
-                        <select name="city" value={form.city} onChange={handleChange} className={inputClass} disabled={citiesLoading}>
-                          <option value="">{citiesLoading ? "Loading cities..." : "Select city"}</option>
-                          {cities.map(city => <option key={city} value={city}>{city}</option>)}
-                        </select>
-                        {citiesError && <p className="mt-1 text-xs text-red-500">{citiesError}</p>}
+                        <label className={labelClass}>City <RequiredAsterisk /></label>
+                        <input
+                          type="text"
+                          name="city"
+                          required
+                          placeholder="Enter your city"
+                          value={form.city || ""}
+                          onChange={handleChange}
+                          className={inputClass}
+                          list="franchise-city-list"
+                        />
+                        <datalist id="franchise-city-list">
+                          {cities.map(city => <option key={city} value={city} />)}
+                        </datalist>
                       </div>
                     </div>
                   </div>
@@ -1007,19 +1040,19 @@ function FranchisePageContent() {
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className={labelClass}>Bank Name *</label>
+                        <label className={labelClass}>Bank Name <RequiredAsterisk /></label>
                         <input type="text" name="bankName" placeholder="e.g. State Bank of India" value={form.bankName || ""} onChange={handleChange} className={inputClass} />
                       </div>
                       <div>
-                        <label className={labelClass}>Branch Name *</label>
+                        <label className={labelClass}>Branch Name <RequiredAsterisk /></label>
                         <input type="text" name="branchName" placeholder="Branch name" value={form.branchName || ""} onChange={handleChange} className={inputClass} />
                       </div>
                       <div>
-                        <label className={labelClass}>Account Number *</label>
+                        <label className={labelClass}>Account Number <RequiredAsterisk /></label>
                         <input type="text" name="accountNumber" placeholder="Your bank account number" value={form.accountNumber || ""} onChange={handleChange} className={inputClass} />
                       </div>
                       <div>
-                        <label className={labelClass}>IFSC Code *</label>
+                        <label className={labelClass}>IFSC Code <RequiredAsterisk /></label>
                         <input type="text" name="ifscCode" placeholder="e.g. SBIN0001234" value={form.ifscCode || ""} onChange={handleChange} className={`${inputClass} uppercase`} />
                       </div>
                     </div>
@@ -1045,16 +1078,18 @@ function FranchisePageContent() {
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
-                        <label className={labelClass}>Franchise Model *</label>
+                        <label className={labelClass}>Franchise Model <RequiredAsterisk /></label>
                         <select name="model" value={form.model} onChange={handleChange} className={inputClass}>
                           <option value="">Select Model</option>
-                          <option value="Associate Partner">Associate Partner</option>
-                          <option value="Regional Franchise">Regional Franchise</option>
-                          <option value="Master Franchise">Master Franchise</option>
+                          {activeModels.map((m) => (
+                            <option key={m.id || m.name} value={m.name}>
+                              {m.name}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div>
-                        <label className={labelClass}>Commercial Discussion Preference *</label>
+                        <label className={labelClass}>Commercial Discussion Preference <RequiredAsterisk /></label>
                         <select name="investment" value={form.investment} onChange={handleChange} className={inputClass}>
                           <option value="">Select Preference</option>
                           <option value="Starter territory discussion">Starter territory discussion</option>
@@ -1065,7 +1100,7 @@ function FranchisePageContent() {
                         </select>
                       </div>
                       <div>
-                        <label className={labelClass}>Preferred Territory *</label>
+                        <label className={labelClass}>Preferred Territory <RequiredAsterisk /></label>
                         <input type="text" name="territory" placeholder="City or district you want" value={form.territory || ""} onChange={handleChange} className={inputClass} />
                       </div>
                       <div>
@@ -1111,11 +1146,11 @@ function FranchisePageContent() {
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className={labelClass}>Village / Town / Area *</label>
+                        <label className={labelClass}>Village / Town / Area <RequiredAsterisk /></label>
                         <input type="text" name="officeArea" placeholder="Area where office will be set up" value={form.officeArea || ""} onChange={handleChange} className={inputClass} />
                       </div>
                       <div>
-                        <label className={labelClass}>Office District *</label>
+                        <label className={labelClass}>Office District <RequiredAsterisk /></label>
                         <input type="text" name="officeDistrict" placeholder="Office district" value={form.officeDistrict || ""} onChange={handleChange} className={inputClass} />
                       </div>
                       <div>
@@ -1167,7 +1202,7 @@ function FranchisePageContent() {
                     </div>
                     <div className="space-y-4">
                       <div>
-                        <label className={labelClass}>Why do you want to partner with MTBOSS? *</label>
+                        <label className={labelClass}>Why do you want to partner with MTBOSS? <RequiredAsterisk /></label>
                         <textarea name="message" rows={4} placeholder="Share your motivation, goals, and what you bring to this partnership..." value={form.message} onChange={handleChange} className={`${inputClass} resize-none`} />
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

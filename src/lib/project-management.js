@@ -284,7 +284,22 @@ async function pmSchemaLooksReady() {
            AND pg_get_constraintdef(c.oid) LIKE '%tools%'
            AND pg_get_constraintdef(c.oid) LIKE '%rent%'
       ) AS has_oe_tools_rent_constraint,
-      to_regclass('public.pm_commissions') IS NOT NULL AS has_commissions
+      to_regclass('public.pm_commissions') IS NOT NULL AS has_commissions,
+      to_regclass('public.pm_project_local_vendors') IS NOT NULL AS has_local_vendors,
+      EXISTS (
+        SELECT 1
+          FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'pm_labor_attendance'
+           AND column_name = 'shift_type'
+      ) AS has_labor_att_shift,
+      EXISTS (
+        SELECT 1
+          FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'pm_attendance'
+           AND column_name = 'shift_type'
+      ) AS has_att_shift
   `);
   const row = result.rows[0] || {};
   return Boolean(
@@ -305,8 +320,22 @@ async function pmSchemaLooksReady() {
     && row.has_ma_bill_url
     && row.has_oe_tools_rent_constraint
     && row.has_commissions
+    && row.has_local_vendors
+    && row.has_labor_att_shift
+    && row.has_att_shift
   );
 }
+
+export const ensureAttendanceShiftsAndOvertimeSchema = createInitializationGuard(async () => {
+  await pool.query(`
+    ALTER TABLE pm_labor_attendance ADD COLUMN IF NOT EXISTS overtime_hours NUMERIC(6,2) DEFAULT 0;
+    ALTER TABLE pm_labor_attendance ADD COLUMN IF NOT EXISTS shift_type VARCHAR(20) NOT NULL DEFAULT 'day';
+    ALTER TABLE pm_labor_attendance ADD COLUMN IF NOT EXISTS overtime_amount NUMERIC(14,2) NOT NULL DEFAULT 0;
+    ALTER TABLE pm_attendance ADD COLUMN IF NOT EXISTS shift_type VARCHAR(20) NOT NULL DEFAULT 'day';
+    ALTER TABLE pm_attendance ADD COLUMN IF NOT EXISTS overtime_hours NUMERIC(6,2) NOT NULL DEFAULT 0;
+    ALTER TABLE pm_attendance ADD COLUMN IF NOT EXISTS overtime_amount NUMERIC(14,2) NOT NULL DEFAULT 0;
+  `);
+});
 
 // Migrations are the source of truth. This guarded bootstrap makes fresh Neon
 // previews usable before the deployment migration runner has executed.
@@ -376,6 +405,24 @@ export const ensureProjectManagementSchema = createInitializationGuard(async () 
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS pm_project_agents_project_id_idx ON pm_project_agents(project_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS pm_project_agents_agent_id_idx ON pm_project_agents(agent_id)`);
+
+  // Local / Unregistered Project Vendors
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pm_project_local_vendors (
+      id BIGSERIAL PRIMARY KEY,
+      project_id BIGINT NOT NULL REFERENCES pm_projects(id) ON DELETE CASCADE,
+      name VARCHAR(200) NOT NULL,
+      phone VARCHAR(30),
+      city VARCHAR(100),
+      address TEXT,
+      material_type VARCHAR(100),
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(project_id, name)
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS pm_project_local_vendors_proj_idx ON pm_project_local_vendors(project_id)`);
 
   // Phase 5: Lead to Project Conversion Link
   await pool.query(`
@@ -466,6 +513,11 @@ export const ensureProjectManagementSchema = createInitializationGuard(async () 
   await pool.query(`ALTER TABLE pm_labor_attendance ADD COLUMN IF NOT EXISTS project_vendor_id BIGINT REFERENCES pm_project_vendors(id) ON DELETE SET NULL`);
   await pool.query(`ALTER TABLE pm_labor_attendance ADD COLUMN IF NOT EXISTS contractor_id BIGINT REFERENCES pm_project_vendors(id) ON DELETE SET NULL`);
   await pool.query(`ALTER TABLE pm_labor_attendance ADD COLUMN IF NOT EXISTS overtime_hours NUMERIC(6,2) DEFAULT 0`);
+  await pool.query(`ALTER TABLE pm_labor_attendance ADD COLUMN IF NOT EXISTS shift_type VARCHAR(20) NOT NULL DEFAULT 'day'`);
+  await pool.query(`ALTER TABLE pm_labor_attendance ADD COLUMN IF NOT EXISTS overtime_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
+  await pool.query(`ALTER TABLE pm_attendance ADD COLUMN IF NOT EXISTS shift_type VARCHAR(20) NOT NULL DEFAULT 'day'`);
+  await pool.query(`ALTER TABLE pm_attendance ADD COLUMN IF NOT EXISTS overtime_hours NUMERIC(6,2) NOT NULL DEFAULT 0`);
+  await pool.query(`ALTER TABLE pm_attendance ADD COLUMN IF NOT EXISTS overtime_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS pm_labor_payments (
       id BIGSERIAL PRIMARY KEY,
@@ -490,6 +542,83 @@ export const ensureProjectManagementSchema = createInitializationGuard(async () 
     `CREATE INDEX IF NOT EXISTS pm_labor_pay_labor_idx ON pm_labor_payments(labor_id)`,
     `CREATE INDEX IF NOT EXISTS pm_labor_pay_date_idx ON pm_labor_payments(payment_date)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS pm_labor_proj_phone_active_idx ON pm_labor (project_id, phone) WHERE phone IS NOT NULL AND phone <> '' AND is_active = TRUE`
+  ]) {
+    await pool.query(sql);
+  }
+
+  // Material Inward / Gate Receiving Columns
+  await pool.query(`
+    ALTER TABLE pm_material_received
+      ADD COLUMN IF NOT EXISTS vehicle_no VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS driver_name VARCHAR(150),
+      ADD COLUMN IF NOT EXISTS driver_phone VARCHAR(30),
+      ADD COLUMN IF NOT EXISTS received_by VARCHAR(150),
+      ADD COLUMN IF NOT EXISTS gate_pass_no VARCHAR(100)
+  `);
+
+  // Project Staff Management tables
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pm_project_staff (
+      id BIGSERIAL PRIMARY KEY,
+      project_id BIGINT NOT NULL REFERENCES pm_projects(id) ON DELETE RESTRICT,
+      name VARCHAR(200) NOT NULL,
+      phone VARCHAR(30),
+      role VARCHAR(100) NOT NULL DEFAULT 'Site Supervisor',
+      pay_type VARCHAR(30) NOT NULL DEFAULT 'monthly' CHECK (pay_type IN ('monthly', 'per_day', 'fixed_fee')),
+      salary_rate NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (salary_rate >= 0),
+      commission_rate NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (commission_rate >= 0),
+      commission_notes TEXT,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pm_staff_attendance (
+      id BIGSERIAL PRIMARY KEY,
+      project_id BIGINT NOT NULL REFERENCES pm_projects(id) ON DELETE RESTRICT,
+      staff_id BIGINT NOT NULL REFERENCES pm_project_staff(id) ON DELETE CASCADE,
+      attendance_date DATE NOT NULL,
+      status VARCHAR(20) NOT NULL CHECK (status IN ('present', 'absent', 'half_day')),
+      wage_amount NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (wage_amount >= 0),
+      overtime_hours NUMERIC(6,2) NOT NULL DEFAULT 0,
+      overtime_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+      note TEXT,
+      created_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (staff_id, attendance_date)
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pm_staff_payments (
+      id BIGSERIAL PRIMARY KEY,
+      project_id BIGINT NOT NULL REFERENCES pm_projects(id) ON DELETE RESTRICT,
+      staff_id BIGINT NOT NULL REFERENCES pm_project_staff(id) ON DELETE CASCADE,
+      amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+      payment_date DATE NOT NULL,
+      payment_type VARCHAR(30) NOT NULL DEFAULT 'salary' CHECK (payment_type IN ('salary', 'advance', 'commission', 'bonus', 'reimbursement')),
+      mode VARCHAR(50) DEFAULT 'bank',
+      transaction_reference TEXT,
+      note TEXT,
+      is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+      created_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ
+    );
+  `);
+
+  for (const sql of [
+    `CREATE INDEX IF NOT EXISTS pm_project_staff_project_idx ON pm_project_staff(project_id)`,
+    `CREATE INDEX IF NOT EXISTS pm_project_staff_active_idx ON pm_project_staff(project_id, is_active)`,
+    `CREATE INDEX IF NOT EXISTS pm_staff_att_project_idx ON pm_staff_attendance(project_id)`,
+    `CREATE INDEX IF NOT EXISTS pm_staff_att_staff_idx ON pm_staff_attendance(staff_id, attendance_date)`,
+    `CREATE INDEX IF NOT EXISTS pm_staff_att_date_idx ON pm_staff_attendance(attendance_date)`,
+    `CREATE INDEX IF NOT EXISTS pm_staff_payments_project_idx ON pm_staff_payments(project_id) WHERE NOT is_deleted`,
+    `CREATE INDEX IF NOT EXISTS pm_staff_payments_staff_idx ON pm_staff_payments(staff_id) WHERE NOT is_deleted`,
+    `CREATE INDEX IF NOT EXISTS pm_staff_payments_date_idx ON pm_staff_payments(payment_date) WHERE NOT is_deleted`
   ]) {
     await pool.query(sql);
   }
@@ -655,6 +784,59 @@ export const ensureProjectManagementPhase5Schema = createInitializationGuard(asy
   }
 });
 
+export function getTodayIST() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+}
+
+export function isWithin48HoursIST(dateOrTimestamp) {
+  if (!dateOrTimestamp) return false;
+  try {
+    const str = String(dateOrTimestamp).trim();
+    // Date-only string: "YYYY-MM-DD"
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      const todayStr = getTodayIST();
+      const targetDate = new Date(`${str}T00:00:00+05:30`);
+      const todayDate = new Date(`${todayStr}T00:00:00+05:30`);
+      const diffMs = todayDate.getTime() - targetDate.getTime();
+      const diffDays = Math.round(diffMs / (24 * 60 * 60 * 1000));
+      // 0 = today, 1 = yesterday, 2 = day before yesterday (within 48 hours)
+      return diffDays >= 0 && diffDays <= 2;
+    }
+    // Full timestamp
+    const targetTime = new Date(dateOrTimestamp).getTime();
+    if (Number.isNaN(targetTime)) return false;
+    const diffHours = (Date.now() - targetTime) / (1000 * 60 * 60);
+    // Allow clock drift up to 1 hour in future, and up to 48 hours in past
+    return diffHours >= -1 && diffHours <= 48;
+  } catch {
+    return false;
+  }
+}
+
+export function isCreatedTodayIST(createdAt) {
+  return isWithin48HoursIST(createdAt);
+}
+
+export function assertSameDayEditable(createdAt, user = null, adminOverride = false) {
+  const isSuperAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  if (isSuperAdmin && adminOverride) {
+    return { allowed: true };
+  }
+  if (!isWithin48HoursIST(createdAt)) {
+    return {
+      allowed: false,
+      response: NextResponse.json(
+        {
+          success: false,
+          error: 'Locked: Entries can only be edited or deleted within 48 hours of creation (sirf 48 hours ke andar edit/delete allowed hai).'
+        },
+        { status: 403 }
+      )
+    };
+  }
+  return { allowed: true };
+}
+
 // Formatting helpers (server-side, used by export routes)
 export function inr(v) {
   const n = Number(v || 0);
@@ -672,4 +854,117 @@ export async function loadPmSettings() {
   const r = await pool.query(`SELECT key, value FROM pm_settings`);
   return Object.fromEntries(r.rows.map(row => [row.key, row.value]));
 }
+
+// ─── Phase 6: Staff management + Material Gate Receiving schema ───────────────
+// Separate guard so it always runs regardless of pmSchemaLooksReady() fast-path.
+export const ensureStaffSchema = createInitializationGuard(async () => {
+  // Check if all three staff tables already exist
+  const check = await pool.query(`
+    SELECT
+      (to_regclass('public.pm_project_staff')    IS NOT NULL) AS has_staff,
+      (to_regclass('public.pm_staff_attendance') IS NOT NULL) AS has_attendance,
+      (to_regclass('public.pm_staff_payments')   IS NOT NULL) AS has_payments
+  `);
+  const { has_staff, has_attendance, has_payments } = check.rows[0] || {};
+  if (has_staff && has_attendance && has_payments) {
+    // Ensure all evolutionary columns exist on existing tables
+    await pool.query(`
+      ALTER TABLE pm_staff_attendance
+        ADD COLUMN IF NOT EXISTS shift_type VARCHAR(20) DEFAULT 'day';
+      ALTER TABLE pm_material_received
+        ADD COLUMN IF NOT EXISTS vehicle_no    VARCHAR(100),
+        ADD COLUMN IF NOT EXISTS driver_name   VARCHAR(150),
+        ADD COLUMN IF NOT EXISTS driver_phone  VARCHAR(30),
+        ADD COLUMN IF NOT EXISTS received_by   VARCHAR(150),
+        ADD COLUMN IF NOT EXISTS gate_pass_no  VARCHAR(100);
+    `);
+    return;
+  }
+
+  // 1. Gate-receiving columns on pm_material_received
+  await pool.query(`
+    ALTER TABLE pm_material_received
+      ADD COLUMN IF NOT EXISTS vehicle_no    VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS driver_name   VARCHAR(150),
+      ADD COLUMN IF NOT EXISTS driver_phone  VARCHAR(30),
+      ADD COLUMN IF NOT EXISTS received_by   VARCHAR(150),
+      ADD COLUMN IF NOT EXISTS gate_pass_no  VARCHAR(100)
+  `);
+
+  // 2. Staff directory
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pm_project_staff (
+      id              BIGSERIAL PRIMARY KEY,
+      project_id      BIGINT NOT NULL REFERENCES pm_projects(id) ON DELETE RESTRICT,
+      name            VARCHAR(200) NOT NULL,
+      phone           VARCHAR(30),
+      role            VARCHAR(100) NOT NULL DEFAULT 'Site Supervisor',
+      pay_type        VARCHAR(30)  NOT NULL DEFAULT 'monthly'
+                        CHECK (pay_type IN ('monthly','per_day','fixed_fee')),
+      salary_rate     NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (salary_rate >= 0),
+      commission_rate NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (commission_rate >= 0),
+      commission_notes TEXT,
+      is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by      TEXT NOT NULL,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ
+    )
+  `);
+
+  // 3. Daily attendance
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pm_staff_attendance (
+      id              BIGSERIAL PRIMARY KEY,
+      project_id      BIGINT NOT NULL REFERENCES pm_projects(id) ON DELETE RESTRICT,
+      staff_id        BIGINT NOT NULL REFERENCES pm_project_staff(id) ON DELETE CASCADE,
+      attendance_date DATE NOT NULL,
+      status          VARCHAR(20) NOT NULL CHECK (status IN ('present','absent','half_day')),
+      wage_amount     NUMERIC(14,2) NOT NULL DEFAULT 0,
+      overtime_hours  NUMERIC(6,2)  NOT NULL DEFAULT 0,
+      overtime_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+      note            TEXT,
+      created_by      TEXT NOT NULL,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (staff_id, attendance_date)
+    )
+  `);
+
+  await pool.query(`
+    ALTER TABLE pm_staff_attendance
+      ADD COLUMN IF NOT EXISTS shift_type VARCHAR(20) DEFAULT 'day'
+  `);
+
+  // 4. Salary / commission payments
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pm_staff_payments (
+      id                   BIGSERIAL PRIMARY KEY,
+      project_id           BIGINT NOT NULL REFERENCES pm_projects(id) ON DELETE RESTRICT,
+      staff_id             BIGINT NOT NULL REFERENCES pm_project_staff(id) ON DELETE CASCADE,
+      amount               NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+      payment_date         DATE NOT NULL,
+      payment_type         VARCHAR(30) NOT NULL DEFAULT 'salary'
+                             CHECK (payment_type IN ('salary','advance','commission','bonus','reimbursement')),
+      mode                 VARCHAR(50) DEFAULT 'bank',
+      transaction_reference TEXT,
+      note                 TEXT,
+      is_deleted           BOOLEAN NOT NULL DEFAULT FALSE,
+      created_by           TEXT NOT NULL,
+      created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at           TIMESTAMPTZ
+    )
+  `);
+
+  // 5. Indexes
+  const idxList = [
+    `CREATE INDEX IF NOT EXISTS pm_project_staff_project_idx    ON pm_project_staff(project_id)`,
+    `CREATE INDEX IF NOT EXISTS pm_project_staff_active_idx     ON pm_project_staff(project_id, is_active)`,
+    `CREATE INDEX IF NOT EXISTS pm_staff_att_project_idx        ON pm_staff_attendance(project_id)`,
+    `CREATE INDEX IF NOT EXISTS pm_staff_att_staff_date_idx     ON pm_staff_attendance(staff_id, attendance_date)`,
+    `CREATE INDEX IF NOT EXISTS pm_staff_payments_project_idx   ON pm_staff_payments(project_id) WHERE NOT is_deleted`,
+    `CREATE INDEX IF NOT EXISTS pm_staff_payments_staff_idx     ON pm_staff_payments(staff_id)   WHERE NOT is_deleted`,
+  ];
+  for (const sql of idxList) {
+    await pool.query(sql);
+  }
+});
 

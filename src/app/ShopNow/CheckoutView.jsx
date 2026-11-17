@@ -1,11 +1,13 @@
 "use client";
+import RequiredAsterisk from '../components/RequiredAsterisk';
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import {
   ArrowLeft,
+  Home,
   BadgePercent,
   Check,
   CheckCircle2,
@@ -22,12 +24,38 @@ import {
   Wallet,
   X,
   Zap,
+  Banknote,
+  CreditCard,
+  Smartphone,
 } from "lucide-react";
 import { useCities } from "@/hooks/useCities";
 import { displayUnit, getProductImage, ShopImage } from "./Storefront";
 import { getCartStep } from "@/lib/cart-step";
 import { evaluateCartPromotions } from "@/lib/promotion-calculations";
+import { redirectToPayU } from "@/lib/payu-client";
+import CustomerMobileOtpAuth from "@/app/components/CustomerMobileOtpAuth";
 import "./shop.css";
+
+function readCustomerLoggedIn() {
+  if (typeof window === "undefined") return false;
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) return false;
+    if (localStorage.getItem("admin-token")) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getNextDayDate() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 function useDarkMode() {
   const [dark, setDark] = useState(false);
@@ -89,7 +117,10 @@ export default function CheckoutView({ productId: initialProductId }) {
   // Form fields
   const [selectedCity, setSelectedCity] = useState("");
   const [formData, setFormData] = useState({ name: "", email: "", phone: "", address: "", message: "" });
-  const [deliveryDate, setDeliveryDate] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState(() => getNextDayDate());
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [activePaymentMethod, setActivePaymentMethod] = useState("COD");
+  const [paymentMethod, setPaymentMethod] = useState("COD"); // "COD" | "ONLINE"
 
   // Address selector
   const [savedAddresses, setSavedAddresses] = useState([]);
@@ -129,6 +160,39 @@ export default function CheckoutView({ productId: initialProductId }) {
   const [submitError, setSubmitError] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [submittedOrder, setSubmittedOrder] = useState(null);
+
+  const [customerAuthed, setCustomerAuthed] = useState(false);
+
+  const syncCustomerAuth = useCallback(() => {
+    setCustomerAuthed(readCustomerLoggedIn());
+  }, []);
+
+  useEffect(() => {
+    syncCustomerAuth();
+    const onLogin = () => syncCustomerAuth();
+    window.addEventListener("userLoggedIn", onLogin);
+    window.addEventListener("storage", onLogin);
+    return () => {
+      window.removeEventListener("userLoggedIn", onLogin);
+      window.removeEventListener("storage", onLogin);
+    };
+  }, [syncCustomerAuth]);
+
+  const handleAuthSuccess = useCallback(() => {
+    syncCustomerAuth();
+    try {
+      const raw = localStorage.getItem("user");
+      if (raw) {
+        const u = JSON.parse(raw);
+        setFormData((p) => ({
+          ...p,
+          name: p.name || u.name || "",
+          email: p.email || u.email || "",
+          phone: p.phone || u.phone || "",
+        }));
+      }
+    } catch {}
+  }, [syncCustomerAuth]);
 
   // Fetch promotions
   useEffect(() => {
@@ -187,6 +251,7 @@ export default function CheckoutView({ productId: initialProductId }) {
 
   // ── Wallet balance ──────────────────────────────────────────────────────────
   useEffect(() => {
+    if (!customerAuthed) return;
     const token = localStorage.getItem("token");
     if (!token) return;
     fetch("/api/wallet", { headers: { Authorization: `Bearer ${token}` } })
@@ -195,10 +260,11 @@ export default function CheckoutView({ productId: initialProductId }) {
         if (d?.success && d?.data) setWalletBalance(Number(d.data.balance) || 0);
       })
       .catch(() => {});
-  }, []);
+  }, [customerAuthed]);
 
   // ── Saved addresses ─────────────────────────────────────────────────────────
   useEffect(() => {
+    if (!customerAuthed) return;
     const token = localStorage.getItem("token") || localStorage.getItem("admin-token");
     let list = [];
     const doLoad = async () => {
@@ -226,7 +292,7 @@ export default function CheckoutView({ productId: initialProductId }) {
       }
     };
     doLoad();
-  }, []);
+  }, [customerAuthed]);
 
   const applyAddress = (addr) => {
     if (!addr) return;
@@ -246,19 +312,73 @@ export default function CheckoutView({ productId: initialProductId }) {
     }
   };
 
-  const handleCheckCity = async (city) => {
+  const handleCheckCity = useCallback(async (city, categoryName = null) => {
     if (!city) return;
-    const catName = product?.category || cartItems[0]?.product?.category?.name || "";
+    const catName = categoryName ?? (product?.category || (typeof cartItems[0]?.product?.category === 'object' ? cartItems[0]?.product?.category?.name : cartItems[0]?.product?.category) || "");
+    if (!catName) {
+      setCityAvailable(null);
+      return;
+    }
     setCityCheckLoading(true);
     try {
       const r = await fetch(`/api/pincode-check?city=${encodeURIComponent(city)}&type=category&name=${encodeURIComponent(catName)}`);
       const d = await r.json();
-      setCityAvailable(Boolean(d?.available));
+      if (d?.success) {
+        setCityAvailable(Boolean(d?.available));
+      } else {
+        setCityAvailable(null);
+      }
     } catch {
       setCityAvailable(null);
     } finally {
       setCityCheckLoading(false);
     }
+  }, [product, cartItems]);
+
+  // Re-verify city availability whenever selectedCity, product or cartItems updates
+  useEffect(() => {
+    const cat = product?.category || (typeof cartItems[0]?.product?.category === 'object' ? cartItems[0]?.product?.category?.name : cartItems[0]?.product?.category) || "";
+    if (selectedCity && cat) {
+      handleCheckCity(selectedCity, cat);
+    }
+  }, [selectedCity, product, cartItems, handleCheckCity]);
+
+  // Prefill city from MT-Boss Shop location selection
+  useEffect(() => {
+    if (!selectedCity) {
+      try {
+        const savedCity = localStorage.getItem("MTBOSS_selected_city");
+        if (savedCity) {
+          setSelectedCity(savedCity);
+        }
+      } catch {}
+    }
+  }, [selectedCity]);
+
+  const handleAutoDetectCity = () => {
+    if (typeof window === "undefined" || !("geolocation" in navigator)) return;
+    setCityCheckLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const res = await fetch(`/api/location/reverse-geocode?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`);
+          const data = await res.json();
+          if (data?.success && data?.city) {
+            const finalCity = data.matchedCity || data.city;
+            setSelectedCity(finalCity);
+            try {
+              localStorage.setItem("MTBOSS_selected_city", finalCity);
+              window.dispatchEvent(new CustomEvent("MTBOSS_city_changed", { detail: finalCity }));
+            } catch {}
+            handleCheckCity(finalCity);
+          }
+        } catch {} finally {
+          setCityCheckLoading(false);
+        }
+      },
+      () => setCityCheckLoading(false),
+      { timeout: 8000 }
+    );
   };
 
   // ── Shipping quote ──────────────────────────────────────────────────────────
@@ -375,7 +495,7 @@ export default function CheckoutView({ productId: initialProductId }) {
 
   // GPS location detection
   const requestLocation = () => {
-    if (!navigator.geolocation) return;
+    if (typeof window === "undefined" || !("geolocation" in navigator)) return;
     setLocationStatus("loading");
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
@@ -383,13 +503,26 @@ export default function CheckoutView({ productId: initialProductId }) {
         setLocationCoords({ latitude, longitude });
         setLocationStatus("success");
         try {
-          const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`, {
-            headers: { "Accept-Language": "en" },
-          });
+          const r = await fetch(`/api/location/reverse-geocode?lat=${latitude}&lng=${longitude}`);
           const d = await r.json();
-          if (d.display_name) setFormData((p) => ({ ...p, address: p.address?.trim() || d.display_name }));
-          if (d.address?.postcode) {
-            const pin = String(d.address.postcode).replace(/\D/g, "").slice(0, 6);
+          if (d?.success && d.city) {
+            const finalCity = d.matchedCity || d.city;
+            if (!selectedCity) {
+              setSelectedCity(finalCity);
+              try {
+                localStorage.setItem("MTBOSS_selected_city", finalCity);
+                window.dispatchEvent(new CustomEvent("MTBOSS_city_changed", { detail: finalCity }));
+              } catch {}
+            }
+          }
+          if (d?.district || d?.city) {
+            setFormData((p) => ({
+              ...p,
+              address: p.address?.trim() || [d.district, d.city, d.state].filter(Boolean).join(", ")
+            }));
+          }
+          if (d?.pincode) {
+            const pin = String(d.pincode).replace(/\D/g, "").slice(0, 6);
             if (pin.length === 6) setNewAddressPincode((prev) => prev || pin);
           }
         } catch {}
@@ -399,9 +532,9 @@ export default function CheckoutView({ productId: initialProductId }) {
     );
   };
 
-  // ── Order submit ────────────────────────────────────────────────────────────
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+    // ── Open Payment Modal on clicking Complete Payment ─────────────────────────
+  const handleOpenPaymentModal = (e) => {
+    if (e) e.preventDefault();
     if (!selectedCity) {
       setSubmitError("Please select your delivery city.");
       return;
@@ -410,19 +543,34 @@ export default function CheckoutView({ productId: initialProductId }) {
       setSubmitError("Please enter your complete delivery address.");
       return;
     }
+    if (!formData.phone?.trim()) {
+      setSubmitError("Please enter your 10-digit phone number.");
+      return;
+    }
+    const token = localStorage.getItem("token") || localStorage.getItem("admin-token");
+    if (!token) {
+      setSubmitError("Please login to place an order so you can track it.");
+      return;
+    }
+    setSubmitError("");
+    setShowPaymentModal(true);
+  };
 
+  // ── Execute Order with chosen payment method (COD or ONLINE) ───────────────
+  const handleExecuteOrder = async (chosenMethod) => {
+    setActivePaymentMethod(chosenMethod);
     setSubmitting(true);
     setSubmitError("");
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("token") || localStorage.getItem("admin-token");
       if (!token) throw new Error("Please login to place an order so you can track it.");
 
       const payload = {
-        order_intent: "buy",
+        order_intent: product ? "buy" : "cart",
         user_name: formData.name,
         user_phone: formData.phone,
         user_email: formData.email,
-        delivery_date: deliveryDate || null,
+        delivery_date: deliveryDate || getNextDayDate(),
         delivery_address: formData.address,
         latitude: locationCoords?.latitude || null,
         longitude: locationCoords?.longitude || null,
@@ -433,6 +581,7 @@ export default function CheckoutView({ productId: initialProductId }) {
         promotion_id: promoDiscount?.promotion?.id || null,
         promotion_name: promoDiscount?.promotion?.name || null,
         promotion_discount: promoDiscountAmount,
+        payment_method: chosenMethod,
       };
 
       if (product) {
@@ -445,8 +594,8 @@ export default function CheckoutView({ productId: initialProductId }) {
         payload.order_unit = product.unit || "unit";
       } else {
         payload.items = cartItems.map((ci) => ({
-          product_id: ci.product?.product_id || null,
-          category_name: ci.product?.category?.name || "Materials",
+          product_id: ci.product?.product_id || ci.product?.id || null,
+          category_name: ci.product?.category?.name || ci.product?.category || "Materials",
           material_type: ci.product?.name,
           quantity: ci.quantity,
           order_unit: ci.product?.unit || "unit",
@@ -462,14 +611,7 @@ export default function CheckoutView({ productId: initialProductId }) {
       const d = await r.json();
       if (!r.ok || !d.success) throw new Error(d.error || "Failed to place order");
 
-      setSubmittedOrder(d.data);
-      if (!product) {
-        localStorage.removeItem("MTBOSS-shop-cart");
-        window.dispatchEvent(new Event("storage"));
-      }
-      setSubmitted(true);
-
-      // Save address
+      // Save address in background
       if (addressMode === "new" && saveAddressToProfile && formData.address?.trim()) {
         const label = newAddressLabel === "Other" ? customAddressLabel.trim() || "Other" : newAddressLabel;
         fetch("/api/user/addresses", {
@@ -486,6 +628,24 @@ export default function CheckoutView({ productId: initialProductId }) {
           }),
         }).catch(() => {});
       }
+
+      // If online payment is returned from PayU, forward user to hosted payment page
+      if (d.payment) {
+        if (!product) {
+          localStorage.removeItem("MTBOSS-shop-cart");
+          window.dispatchEvent(new Event("storage"));
+        }
+        redirectToPayU(d.payment);
+        return;
+      }
+
+      setSubmittedOrder(d.data);
+      if (!product) {
+        localStorage.removeItem("MTBOSS-shop-cart");
+        window.dispatchEvent(new Event("storage"));
+      }
+      setShowPaymentModal(false);
+      setSubmitted(true);
     } catch (err) {
       setSubmitError(err.message);
     } finally {
@@ -564,13 +724,14 @@ export default function CheckoutView({ productId: initialProductId }) {
             </div>
           )}
 
-          <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
+          <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center items-center">
             <Link
               href="/material-orders?role=user"
               className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-[var(--brand-blue)] text-slate-950 font-black text-xs uppercase tracking-wider shadow-md hover:bg-sky-400 transition-all"
             >
               <ClipboardList size={16} /> Track Order Status →
             </Link>
+
             <Link
               href="/ShopNow"
               className={`inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl border-2 font-black text-xs uppercase tracking-wider transition-all ${
@@ -645,28 +806,55 @@ export default function CheckoutView({ productId: initialProductId }) {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 mt-2">
         <div className="mb-6">
           <h1 className="text-2xl sm:text-3xl font-black">Checkout &amp; Delivery Details</h1>
-          <p className={`text-sm mt-1 ${muted}`}>Please enter your site delivery address to schedule dispatch.</p>
+          <p className={`text-sm mt-1 ${muted}`}>
+            {customerAuthed
+              ? "Please enter your site delivery address to schedule dispatch."
+              : "Sign in with your mobile number to complete checkout. You can browse and add to cart without logging in."}
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        {!customerAuthed ? (
+          <div className={`max-w-md mx-auto mb-10 p-6 sm:p-8 rounded-3xl border ${card}`}>
+            <CustomerMobileOtpAuth
+              title="Sign in to checkout"
+              subtitle="Verify your mobile with OTP. New customers can create an account on the next step."
+              onSuccess={handleAuthSuccess}
+            />
+          </div>
+        ) : null}
+
+        <div className={`grid grid-cols-1 lg:grid-cols-12 gap-8 items-start ${!customerAuthed ? "opacity-40 pointer-events-none select-none" : ""}`}>
           {/* ──────────────────────────────────────────────────────────
               LEFT: FORM INPUTS
              ────────────────────────────────────────────────────────── */}
           <div className="lg:col-span-7">
-            <form id="checkout-form" onSubmit={handleSubmit} className="space-y-6">
+            <form id="checkout-form" onSubmit={handleOpenPaymentModal} noValidate data-no-auto-validate className="space-y-6">
 
               {/* 1. DELIVERY CITY */}
               <div className={`p-6 rounded-3xl border ${card}`}>
-                <h2 className="text-base font-black mb-3 flex items-center gap-2">
-                  <MapPin size={18} className="text-[var(--brand-blue)]" />
-                  1. Delivery City
-                </h2>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-base font-black flex items-center gap-2">
+                    <MapPin size={18} className="text-[var(--brand-blue)]" />
+                    1. Delivery City
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={handleAutoDetectCity}
+                    className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                  >
+                    📍 Detect GPS
+                  </button>
+                </div>
                 <select
                   required
                   value={selectedCity}
                   onChange={(e) => {
                     const val = e.target.value;
                     setSelectedCity(val);
+                    try {
+                      localStorage.setItem("MTBOSS_selected_city", val);
+                      window.dispatchEvent(new CustomEvent("MTBOSS_city_changed", { detail: val }));
+                    } catch {}
                     handleCheckCity(val);
                   }}
                   className={inpClass}
@@ -714,7 +902,7 @@ export default function CheckoutView({ productId: initialProductId }) {
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className={`block text-[10px] font-black uppercase tracking-wider mb-1.5 ${muted}`}>Full Name *</label>
+                    <label className={`block text-[10px] font-black uppercase tracking-wider mb-1.5 ${muted}`}>Full Name <RequiredAsterisk /></label>
                     <input
                       type="text"
                       required
@@ -725,7 +913,7 @@ export default function CheckoutView({ productId: initialProductId }) {
                     />
                   </div>
                   <div>
-                    <label className={`block text-[10px] font-black uppercase tracking-wider mb-1.5 ${muted}`}>Phone Number *</label>
+                    <label className={`block text-[10px] font-black uppercase tracking-wider mb-1.5 ${muted}`}>Phone Number <RequiredAsterisk /></label>
                     <input
                       type="tel"
                       required
@@ -739,7 +927,7 @@ export default function CheckoutView({ productId: initialProductId }) {
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className={`block text-[10px] font-black uppercase tracking-wider mb-1.5 ${muted}`}>Email Address *</label>
+                    <label className={`block text-[10px] font-black uppercase tracking-wider mb-1.5 ${muted}`}>Email Address <RequiredAsterisk /></label>
                     <input
                       type="email"
                       required
@@ -830,7 +1018,7 @@ export default function CheckoutView({ productId: initialProductId }) {
                     </div>
 
                     <div>
-                      <label className={`block text-[10px] font-black uppercase tracking-wider mb-1.5 ${muted}`}>Full Street Address / Site Location *</label>
+                      <label className={`block text-[10px] font-black uppercase tracking-wider mb-1.5 ${muted}`}>Full Street Address / Site Location <RequiredAsterisk /></label>
                       <textarea
                         required
                         rows={3}
@@ -878,12 +1066,17 @@ export default function CheckoutView({ productId: initialProductId }) {
                 </h2>
                 <div className="space-y-4">
                   <div>
-                    <label className={`block text-[10px] font-black uppercase tracking-wider mb-1.5 ${muted}`}>Required Delivery Date (optional)</label>
+                    <div className="flex items-center justify-between mb-1.5">
+                    <label className={`block text-[10px] font-black uppercase tracking-wider ${muted}`}>Required Delivery Date</label>
+                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full">
+                      ✓ Next-Day Delivery Auto-Confirmed
+                    </span>
+                  </div>
                     <input
                       type="date"
                       value={deliveryDate}
                       onChange={(e) => setDeliveryDate(e.target.value)}
-                      min={new Date().toISOString().split("T")[0]}
+                      min={getNextDayDate()}
                       max="9999-12-31"
                       suppressHydrationWarning
                       className={inpClass}
@@ -950,21 +1143,21 @@ export default function CheckoutView({ productId: initialProductId }) {
                 </div>
               )}
 
-              {/* SUBMIT ERROR */}
+                            {/* SUBMIT ERROR */}
               {submitError && (
                 <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 text-xs font-bold">
                   ⚠️ {submitError}
                 </div>
               )}
 
-              {/* CONFIRM ORDER BUTTON */}
+              {/* COMPLETE PAYMENT BUTTON */}
               <button
                 type="submit"
                 disabled={submitting}
                 className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-[var(--brand-blue)] to-sky-400 hover:from-sky-400 hover:to-[var(--brand-blue)] text-slate-950 font-black text-sm uppercase tracking-wider shadow-xl shadow-sky-500/20 active:scale-[0.98] disabled:opacity-60 transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Zap size={18} className="fill-slate-950" />
-                {submitting ? "Placing Order…" : "Confirm & Place Order →"}
+                {submitting ? "Processing…" : "Complete Payment →"}
               </button>
               <p className={`text-xs text-center ${muted}`}>
                 Orders are verified by official MTBOSS suppliers. Official GST invoice provided upon site delivery.
@@ -1102,6 +1295,120 @@ export default function CheckoutView({ productId: initialProductId }) {
           </div>
         </div>
       </div>
+    
+      {/* ──────────────────────────────────────────────────────────
+          PAYMENT METHOD POPUP MODAL (Images 2 & 3 matching)
+         ────────────────────────────────────────────────────────── */}
+      {showPaymentModal && (
+        <div 
+          className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
+          onClick={() => !submitting && setShowPaymentModal(false)}
+        >
+          <div
+            className={`relative w-full max-w-md rounded-2xl shadow-2xl p-6 transition-all animate-in zoom-in-95 duration-150 ${
+              isDark ? "bg-zinc-900 border border-zinc-800 text-white" : "bg-white text-slate-900"
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4">
+              <h3 className="text-lg font-black tracking-tight">Delivering To</h3>
+              <button
+                type="button"
+                onClick={() => !submitting && setShowPaymentModal(false)}
+                disabled={submitting}
+                className={`p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer ${muted}`}
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Address Card (Matching Image 3) */}
+            <div className={`p-4 rounded-xl flex items-start gap-3.5 mb-5 ${
+              isDark ? "bg-zinc-800/80 border border-zinc-700/60" : "bg-amber-50/70 border border-amber-100"
+            }`}>
+              <div className="w-10 h-10 rounded-xl bg-amber-100/90 dark:bg-zinc-700 flex items-center justify-center text-amber-900 dark:text-amber-300 flex-shrink-0">
+                <Home size={20} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-black text-sm text-slate-900 dark:text-white leading-tight">
+                  {formData.name || "Customer"}
+                </p>
+                <p className={`text-xs mt-1 leading-relaxed ${isDark ? "text-zinc-300" : "text-slate-600"}`}>
+                  {formData.address}
+                  {selectedCity ? `, ${selectedCity}` : ""}
+                  {newAddressPincode ? ` - ${newAddressPincode}` : ""}
+                </p>
+                <p className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
+                  <span>🚚</span> Expected delivery by tomorrow ({(deliveryDate || getNextDayDate()).split("-").reverse().join("-")})
+                </p>
+              </div>
+            </div>
+
+            <div className={`border-t my-4 ${border}`} />
+
+            {/* Total Amount & Prompt */}
+            <div className="text-center py-2">
+              <p className="text-2xl font-black text-slate-900 dark:text-white">
+                Total: ₹{grandTotal > 0 ? grandTotal.toLocaleString("en-IN") : 0}
+              </p>
+              <p className={`text-xs mt-1 ${muted}`}>
+                Select payment method and place order
+              </p>
+            </div>
+
+            {/* Action Error if any */}
+            {submitError && (
+              <div className="p-3 my-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 text-xs font-bold text-center">
+                ⚠️ {submitError}
+              </div>
+            )}
+
+            {/* Two Action Buttons Side by Side (Image 3) */}
+            <div className="grid grid-cols-2 gap-3 mt-5">
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => handleExecuteOrder("COD")}
+                className={`py-3.5 px-4 rounded-xl border-2 border-emerald-600 text-emerald-700 dark:text-emerald-400 font-bold text-sm text-center hover:bg-emerald-50 dark:hover:bg-emerald-950/30 active:scale-[0.98] transition-all disabled:opacity-50 cursor-pointer ${
+                  isDark ? "bg-transparent" : "bg-white"
+                }`}
+              >
+                {submitting && activePaymentMethod === "COD" ? (
+                  <span className="flex items-center justify-center gap-1.5">
+                    <span className="w-4 h-4 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+                    Placing…
+                  </span>
+                ) : (
+                  "Pay On Delivery"
+                )}
+              </button>
+
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => handleExecuteOrder("ONLINE")}
+                className="py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-sm text-center shadow-lg shadow-emerald-600/20 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {submitting && activePaymentMethod === "ONLINE" ? (
+                  <span className="flex items-center justify-center gap-1.5">
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Connecting…
+                  </span>
+                ) : (
+                  "Pay Online"
+                )}
+              </button>
+            </div>
+
+            <p className={`text-[10px] text-center mt-4 ${muted}`}>
+              UPI (Google Pay, PhonePe, Paytm), NetBanking & Cards supported
+            </p>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

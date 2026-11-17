@@ -1,6 +1,5 @@
 "use client";
 import React, { useState, useEffect } from "react";
-import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import dynamic from "next/dynamic";
 import Navbar from "./components/Navbar";
 import "./globals.css";
@@ -11,8 +10,6 @@ import PrivacyConsentGuard from "./components/PrivacyConsentGuard";
 import FreeWhatsAppNotifier from "./components/FreeWhatsAppNotifier";
 import { usePathname } from "next/navigation";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
-const plusJakartaSans = Plus_Jakarta_Sans({ subsets: ["latin"], weight: ["600", "700", "800"], variable: "--font-plus-jakarta-sans" });
 const ChatbotWidget = dynamic(() => import("./components/ChatbotWidget"), { ssr: false });
 const LeadConsultationModal = dynamic(
   () => import("./components/LeadConsultationModal"),
@@ -57,6 +54,7 @@ export default function RootLayout({ children }) {
       const dark = localStorage.getItem("theme") === "dark";
       setIsDarkMode(dark);
       document.documentElement.classList.toggle("dark-mode", dark);
+      document.documentElement.classList.toggle("dark", dark);
     });
     return () => cancelAnimationFrame(frame);
   }, []);
@@ -124,7 +122,9 @@ export default function RootLayout({ children }) {
     };
     const onInput = (event) => validateField(event.target);
     const onSubmit = (event) => {
-      if (event.target.noValidate || event.target.hasAttribute('data-no-auto-validate')) return;
+      if (!event.target || !(event.target instanceof HTMLElement)) return;
+      if (event.target.noValidate || event.target.hasAttribute('data-no-auto-validate') || event.target.hasAttribute('noValidate')) return;
+      if (typeof event.target.querySelectorAll !== 'function') return;
       const fields = Array.from(event.target.querySelectorAll('input'));
       const ok = fields.every(validateField);
       if (!ok) {
@@ -148,19 +148,25 @@ export default function RootLayout({ children }) {
 
     if (newMode) {
       document.documentElement.classList.add("dark-mode");
+      document.documentElement.classList.add("dark");
       localStorage.setItem("theme", "dark");
     } else {
       document.documentElement.classList.remove("dark-mode");
+      document.documentElement.classList.remove("dark");
       localStorage.setItem("theme", "light");
     }
   };
 
   return (
-    <html lang="en" className={`${inter.variable} ${plusJakartaSans.variable} ${isDarkMode ? "dark-mode" : ""} ${isShopPage ? "shop-html" : ""}`}>
+    <html lang="en" suppressHydrationWarning className={`${isDarkMode ? "dark-mode dark" : ""} ${isShopPage ? "shop-html" : ""}`}>
       <head>
         <meta name="google-site-verification" content="_HIsDPgunnMsWo7iWtmz2fX3YW9aG406vj5zL02lWXY" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" />
       </head>
-      <body className={`transition-colors duration-500 ${isShopPage ? "shop-route" : "overflow-x-clip"} ${isDarkMode ? "bg-black text-white" : "bg-white text-black"}`}>
+      <body suppressHydrationWarning className={`transition-colors duration-500 ${isShopPage ? "shop-route" : "overflow-x-clip"} ${isDarkMode ? "bg-black text-white" : "bg-white text-black"}`}>
         <PrivacyConsentGuard />
         {!isSoftwarePanel && <FreeWhatsAppNotifier />}
         {!isAdminDashboard && <Navbar isDarkMode={isDarkMode} toggleTheme={toggleTheme} />}

@@ -188,12 +188,22 @@ export async function getAdminOrders({
       me.order_intent,
       COALESCE(me.message, me.status_note) AS notes,
       me.accepted_by_supplier_id,
+      sm.supplier_id AS free_tier_vendor_id,
+      COALESCE(ps.shop_name, '') AS free_vendor_shop_name,
+      COALESCE(ps.phone, '') AS free_vendor_phone,
+      COALESCE(ps.email, '') AS free_vendor_email,
+      CASE 
+        WHEN sm.supplier_id > 0 AND (COALESCE(ps.package_price, 0) <= 0 OR ps.package_id = 'pkg_free_1m') THEN TRUE
+        ELSE FALSE
+      END AS is_free_tier_order,
       NULL::JSON AS supplier,
       NULL::JSON AS vendor,
       '[]'::JSON AS events,
       1 AS type_sort_priority
     FROM material_enquiries me
     LEFT JOIN users u ON u.id = me.user_id
+    LEFT JOIN supplier_materials sm ON sm.id = me.product_id
+    LEFT JOIN suppliers ps ON ps.id = sm.supplier_id
   `;
 
   const serviceQuery = `
@@ -228,6 +238,11 @@ export async function getAdminOrders({
       'service' AS order_intent,
       COALESCE(sb.user_notes, sb.admin_notes, sb.vendor_notes) AS notes,
       NULL::INT AS accepted_by_supplier_id,
+      NULL::INT AS free_tier_vendor_id,
+      ''::TEXT AS free_vendor_shop_name,
+      ''::TEXT AS free_vendor_phone,
+      ''::TEXT AS free_vendor_email,
+      FALSE AS is_free_tier_order,
       NULL::JSON AS supplier,
       NULL::JSON AS vendor,
       '[]'::JSON AS events,
@@ -237,12 +252,19 @@ export async function getAdminOrders({
     LEFT JOIN quick_services qs ON qs.id = sb.quick_service_id
   `;
 
-  // Combine based on type selection. Shop orders are prioritized first
+  // Skip the unused half of the UNION when the caller filters by type.
+  const unifiedBody =
+    type === 'shop_order'
+      ? shopQuery
+      : type === 'service_booking'
+        ? serviceQuery
+        : `${shopQuery}
+      UNION ALL
+      ${serviceQuery}`;
+
   const unionSql = `
     WITH unified AS (
-      ${shopQuery}
-      UNION ALL
-      ${serviceQuery}
+      ${unifiedBody}
     )
   `;
 
@@ -269,10 +291,10 @@ export async function getAdminOrders({
     LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
   `;
 
-  const [summaryResult, itemsResult] = await Promise.all([
-    pool.query(summarySql, params),
-    pool.query(itemsSql, [...params, l, offset]),
-  ]);
+  // Sequential on purpose: Neon pooler max is small; twin heavy UNION queries
+  // in parallel often exhaust waitingCount during dashboard/orders loads.
+  const summaryResult = await pool.query(summarySql, params);
+  const itemsResult = await pool.query(itemsSql, [...params, l, offset]);
 
   const summary = summaryResult.rows[0] || {
     total_orders: 0,
@@ -350,6 +372,14 @@ export async function getAdminOrderById(orderId, { type } = {}) {
       me.order_intent,
       COALESCE(me.message, me.status_note) AS notes,
       me.accepted_by_supplier_id,
+      sm.supplier_id AS free_tier_vendor_id,
+      COALESCE(ps.shop_name, '') AS free_vendor_shop_name,
+      COALESCE(ps.phone, '') AS free_vendor_phone,
+      COALESCE(ps.email, '') AS free_vendor_email,
+      CASE 
+        WHEN sm.supplier_id > 0 AND (COALESCE(ps.package_price, 0) <= 0 OR ps.package_id = 'pkg_free_1m') THEN TRUE
+        ELSE FALSE
+      END AS is_free_tier_order,
       (
         SELECT row_to_json(sup)
         FROM (
@@ -377,6 +407,8 @@ export async function getAdminOrderById(orderId, { type } = {}) {
       ) AS events
     FROM material_enquiries me
     LEFT JOIN users u ON u.id = me.user_id
+    LEFT JOIN supplier_materials sm ON sm.id = me.product_id
+    LEFT JOIN suppliers ps ON ps.id = sm.supplier_id
     WHERE ${isNumber ? 'me.id = $1 OR me.order_reference = $2' : 'me.order_reference = $1'}
     LIMIT 1
   `;
@@ -1154,12 +1186,13 @@ export async function generateOrderInvoicePdf(order) {
           `City: ${order.supplier.city || '-'}`,
           order.supplier.email ? `Email: ${order.supplier.email}` : null,
         ];
-      } else if (order.vendor) {
+      } else if (order.vendor || order.service_provider) {
+        const prov = order.vendor || order.service_provider;
         fulfilledLines = [
-          order.vendor.vendor_name || order.vendor.shop_name || 'Verified Vendor',
-          `Phone: ${formatIndianPhone(order.vendor.phone)}`,
-          `City: ${order.vendor.city || '-'}`,
-          order.vendor.email ? `Email: ${order.vendor.email}` : null,
+          prov.vendor_name || prov.service_provider_name || prov.shop_name || 'Verified Service Provider',
+          `Phone: ${formatIndianPhone(prov.phone)}`,
+          `City: ${prov.city || '-'}`,
+          prov.email ? `Email: ${prov.email}` : null,
         ];
       } else {
         fulfilledLines = [

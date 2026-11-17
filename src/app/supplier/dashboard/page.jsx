@@ -8,16 +8,27 @@ import { redirectToPayU } from '@/lib/payu-client';
 import PanelLayout from '@/app/components/PanelLayout';
 import {
   ClipboardList,
+  ShoppingCart,
   Truck,
   CircleDollarSign,
   Package,
+  Layers,
+  History,
   User,
 } from '@/app/components/ui/icons';
 
 const MaterialOrdersPanel = dynamic(() => import('@/app/components/MaterialOrdersPanel'), {
-  loading: () => <div className="sd-loading">Loading order tracking...</div>,
+  loading: () => <div className="sd-loading">Loading material orders...</div>,
 });
-const SUPPLIER_TABS = ['orders', 'tracking', 'earnings', 'packages', 'profile'];
+const SupplierShopProductsManager = dynamic(
+  () => import('@/app/components/ShopNowManager').then((module) => module.SupplierShopProductsManager),
+  { loading: () => <div className="sd-loading">Loading products...</div> }
+);
+const ShippingSettingsManager = dynamic(
+  () => import('@/app/components/ShippingSettingsManager'),
+  { loading: () => <div className="sd-loading">Loading shipping settings...</div> }
+);
+const SUPPLIER_TABS = ['orders', 'products', 'shipping', 'tracking', 'earnings', 'history', 'packages', 'profile'];
 
 export default function SupplierDashboard() {
   return (
@@ -59,6 +70,8 @@ function SupplierDashboardContent() {
   // Earnings
   const [earnings, setEarnings] = useState(null);
   const [loadingEarnings, setLoadingEarnings] = useState(false);
+  const [historyData, setHistoryData] = useState(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Packages
   const [pkgList, setPkgList] = useState([]);
@@ -87,6 +100,25 @@ function SupplierDashboardContent() {
       setSupplier(parsed);
       setSelectedCats(parsed.product_categories || []);
       setLoading(false);
+
+      // Fetch package status on initial dashboard mount
+      fetch('/api/supplier/packages?action=status', { headers: { Authorization: `Bearer ${tok}` } })
+        .then(r => r.json())
+        .then(d => {
+          if (d.success && d.package) {
+            setPkgStatus(d.package);
+            setSupplier(prev => ({
+              ...prev,
+              package_id: d.package.package_id,
+              package_name: d.package.package_name,
+              package_price: d.package.package_price,
+              package_status: d.package.package_status,
+              package_expires_at: d.package.package_expires_at,
+              is_free_tier: d.package.is_free_plan,
+            }));
+          }
+        })
+        .catch(() => {});
     } catch { router.push('/supplier/login'); }
   }, [router]);
 
@@ -104,6 +136,7 @@ function SupplierDashboardContent() {
 
     if (activeTab === 'orders') fetchOrders();
     if (activeTab === 'earnings') fetchEarnings();
+    if (activeTab === 'history') fetchHistory();
     if (activeTab === 'packages') loadPackages();
     if (activeTab === 'profile' && productCategories.length === 0) {
       fetch('/api/shop-categories')
@@ -196,6 +229,22 @@ function SupplierDashboardContent() {
     finally { setLoadingEarnings(false); }
   };
 
+  // ── History ───────────────────────────────────────────────────────────────
+  const fetchHistory = async (t) => {
+    setLoadingHistory(true);
+    try {
+      const res = await fetch('/api/supplier/history', {
+        headers: { 'Authorization': `Bearer ${t || token()}` }
+      });
+      const data = await res.json();
+      if (data.success && data.data) setHistoryData(data.data);
+    } catch (err) {
+      console.error('Error fetching history:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
   // ── Packages ─────────────────────────────────────────────────────────────
   const loadPackages = async () => {
     const tok = token();
@@ -252,6 +301,11 @@ function SupplierDashboardContent() {
   const fmt = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const statusLabel = (s) => ({ open: 'Open', accepted: 'Accepted', fulfilled: 'Fulfilled', cancelled: 'Cancelled' }[s] || s);
   const noCats = (supplier?.product_categories || []).length === 0;
+  const isFreeVendor = pkgStatus ? pkgStatus.is_free_plan : (
+    supplier?.is_free_tier !== undefined
+      ? supplier.is_free_tier
+      : (Number(supplier?.package_price || 0) <= 0 || supplier?.package_id === 'pkg_free_1m')
+  );
 
   // Format date nicely
   const fmtDate = (d) => {
@@ -454,15 +508,30 @@ function SupplierDashboardContent() {
       `}</style>
 
       <PanelLayout
-        title="Supplier Hub"
-        subtitle={`${supplier?.shop_name || 'Supplier'} · ${supplier?.city ? supplier.city + ' · ' : ''}${supplier?.is_active === false ? 'Inactive' : 'Active'}`}
+        title="Vendor Hub"
+        subtitle={`${supplier?.shop_name || 'Vendor'} · ${supplier?.city ? supplier.city + ' · ' : ''}${supplier?.is_active === false ? 'Inactive' : 'Active'} · ${isFreeVendor ? '🟡 Free Plan' : '🟢 Paid Vendor'}`}
         user={{
           name: supplier?.shop_name || 'Supplier',
           email: supplier?.email || '',
           city: supplier?.city || '',
-          role: 'Supplier',
+          role: isFreeVendor ? 'Free Vendor' : 'Paid Vendor',
         }}
-        roleBadge="Supplier"
+        roleBadge={isFreeVendor ? 'Free Vendor' : 'Paid Vendor'}
+        actions={
+          isFreeVendor ? (
+            <button
+              type="button"
+              onClick={() => { setActiveTab('packages'); router.push('/supplier/dashboard?tab=packages'); }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-lg shadow-sm transition-all cursor-pointer"
+            >
+              ⭐ Upgrade to Paid Plan
+            </button>
+          ) : (
+            <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-lg text-xs font-bold">
+              ✓ Paid Plan Active
+            </span>
+          )
+        }
         menuItems={[
           {
             key: 'orders',
@@ -471,8 +540,11 @@ function SupplierDashboardContent() {
             badge: openEnquiries.length > 0 ? openEnquiries.length : null,
             badgeColor: 'bg-amber-500 text-white',
           },
-          { key: 'tracking', label: 'Order Tracking', icon: Truck },
+          { key: 'products', label: 'Products', icon: ShoppingCart },
+          { key: 'shipping', label: 'Shipping', icon: Truck },
+          { key: 'tracking', label: 'Material Orders', icon: Layers },
           { key: 'earnings', label: 'Earnings', icon: CircleDollarSign },
+          { key: 'history', label: 'History', icon: History },
           { key: 'packages', label: 'Package', icon: Package },
           { key: 'profile', label: 'Profile', icon: User },
         ]}
@@ -482,19 +554,46 @@ function SupplierDashboardContent() {
           router.push(`/supplier/dashboard?tab=${tab}`);
         }}
         onLogout={handleLogout}
-        actions={
-          activeTab === 'orders' ? (
-            <button
-              type="button"
-              onClick={() => fetchOrders()}
-              className="px-3 py-1.5 border border-slate-300 dark:border-zinc-700 text-xs font-semibold rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
-            >
-              Refresh Orders
-            </button>
-          ) : null
-        }
+        // actions={
+        //   activeTab === 'products' ? (
+        //     <button
+        //       type="button"
+        //       onClick={() => {
+        //         window.dispatchEvent(new CustomEvent('openSupplierAddProduct')); setTimeout(() => document.getElementById('supplier-shop-product-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+        //       }}
+        //       className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white dark:bg-white dark:text-black text-xs font-semibold rounded-md shadow-xs hover:opacity-90 transition-opacity"
+        //     >
+        //       + Add Product
+        //     </button>
+        //   ) : activeTab === 'orders' ? (
+        //     <button
+        //       type="button"
+        //       onClick={() => fetchOrders()}
+        //       className="px-3 py-1.5 border border-slate-300 dark:border-zinc-700 text-xs font-semibold rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+        //     >
+        //       Refresh Orders
+        //     </button>
+        //   ) : null
+        // }
       >
         <div className="space-y-6">
+          {/* ══════════════════════ TRIAL BANNER ══════════════════════ */}
+          {isFreeVendor && (
+            <div style={{ background: 'linear-gradient(90deg, #059669 0%, #10b981 100%)', color: '#fff', padding: '0.85rem 1.25rem', borderRadius: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', boxShadow: '0 4px 12px rgba(16,185,129,0.2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', fontSize: '0.875rem' }}>
+                <span style={{ fontSize: '1.25rem' }}>🎉</span>
+                <span><strong>Free Plan Active:</strong> Store setup & product listing enabled! Customer leads and product buy payouts unlock when you upgrade to a Paid Plan.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setActiveTab('packages'); router.push('/supplier/dashboard?tab=packages'); }}
+                style={{ background: '#fff', color: '#065f46', border: 'none', padding: '0.5rem 1rem', borderRadius: 8, fontWeight: 800, fontSize: '0.75rem', cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }}
+              >
+                Upgrade to Paid Plan →
+              </button>
+            </div>
+          )}
+
           {/* ══════════════════════ ORDERS ══════════════════════ */}
           {activeTab === 'orders' && (
             fulfillModal ? (
@@ -568,6 +667,26 @@ function SupplierDashboardContent() {
                 <button onClick={() => fetchOrders()} style={{ padding: '0.5rem 1rem', background: 'transparent', border: `1px solid ${border}`, borderRadius: 8, color: muted, cursor: 'pointer', fontSize: '0.78rem' }}>↺ Refresh</button>
               </div>
 
+              {/* Free Trial Locked State */}
+              {isFreeVendor && (
+                <div style={{ background: dark ? '#2a1f0a' : '#fffbeb', border: '1.5px solid #f59e0b', borderRadius: 12, padding: '1.25rem 1.5rem', marginBottom: '1.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                    <span style={{ fontSize: '1.5rem' }}>🔒</span>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 800, color: '#b45309', margin: 0 }}>Customer Leads & Direct Orders are Locked</h3>
+                  </div>
+                  <p style={{ fontSize: '0.82rem', color: dark ? '#fde68a' : '#78350f', margin: '0 0 0.85rem 0', lineHeight: 1.5 }}>
+                    You are currently on the <strong>Free Plan</strong>. Your store is live and you can add products under the Products tab. Once a customer purchases your item, our Admin team will contact you to upgrade your subscription plan so your payment can be released and market leads unlocked.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab('packages'); router.push('/supplier/dashboard?tab=packages'); }}
+                    style={{ padding: '0.5rem 1.25rem', background: '#b45309', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer' }}
+                  >
+                    View Paid Plans & Upgrade →
+                  </button>
+                </div>
+              )}
+
               {/* No categories warning */}
               {!loadingOrders && noCats && (
                 <div style={{ background: dark ? '#2a1a0a' : '#fff7ed', border: '1px solid #f9731633', borderRadius: 10, padding: '1rem 1.25rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -635,6 +754,29 @@ function SupplierDashboardContent() {
           )
         )}
 
+          {/* ══════════════════════ PRODUCTS ══════════════════════ */}
+          {activeTab === 'products' && (
+            <div className="space-y-4">
+              <div className="flex justify-end">
+                {/* <button
+                  type="button"
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('openSupplierAddProduct')); setTimeout(() => document.getElementById('supplier-shop-product-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-[var(--brand-blue)] text-white text-xs font-bold rounded-lg shadow-sm hover:opacity-90 transition-opacity"
+                >
+                  + Add Product
+                </button> */}
+              </div>
+              <SupplierShopProductsManager isDarkMode={dark} />
+            </div>
+          )}
+
+          {/* ══════════════════════ SHIPPING ══════════════════════ */}
+          {activeTab === 'shipping' && (
+            <ShippingSettingsManager supplier city={supplier?.city} />
+          )}
+
           {/* ══════════════════════ EARNINGS ══════════════════════ */}
           {activeTab === 'tracking' && (
             <MaterialOrdersPanel role="supplier" embedded />
@@ -673,12 +815,88 @@ function SupplierDashboardContent() {
             </>
           )}
 
+          {/* ══════════════════════ HISTORY ══════════════════════ */}
+          {activeTab === 'history' && (
+            <div className="space-y-4">
+              {loadingHistory ? (
+                <div className="sd-loading">Loading history…</div>
+              ) : historyData ? (
+                <>
+                  {/* Summary */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem' }}>
+                    {[
+                      { label: 'Total Earned', value: '₹' + (historyData.summary.total_earned || 0).toLocaleString('en-IN'), color: '#3b82f6' },
+                      { label: 'Total Commission', value: '₹' + (historyData.summary.total_commission || 0).toLocaleString('en-IN'), color: '#f97316' },
+                      { label: 'Net Earnings', value: '₹' + (historyData.summary.total_net || 0).toLocaleString('en-IN'), color: '#22c55e' },
+                      { label: 'Total Orders', value: historyData.summary.total_orders || 0, color: text },
+                    ].map(c => (
+                      <div key={c.label} style={{ background: surface, border: '1px solid ' + border, borderRadius: 12, padding: '1rem' }}>
+                        <div style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: muted, marginBottom: '0.4rem' }}>{c.label}</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: c.color }}>{c.value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* History List */}
+                  {historyData.history.length === 0 ? (
+                    <div className="sd-empty">
+                      <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📋</div>
+                      <div>No completed orders yet.</div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      {historyData.history.map((item, idx) => (
+                        <div key={item.id + '-' + idx} style={{ background: surface, border: '1px solid ' + border, borderRadius: 12, padding: '1.25rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                                <span style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', padding: '0.2rem 0.5rem', borderRadius: 4, background: item.history_type === 'shop_product' ? '#dbeafe' : '#dcfce7', color: item.history_type === 'shop_product' ? '#1d4ed8' : '#15803d' }}>
+                                  {item.history_type === 'shop_product' ? '🛒 Shop Product' : '📦 Material Order'}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '0.95rem', fontWeight: 700, color: text }}>{item.product_name || item.material_name || 'Order'}</div>
+                              <div style={{ fontSize: '0.78rem', color: muted, marginTop: '0.25rem' }}>
+                                {item.quantity && item.unit ? item.quantity + ' ' + item.unit : ''}
+                                {item.city ? ' · ' + item.city : ''}
+                              </div>
+                              {item.customer_name && (
+                                <div style={{ fontSize: '0.78rem', color: muted, marginTop: '0.25rem' }}>
+                                  Customer: <strong style={{ color: text }}>{item.customer_name}</strong>
+                                  {item.customer_phone ? ' · ' + item.customer_phone : ''}
+                                </div>
+                              )}
+                              <div style={{ fontSize: '0.75rem', color: muted, marginTop: '0.25rem' }}>
+                                {item.completed_at ? new Date(item.completed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right', minWidth: 110, background: dark ? '#1a2a1a' : '#f0fdf4', border: '1px solid #10b98133', borderRadius: 10, padding: '0.75rem' }}>
+                              <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', color: muted, marginBottom: '0.25rem' }}>Amount</div>
+                              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#22c55e' }}>₹{Number(item.amount || 0).toLocaleString('en-IN')}</div>
+                              {item.commission > 0 && (
+                                <div style={{ fontSize: '0.72rem', color: '#f97316', marginTop: '0.2rem' }}>−₹{Number(item.commission || 0).toLocaleString('en-IN')} commission</div>
+                              )}
+                              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#10b981', marginTop: '0.25rem' }}>
+                                Net: ₹{Number((item.amount || 0) - (item.commission || 0)).toLocaleString('en-IN')}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="sd-empty">Could not load history.</div>
+              )}
+            </div>
+          )}
+
           {/* ══════════════════════ PACKAGES ══════════════════════ */}
           {activeTab === 'packages' && (
             <div style={{ maxWidth: 600 }}>
               <div style={{ marginBottom: '1.5rem' }}>
                 <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>Subscription Plan 📦</div>
-                <div style={{ fontSize: '0.85rem', color: muted }}>Manage your vendor package and track validity</div>
+                <div style={{ fontSize: '0.85rem', color: muted }}>Manage your service provider package and track validity</div>
               </div>
 
               {pkgMsg && (
@@ -696,7 +914,9 @@ function SupplierDashboardContent() {
                       <strong style={{ fontSize: '1.2rem', color: text }}>{pkgStatus.package_name || 'No Plan Selected'}</strong>
                       <div style={{ fontSize: '0.82rem', color: muted, marginTop: '0.25rem' }}>
                         {pkgStatus.is_active
-                          ? `Expires in ${pkgStatus.days_remaining} days (${new Date(pkgStatus.package_expires_at).toLocaleDateString('en-IN')})`
+                          ? (pkgStatus.is_free_plan
+                              ? '♾️ Lifetime Free Plan (No Expiry)'
+                              : `Expires in ${pkgStatus.days_remaining} days (${pkgStatus.package_expires_at ? new Date(pkgStatus.package_expires_at).toLocaleDateString('en-IN') : '—'})`)
                           : pkgStatus.package_status === 'pending'
                             ? '⏳ Pending Admin Approval'
                             : 'No active plan'
@@ -713,7 +933,7 @@ function SupplierDashboardContent() {
               {/* Package options list */}
               <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem' }}>Available Plans</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {pkgList.map(pkg => (
+                {pkgList.filter(pkg => Number(pkg.price) > 0).map(pkg => (
                   <div
                     key={pkg.id}
                     style={{

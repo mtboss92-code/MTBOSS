@@ -4,19 +4,33 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
-  ArrowRight, CheckCircle2, ChevronDown, ClipboardList, Clock, CreditCard, Grid3X3,
+  ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ClipboardList, Clock, CreditCard, Grid3X3,
   Hammer, MapPin, Minus, Mountain, Package, PaintBucket, Percent, Plus,
-  Search, ShieldCheck, ShoppingCart, Truck, Wallet, Wrench, X,
+  Search, ShieldCheck, ShoppingCart, Truck, Wallet, Wrench, X, Sparkles,
 } from "lucide-react";
 import "./shop.css";
 import ShopCategoryNav from "./ShopCategoryNav";
-import { CATEGORY_NAV_TREE } from "./categoryNavTree";
+import {
+  CATEGORY_NAV_TREE,
+  getMainCategories,
+  getSubcategoriesForParent,
+  productMatchesCategoryAndSub,
+  resolveParentAndSubFromParam,
+  namesMatch,
+  findCategoryByLabel,
+} from "./categoryNavTree";
 import MobileStorefront from "./MobileStorefront";
 import ProductGalleryCarousel from "./ProductGalleryCarousel";
 import AutoSwipeGallery from "./AutoSwipeGallery";
 import HeroBannerGallery from "./HeroBannerGallery";
 import { defaultHeroImages } from "@/lib/shop-storefront-defaults";
 import { getCartStep } from "@/lib/cart-step";
+import {
+  getCategoryAttributeConfig,
+  extractProductAttributes,
+  matchesAttribute,
+  collectUniqueAttributes,
+} from "@/lib/product-attributes";
 
 const SEARCH_PLACEHOLDERS = [
   'Search "Cement"',
@@ -123,7 +137,14 @@ function categoryStyle(name = "") {
   if (/sand|gravel|aggregate/.test(value)) return { tone: "cream", Icon: Mountain };
   if (/brick|block/.test(value)) return { tone: "coral", Icon: Hammer };
   if (/paint|colour/.test(value)) return { tone: "mint", Icon: PaintBucket };
-  if (/tile|floor/.test(value)) return { tone: "lavender", Icon: Grid3X3 };
+  if (/tile|floor|marble|glass/.test(value)) return { tone: "lavender", Icon: Grid3X3 };
+  if (/plumb|pipe|sanitary|faucet|sink|tank/.test(value)) return { tone: "blue", Icon: Wrench };
+  if (/electr|switch|socket|mcb|wire|cable|light/.test(value)) return { tone: "sand", Icon: Sparkles };
+  if (/carpentry|timber|plywood|hpl|wood/.test(value)) return { tone: "coral", Icon: Hammer };
+  if (/hardware|furniture|hinges|lock|handle|fittings/.test(value)) return { tone: "green", Icon: ShieldCheck };
+  if (/chemical|waterproof|sealant|admixture/.test(value)) return { tone: "mint", Icon: Package };
+  if (/launch|arrival|new/.test(value)) return { tone: "blue", Icon: Sparkles };
+  if (/building/.test(value)) return { tone: "sand", Icon: Mountain };
   return { tone: "green", Icon: Package };
 }
 
@@ -221,9 +242,15 @@ export function getProductFreeShippingPromo(product, promotions = []) {
 }
 
 function productCanOrder(product, selectedCity) {
-  const normalizedCity = selectedCity.trim().toLowerCase();
-  const cityUnavailable = Boolean(normalizedCity && product.available_cities?.length && !product.available_cities.some((city) => city.trim().toLowerCase() === normalizedCity));
-  return !cityUnavailable && (!product.fromSupplier || Number(product.quantity) > 0);
+  const normalizedCity = (selectedCity || "").trim().toLowerCase();
+  const cityUnavailable = Boolean(
+    normalizedCity &&
+    Array.isArray(product.available_cities) &&
+    product.available_cities.length > 0 &&
+    !product.available_cities.some((city) => city && city.trim().toLowerCase() === normalizedCity)
+  );
+  const outOfStock = Boolean(product.fromSupplier && Number(product.quantity) <= 0);
+  return !cityUnavailable && !outOfStock;
 }
 
 function discountPercent(product) {
@@ -261,9 +288,15 @@ function ProductCard({ product, quantity, canAdd, onAdd, onChangeQty, onQuote, o
   const price = Number(product.price);
   const hasFixedPrice = Number.isFinite(price) && price > 0;
   const discount = discountPercent(product);
-  const normalizedCity = selectedCity.trim().toLowerCase();
-  const cityUnavailable = Boolean(normalizedCity && product.available_cities?.length && !product.available_cities.some((city) => city.trim().toLowerCase() === normalizedCity));
-  const canOrder = productCanOrder(product, selectedCity);
+  const normalizedCity = (selectedCity || "").trim().toLowerCase();
+  const cityUnavailable = Boolean(
+    normalizedCity &&
+    Array.isArray(product.available_cities) &&
+    product.available_cities.length > 0 &&
+    !product.available_cities.some((city) => city && city.trim().toLowerCase() === normalizedCity)
+  );
+  const outOfStock = Boolean(product.fromSupplier && Number(product.quantity) <= 0);
+  const canOrder = !cityUnavailable && !outOfStock;
   const detailId = product.product_id || (String(product.id).startsWith('supplier-') ? product.id.replace('supplier-', '') : product.id);
   const detailHref = `/ShopNow/${detailId}`;
 
@@ -278,67 +311,61 @@ function ProductCard({ product, quantity, canAdd, onAdd, onChangeQty, onQuote, o
       )}
       <Link
         href={detailHref}
-        target="_blank"
-        rel="noopener noreferrer"
         className="store-product-image-button"
         aria-label={`View ${product.name} details`}
       >
         <ProductVisual image={productImage} category={product.category} name={product.name} />
       </Link>
       <div className="store-product-details">
-        <span className={`store-product-tag ${!canOrder ? 'store-product-tag-unavailable' : ''}`}>
-          {canOrder ? 'Available' : 'Unavailable'}
-        </span>
+        {/* Delivery / Trust & Promotion Line */}
+        <div className="store-card-promo-section">
+          <div className="store-delivery-trust-row">
+            <span className="store-trust-item">
+              <CreditCard size={11} /> Pay on Delivery
+            </span>
+          </div>
+
+          {activePromos.length > 0 ? (
+            activePromos.slice(0, 1).map((promo) => {
+              const isFreeShipping = promo.promo_type === 'free_shipping';
+              const promoSpendText = promo.min_cart_value > 0 ? `on orders above ${formatPromoSpend(promo.min_cart_value)}` : 'on all orders';
+              return (
+                <div key={promo.id || promo.name} className="store-card-blue-promo">
+                  <Truck size={12} />
+                  <span>{isFreeShipping ? 'Free Delivery' : `${promo.discount_value}% Discount`} {promoSpendText}</span>
+                </div>
+              );
+            })
+          ) : (
+            <div className="store-card-blue-promo">
+              <Truck size={12} />
+              <span>Free Delivery on orders above ₹500</span>
+            </div>
+          )}
+        </div>
+
+        {/* Product Title */}
         <Link
           href={detailHref}
-          target="_blank"
-          rel="noopener noreferrer"
           className="store-product-title"
+          title={product.name}
         >
           <h3>{product.name}</h3>
         </Link>
-        <p className="store-product-category">{(typeof product.category === 'object' ? product.category?.name : product.category) || ''}{product.unit ? ` · ${product.unit}` : ""}</p>
 
-        {/* Price row */}
+        {/* Price row (MRP strikethrough + Current Price) */}
         <div className="store-product-price-slot">
           {hasFixedPrice ? (
             <div className="store-product-price">
-              {Number(product.compare_at_price) > price && <del>₹{Number(product.compare_at_price).toLocaleString('en-IN')}</del>}
-              <strong>₹{price.toLocaleString('en-IN')} / {displayUnit(product.unit)}</strong>
+              {Number(product.compare_at_price) > price && (
+                <del>₹{Number(product.compare_at_price).toLocaleString('en-IN')}</del>
+              )}
+              <strong>₹{price.toLocaleString('en-IN')}</strong>
             </div>
           ) : null}
         </div>
 
-        {/* Promotion Strip(s) (HomeRun Image 2 style - supports ANY active promotion) */}
-        {activePromos.slice(0, 2).map((promo) => {
-          const isFreeShipping = promo.promo_type === 'free_shipping';
-          const isFlat = promo.promo_type === 'flat';
-          const isPercent = promo.promo_type === 'percentage';
-
-          const stickerLabel = isFreeShipping ? 'FREE' : isFlat ? 'FLAT' : 'Special';
-          const stickerVal = isFreeShipping ? 'SHIP' : isPercent ? `${promo.discount_value}%` : `₹${Number(promo.discount_value).toLocaleString('en-IN')}`;
-          const promoTitle = isFreeShipping ? 'Free Delivery' : 'Discount';
-          const promoSpendText = promo.min_cart_value > 0 ? `on orders above ${formatPromoSpend(promo.min_cart_value)}` : 'on all orders';
-
-          return (
-            <div
-              key={promo.id || promo.name}
-              className={`store-homerun-promo-strip ${isFreeShipping ? 'store-homerun-promo-shipping' : ''}`}
-              title={promo.description || promo.name}
-            >
-              <div className={`store-promo-sticker ${isFreeShipping ? 'store-promo-sticker-shipping' : ''}`}>
-                <span className="store-promo-sticker-label">{stickerLabel}</span>
-                <span className="store-promo-sticker-pct">{stickerVal}</span>
-              </div>
-              <div className="store-promo-text">
-                <strong className="store-promo-title">{promoTitle}</strong>
-                <span className="store-promo-sub">{promoSpendText}</span>
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Bulk Prices link (Image 2 style: Unlock Bulk Prices of ₹335) */}
+        {/* Bulk Prices link (Image 2 style: Unlock Bulk Prices of ₹...) */}
         {lowestBulkPrice ? (
           <button
             type="button"
@@ -354,34 +381,225 @@ function ProductCard({ product, quantity, canAdd, onAdd, onChangeQty, onQuote, o
         ) : null}
 
         <div className="store-product-footer">
-          {cityUnavailable && <span className="store-stock-note">Not delivered in {selectedCity}</span>}
-          {product.fromSupplier && Number(product.quantity) === 0 && <span className="store-stock-note">Currently unavailable</span>}
-          <div className="store-product-actions store-product-actions-single">
-            <button type="button" className="store-buy-btn" disabled={!canOrder} onClick={() => onBuy(product)}>{canOrder ? 'Buy Now' : 'Unavailable'}</button>
+          {cityUnavailable && <span className="store-stock-note store-stock-note-red">Out of stock in {selectedCity}</span>}
+          {outOfStock && !cityUnavailable && <span className="store-stock-note store-stock-note-red">Currently out of stock</span>}
+
+          <div className="store-product-actions">
+            <button
+              type="button"
+              className={`store-buy-btn ${!canOrder ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={!canOrder}
+              onClick={() => onBuy(product)}
+            >
+              Buy Now
+            </button>
+
+            {quantity ? (
+              <div className="store-quantity-control" aria-label={`${product.name} quantity in cart`}>
+                <button
+                  type="button"
+                  onClick={() => onChangeQty(product.id, -1)}
+                  aria-label={`Remove one ${product.name}`}
+                >
+                  <Minus size={14} />
+                </button>
+                <span style={{ fontWeight: 800 }}>{quantity}</span>
+                <button
+                  type="button"
+                  disabled={!canOrder}
+                  onClick={() => onChangeQty(product.id, 1)}
+                  aria-label={`Add one ${product.name}`}
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className={`store-add-btn ${!canOrder ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={!canAdd || !canOrder}
+                onClick={(e) => onAdd(product, e)}
+              >
+                {!canOrder ? 'Out of Stock' : 'Add'}
+              </button>
+            )}
           </div>
-          {quantity ? (
-            <div className="store-quantity-control" aria-label={`${product.name} quantity in cart`}>
-              <button type="button" onClick={() => onChangeQty(product.id, -1)} aria-label={`Remove one ${product.name}`}><Minus size={15} /></button>
-              <span>{quantity} in cart</span>
-              <button type="button" onClick={() => onChangeQty(product.id, 1)} aria-label={`Add one ${product.name}`}><Plus size={15} /></button>
-            </div>
-          ) : (
-            <button type="button" className="store-add-btn" disabled={!canAdd || !canOrder} onClick={(e) => onAdd(product, e)}><Plus size={15} /> {!canOrder ? 'Unavailable' : canAdd ? "Add to cart" : "Cart limit reached"}</button>
-          )}
         </div>
       </div>
     </article>
   );
 }
 
-export default function Storefront({ categories, products, offers = [], content, loading, cities, selectedCity, setSelectedCity, cart, onAdd, onChangeQty, onQuote, onBuy, onCheckout, activeCoupon, couponCalculation, couponOffers, onApplyCoupon, onSelectCoupon, onClearCoupon, shippingSettings, shippingQuote, promotions = [] }) {
+
+function FilterPopover({ label, options = [], selected = [], onToggle, onReset, isOpen, onOpen, onClose }) {
+  if (!options || options.length === 0) return null;
+  const selectedCount = selected.length;
+  const hasSelected = selectedCount > 0;
+
+  return (
+    <div className="homerun-filter-popover-wrap">
+      <button
+        type="button"
+        className={`homerun-filter-trigger ${isOpen ? 'is-open' : ''} ${hasSelected ? 'has-selected' : ''}`}
+        onClick={isOpen ? onClose : onOpen}
+        aria-expanded={isOpen}
+      >
+        <span>{label}{hasSelected ? ` (${selectedCount})` : ''}</span>
+        <ChevronDown
+          size={14}
+          style={{
+            transform: isOpen ? 'rotate(180deg)' : 'none',
+            transition: 'transform 0.15s ease'
+          }}
+        />
+      </button>
+
+      {isOpen && (
+        <div className="homerun-filter-popover">
+          <div className="homerun-filter-popover-header">
+            <span>{selectedCount} selected</span>
+            {hasSelected && (
+              <button
+                type="button"
+                className="homerun-filter-popover-reset"
+                onClick={onReset}
+              >
+                Reset
+              </button>
+            )}
+          </div>
+          <div className="homerun-filter-popover-list">
+            {options.map((opt) => {
+              const val = typeof opt === 'object' ? opt.value : opt;
+              const lbl = typeof opt === 'object' ? opt.label : opt;
+              const count = typeof opt === 'object' ? opt.count : undefined;
+              const isChecked = selected.includes(val);
+              return (
+                <label key={val} className="homerun-filter-option">
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => onToggle(val)}
+                  />
+                  <span>{lbl}</span>
+                  {count !== undefined && count !== null && (
+                    <span style={{ color: '#9ca3af', fontSize: '12px' }}>({count})</span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PriceSortPopover({ selectedPriceRanges = [], onTogglePriceRange, onResetPrice, isOpen, onOpen, onClose }) {
+  const hasSelected = selectedPriceRanges.length > 0;
+  return (
+    <div className="homerun-filter-popover-wrap">
+      <button
+        type="button"
+        className={`homerun-filter-trigger ${isOpen ? 'is-open' : ''} ${hasSelected ? 'has-selected' : ''}`}
+        onClick={isOpen ? onClose : onOpen}
+        aria-expanded={isOpen}
+      >
+        <span>Price{hasSelected ? ` (${selectedPriceRanges.length})` : ''}</span>
+        <ChevronDown
+          size={14}
+          style={{
+            transform: isOpen ? 'rotate(180deg)' : 'none',
+            transition: 'transform 0.15s ease'
+          }}
+        />
+      </button>
+
+      {isOpen && (
+        <div className="homerun-filter-popover" style={{ minWidth: 200 }}>
+          <div className="homerun-filter-popover-header">
+            <span>{selectedPriceRanges.length} selected</span>
+            {hasSelected && (
+              <button
+                type="button"
+                className="homerun-filter-popover-reset"
+                onClick={onResetPrice}
+              >
+                Reset
+              </button>
+            )}
+          </div>
+          <div className="homerun-filter-popover-list">
+            {[
+              { label: 'Under ₹500', value: 'under-500' },
+              { label: '₹500 - ₹1,000', value: '500-1000' },
+              { label: '₹1,000 - ₹5,000', value: '1000-5000' },
+              { label: 'Above ₹5,000', value: 'above-5000' },
+            ].map((opt) => (
+              <label key={opt.value} className="homerun-filter-option">
+                <input
+                  type="checkbox"
+                  checked={selectedPriceRanges.includes(opt.value)}
+                  onChange={() => onTogglePriceRange(opt.value)}
+                />
+                <span>{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Storefront({ categories, products, offers = [], content, loading, cities, selectedCity, setSelectedCity, cart, onAdd, onChangeQty, onQuote, onBuy, onCheckout, activeCoupon, couponCalculation, couponOffers, onApplyCoupon, onSelectCoupon, onClearCoupon, shippingSettings, shippingQuote, promotions = [], onOpenLocationModal }) {
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
+  const [selectedParentNav, setSelectedParentNav] = useState(null);
+  const [selectedSubNav, setSelectedSubNav] = useState(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [cityOpen, setCityOpen] = useState(false);
   const [productManagerHref, setProductManagerHref] = useState('');
   const [sortBy, setSortBy] = useState('featured');
-  const [brandFilter, setBrandFilter] = useState('all');
+  const [selectedSubcategories, setSelectedSubcategories] = useState([]);
+  const [selectedBrands, setSelectedBrands] = useState([]);
+  const [selectedThicknesses, setSelectedThicknesses] = useState([]);
+  const [selectedSizes, setSelectedSizes] = useState([]);
+  const [selectedTypes, setSelectedTypes] = useState([]);
+  const [selectedColors, setSelectedColors] = useState([]);
+  const [selectedMaterials, setSelectedMaterials] = useState([]);
+  const [selectedGrades, setSelectedGrades] = useState([]);
+  const [selectedPackSizes, setSelectedPackSizes] = useState([]);
+  const [selectedPriceRanges, setSelectedPriceRanges] = useState([]);
+  const [openFilterMenu, setOpenFilterMenu] = useState(null);
+
+  const toggleFilter = (setList, val) => {
+    setList((prev) => (prev.includes(val) ? prev.filter((item) => item !== val) : [...prev, val]));
+  };
+
+  const resetAttributeFilters = () => {
+    setSelectedSubcategories([]);
+    setSelectedBrands([]);
+    setSelectedThicknesses([]);
+    setSelectedSizes([]);
+    setSelectedTypes([]);
+    setSelectedColors([]);
+    setSelectedMaterials([]);
+    setSelectedGrades([]);
+    setSelectedPackSizes([]);
+    setSelectedPriceRanges([]);
+    setOpenFilterMenu(null);
+  };
+
+  useEffect(() => {
+    const handleGlobalClick = (e) => {
+      if (!e.target.closest('.homerun-filter-popover-wrap')) {
+        setOpenFilterMenu(null);
+      }
+    };
+    document.addEventListener('pointerdown', handleGlobalClick);
+    return () => document.removeEventListener('pointerdown', handleGlobalClick);
+  }, []);
   const [cartOverlayTop, setCartOverlayTop] = useState(0);
   const [couponCode, setCouponCode] = useState('');
   const [couponNotice, setCouponNotice] = useState('');
@@ -393,11 +611,47 @@ export default function Storefront({ categories, products, offers = [], content,
   const storeHeaderRef = useRef(null);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
 
+  const mainCategories = useMemo(() => {
+    return getMainCategories(categories, products);
+  }, [categories, products]);
+
+  const currentParentCategory = useMemo(() => {
+    if (!selectedParentNav || selectedParentNav === 'all') return null;
+    return mainCategories.find((m) => namesMatch(m.label, selectedParentNav) || m.id === selectedParentNav) || null;
+  }, [mainCategories, selectedParentNav]);
+
+  const parentSubcategories = useMemo(() => {
+    if (!currentParentCategory) return [];
+    return getSubcategoriesForParent(currentParentCategory, categories, products);
+  }, [currentParentCategory, categories, products]);
+
   useEffect(() => {
     const timer = setInterval(() => {
       setPlaceholderIndex((prev) => (prev + 1) % SEARCH_PLACEHOLDERS.length);
     }, 2800);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const updateHeaderHeight = () => {
+      if (storeHeaderRef.current) {
+        const height = storeHeaderRef.current.offsetHeight;
+        if (height > 0) {
+          document.documentElement.style.setProperty('--shop-header-height', `${height}px`);
+        }
+      }
+    };
+    updateHeaderHeight();
+    window.addEventListener('resize', updateHeaderHeight);
+    let observer = null;
+    if (typeof ResizeObserver !== 'undefined' && storeHeaderRef.current) {
+      observer = new ResizeObserver(updateHeaderHeight);
+      observer.observe(storeHeaderRef.current);
+    }
+    return () => {
+      window.removeEventListener('resize', updateHeaderHeight);
+      if (observer) observer.disconnect();
+    };
   }, []);
 
   const activeCatObj = useMemo(() => {
@@ -534,24 +788,51 @@ export default function Storefront({ categories, products, offers = [], content,
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const requested = params.get('category');
-    const query = params.get('q') || '';
-    const match = categories.find((category) => category.name.toLowerCase() === requested?.toLowerCase());
-    if (!match && !query) return undefined;
-    const frame = requestAnimationFrame(() => {
-      if (match) setActiveCategory(match.id);
-      if (query) setSearch(query);
-    });
-    return () => cancelAnimationFrame(frame);
+    const syncFromUrl = () => {
+      if (typeof window === 'undefined') return;
+      const params = new URLSearchParams(window.location.search);
+      const catParam = params.get('category');
+      const subParam = params.get('subcategory');
+      const query = params.get('q') || '';
+
+      if (query) {
+        setSearch(query);
+      } else {
+        setSearch('');
+      }
+
+      if (catParam || subParam) {
+        const resolved = resolveParentAndSubFromParam(catParam, subParam, categories);
+        setSelectedParentNav(resolved.parentLabel);
+        setSelectedSubNav(resolved.subLabel);
+        if (resolved.subLabel) {
+          const found = findCategoryByLabel(resolved.subLabel, categories);
+          if (found) setActiveCategory(found.id);
+        } else if (resolved.parentLabel) {
+          const found = findCategoryByLabel(resolved.parentLabel, categories);
+          if (found) setActiveCategory(found.id);
+        }
+      } else {
+        setSelectedParentNav(null);
+        setSelectedSubNav(null);
+        setActiveCategory('all');
+      }
+    };
+
+    syncFromUrl();
+    window.addEventListener('popstate', syncFromUrl);
+    return () => window.removeEventListener('popstate', syncFromUrl);
   }, [categories]);
 
   useEffect(() => {
     const checkProductManagerAccess = () => {
+      const activeRole = localStorage.getItem('mtboss.activeRole');
       let hasAdminRole = false;
       try { hasAdminRole = JSON.parse(localStorage.getItem('user') || '{}').role === 'admin'; }
       catch { /* Ignore stale user data. */ }
-      const hasAdminAccess = Boolean(localStorage.getItem('admin-token')) || (Boolean(localStorage.getItem('token')) && hasAdminRole);
+      const hasAdminAccess =
+        activeRole !== 'agent'
+        && (Boolean(localStorage.getItem('admin-token')) || (Boolean(localStorage.getItem('token')) && hasAdminRole));
       if (hasAdminAccess) setProductManagerHref('/dashboard?tab=shop-products');
       else if (localStorage.getItem('vendor-token')) setProductManagerHref('/vendor/dashboard?tab=products');
       else setProductManagerHref('');
@@ -663,39 +944,182 @@ export default function Storefront({ categories, products, offers = [], content,
   };
 
   const searchTerm = search.trim().toLowerCase();
-  const visible = dedupeProducts(catalog.filter((product) => {
-    const catId = product.category?.id != null ? String(product.category.id) : '';
-    const catName = (typeof product.category === 'object' ? product.category?.name : (product.category || '')).toLowerCase().trim();
-    const activeCatObj = categories.find((c) => String(c.id) === String(activeCategory));
-    const activeCatName = activeCatObj ? activeCatObj.name.toLowerCase().trim() : String(activeCategory).toLowerCase().trim();
-    const matchesCategory = activeCategory === "all"
-      || catId === String(activeCategory)
-      || (activeCatObj && catId === String(activeCatObj.id))
-      || catName === activeCatName;
-    const matchesBrand = brandFilter === 'all' || product.brand === brandFilter;
 
-    if (!matchesCategory || !matchesBrand) return false;
-    if (!searchTerm) return true;
-
-    const subName = (product.subcategory || '').toLowerCase();
-    const prodName = (product.name || '').toLowerCase();
-    const brandName = (product.brand || '').toLowerCase();
-    const searchableText = `${prodName} ${catName} ${subName} ${brandName}`;
-
-    // Direct substring
-    if (searchableText.includes(searchTerm)) return true;
-
-    // Word/alias match for subcategory searches like "Hinges, Channels & Handles"
-    const searchWords = searchTerm.split(/[\s,&/]+/).filter((w) => w.length > 2);
-    if (searchWords.length > 0 && searchWords.some((word) => subName.includes(word) || prodName.includes(word))) {
-      return true;
+  const goToAllCategories = ({ noScroll = false } = {}) => {
+    setSelectedParentNav(null);
+    setSelectedSubNav(null);
+    setActiveCategory('all');
+    setSearch('');
+    resetAttributeFilters();
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('category');
+      url.searchParams.delete('subcategory');
+      url.searchParams.delete('q');
+      window.history.pushState({}, '', url);
+      if (!noScroll) window.scrollTo({ top: 0, behavior: 'smooth' });
     }
+  };
 
-    if (subName && searchTerm.includes(subName)) return true;
+  const handleExploreParentCategory = (parent, { noScroll = false } = {}) => {
+    const pLabel = typeof parent === 'object' ? parent.label || parent.name : parent;
+    const parentDef = mainCategories.find((m) => namesMatch(m.label, pLabel) || m.id === parent?.id);
 
-    return false;
-  }).sort((a, b) => sortBy === 'price-asc' ? (Number(a.price) || Infinity) - (Number(b.price) || Infinity) : sortBy === 'price-desc' ? (Number(b.price) || 0) - (Number(a.price) || 0) : sortBy === 'name' ? a.name.localeCompare(b.name) : 0));
-  const brands = [...new Set(catalog.filter((product) => activeCategory === 'all' || String(product.category?.id || product.category) === String(activeCategory)).map((product) => product.brand).filter(Boolean))].sort();
+    if (parentDef?.isDirect) {
+      setSelectedParentNav(parentDef.label);
+      setSelectedSubNav(parentDef.label);
+      setSearch('');
+      resetAttributeFilters();
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('category', parentDef.label);
+        url.searchParams.delete('subcategory');
+        url.searchParams.delete('q');
+        window.history.pushState({}, '', url);
+      }
+    } else {
+      setSelectedParentNav(parentDef?.label || pLabel);
+      setSelectedSubNav(null);
+      setSearch('');
+      resetAttributeFilters();
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('category', parentDef?.label || pLabel);
+        url.searchParams.delete('subcategory');
+        url.searchParams.delete('q');
+        window.history.pushState({}, '', url);
+      }
+    }
+    if (typeof window !== 'undefined') {
+      if (!noScroll) window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const handleSelectSubcategory = (subLabel, parentLabel = null, { noScroll = false } = {}) => {
+    const parent = parentLabel || selectedParentNav;
+    setSelectedParentNav(parent);
+    setSelectedSubNav(subLabel);
+    setSearch('');
+    resetAttributeFilters();
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (parent) url.searchParams.set('category', parent);
+      if (subLabel) url.searchParams.set('subcategory', subLabel);
+      url.searchParams.delete('q');
+      window.history.pushState({}, '', url);
+      if (!noScroll) window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const availableAttributes = useMemo(() => {
+    return collectUniqueAttributes(
+      catalog.filter((p) => {
+        if (selectedSubNav) return productMatchesCategoryAndSub(p, selectedParentNav, selectedSubNav);
+        if (selectedParentNav && selectedParentNav !== 'all') return productMatchesCategoryAndSub(p, selectedParentNav, null);
+        if (activeCategory !== 'all') {
+          const catId = p.category?.id != null ? String(p.category.id) : '';
+          const catName = (typeof p.category === 'object' ? p.category?.name : (p.category || '')).toLowerCase().trim();
+          const activeCatObj = categories.find((c) => String(c.id) === String(activeCategory));
+          const activeCatName = activeCatObj ? activeCatObj.name.toLowerCase().trim() : String(activeCategory).toLowerCase().trim();
+          return catId === String(activeCategory) || (activeCatObj && catId === String(activeCatObj.id)) || catName === activeCatName;
+        }
+        return true;
+      }),
+      selectedParentNav || (typeof activeCategory === 'string' ? activeCategory : ''),
+      selectedSubNav
+    );
+  }, [catalog, selectedSubNav, selectedParentNav, activeCategory, categories]);
+
+  const hasActiveAttributeFilters = selectedSubcategories.length > 0 || selectedBrands.length > 0 || selectedThicknesses.length > 0 || selectedSizes.length > 0 || selectedTypes.length > 0 || selectedColors.length > 0 || selectedMaterials.length > 0 || selectedGrades.length > 0 || selectedPackSizes.length > 0 || selectedPriceRanges.length > 0;
+
+  const visible = dedupeProducts(
+    catalog.filter((product) => {
+      // 1. Hierarchy Match
+      if (selectedSubNav) {
+        if (!productMatchesCategoryAndSub(product, selectedParentNav, selectedSubNav)) {
+          return false;
+        }
+      } else if (selectedParentNav && selectedParentNav !== 'all') {
+        if (!productMatchesCategoryAndSub(product, selectedParentNav, null)) {
+          return false;
+        }
+      } else if (activeCategory !== 'all') {
+        const catId = product.category?.id != null ? String(product.category.id) : '';
+        const catName = (typeof product.category === 'object' ? product.category?.name : (product.category || '')).toLowerCase().trim();
+        const activeCatObj = categories.find((c) => String(c.id) === String(activeCategory));
+        const activeCatName = activeCatObj ? activeCatObj.name.toLowerCase().trim() : String(activeCategory).toLowerCase().trim();
+        const matchesCategory = catId === String(activeCategory)
+          || (activeCatObj && catId === String(activeCatObj.id))
+          || catName === activeCatName;
+        if (!matchesCategory) return false;
+      }
+
+      // 1b. Multi-Subcategory Match from Category Popover
+      if (selectedSubcategories.length > 0) {
+        const matchesAnySub = selectedSubcategories.some((sub) =>
+          productMatchesCategoryAndSub(product, selectedParentNav, sub)
+        );
+        if (!matchesAnySub) return false;
+      }
+
+      // 2. Brand Match
+      if (selectedBrands.length > 0 && !selectedBrands.includes(product.brand)) return false;
+
+      // 3. Dynamic Attribute Matches (HomeRun Style)
+      if (selectedThicknesses.length > 0 && !selectedThicknesses.some((th) => matchesAttribute(product, 'thickness', th))) return false;
+      if (selectedSizes.length > 0 && !selectedSizes.some((sz) => matchesAttribute(product, 'size', sz))) return false;
+      if (selectedTypes.length > 0 && !selectedTypes.some((tp) => matchesAttribute(product, 'type', tp))) return false;
+      if (selectedColors.length > 0 && !selectedColors.some((c) => matchesAttribute(product, 'color', c))) return false;
+      if (selectedMaterials.length > 0 && !selectedMaterials.some((m) => matchesAttribute(product, 'material', m))) return false;
+      if (selectedGrades.length > 0 && !selectedGrades.some((gr) => matchesAttribute(product, 'grade', gr))) return false;
+      if (selectedPackSizes.length > 0 && !selectedPackSizes.some((ps) => matchesAttribute(product, 'pack_size', ps))) return false;
+
+      // 4. Price Range Match
+      if (selectedPriceRanges.length > 0) {
+        const pPrice = Number(product.price) || 0;
+        const matchesPrice = selectedPriceRanges.some((range) => {
+          if (range === 'under-500') return pPrice < 500;
+          if (range === '500-1000') return pPrice >= 500 && pPrice <= 1000;
+          if (range === '1000-5000') return pPrice > 1000 && pPrice <= 5000;
+          if (range === 'above-5000') return pPrice > 5000;
+          return true;
+        });
+        if (!matchesPrice) return false;
+      }
+
+      // 3. Search Term Match
+      if (searchTerm) {
+        const catName = (typeof product.category === 'object' ? product.category?.name : (product.category || '')).toLowerCase().trim();
+        const subName = (product.subcategory || '').toLowerCase();
+        const prodName = (product.name || '').toLowerCase();
+        const brandName = (product.brand || '').toLowerCase();
+        const attrs = extractProductAttributes(product);
+        const attrText = `${attrs.thickness} ${attrs.size} ${attrs.type} ${attrs.color} ${attrs.material} ${attrs.grade || ''} ${attrs.pack_size || ''}`.toLowerCase();
+        const searchableText = `${prodName} ${catName} ${subName} ${brandName} ${attrText}`;
+
+        if (searchableText.includes(searchTerm)) return true;
+
+        const searchWords = searchTerm.split(/[\s,&/]+/).filter((w) => w.length > 2);
+        if (searchWords.length > 0 && searchWords.some((word) => subName.includes(word) || prodName.includes(word) || attrText.includes(word))) {
+          return true;
+        }
+        if (subName && searchTerm.includes(subName)) return true;
+        return false;
+      }
+
+      return true;
+    })
+  ).sort((a, b) =>
+    sortBy === 'price-asc'
+      ? (Number(a.price) || Infinity) - (Number(b.price) || Infinity)
+      : sortBy === 'price-desc'
+      ? (Number(b.price) || 0) - (Number(a.price) || 0)
+      : sortBy === 'name'
+      ? a.name.localeCompare(b.name)
+      : 0
+  );
+
+  const brands = [...new Set(visible.map((product) => product.brand).filter(Boolean))].sort();
   const featured = dedupeProducts(categories.map((category) => catalog.find((product) => product.category?.id === category.id)).filter(Boolean)).slice(0, 8);
   const deals = dedupeProducts(catalog.filter((product) => product.is_featured_deal === true).sort((a, b) => discountPercent(b) - discountPercent(a))).slice(0, 6);
   const arrivals = dedupeProducts(
@@ -707,7 +1131,104 @@ export default function Storefront({ categories, products, offers = [], content,
         if (timeB !== timeA) return timeB - timeA;
         return (Number(b.product_id || b.id) || 0) - (Number(a.product_id || a.id) || 0);
       })
-  ).slice(0, 8);
+  );
+  
+  // Options calculation for HomeRun popovers
+  const baseHierarchyProducts = useMemo(() => {
+    return catalog.filter((p) => {
+      if (selectedSubNav) return productMatchesCategoryAndSub(p, selectedParentNav, selectedSubNav);
+      if (selectedParentNav && selectedParentNav !== 'all') return productMatchesCategoryAndSub(p, selectedParentNav, null);
+      if (activeCategory !== 'all') {
+        const catId = p.category?.id != null ? String(p.category.id) : '';
+        const catName = (typeof p.category === 'object' ? p.category?.name : (p.category || '')).toLowerCase().trim();
+        const activeCatObj = categories.find((c) => String(c.id) === String(activeCategory));
+        const activeCatName = activeCatObj ? activeCatObj.name.toLowerCase().trim() : String(activeCategory).toLowerCase().trim();
+        return catId === String(activeCategory) || (activeCatObj && catId === String(activeCatObj.id)) || catName === activeCatName;
+      }
+      return true;
+    });
+  }, [catalog, selectedSubNav, selectedParentNav, activeCategory, categories]);
+
+  const popoverCategoryOptions = useMemo(() => {
+    if (parentSubcategories.length > 0) {
+      return parentSubcategories.map((sub) => ({
+        label: sub.name,
+        value: sub.name,
+        count: catalog.filter((p) => productMatchesCategoryAndSub(p, currentParentCategory?.label, sub.name)).length
+      })).filter((opt) => opt.count > 0);
+    }
+    return mainCategories.map((cat) => ({
+      label: cat.label,
+      value: cat.label,
+      count: catalog.filter((p) => productMatchesCategoryAndSub(p, cat.label, null)).length
+    })).filter((opt) => opt.count > 0);
+  }, [parentSubcategories, mainCategories, catalog, currentParentCategory]);
+
+  const popoverBrandOptions = useMemo(() => {
+    const uniqueBrands = [...new Set(baseHierarchyProducts.map((p) => p.brand).filter(Boolean))].sort();
+    return uniqueBrands.map((b) => ({
+      label: b,
+      value: b,
+      count: baseHierarchyProducts.filter((p) => p.brand === b).length
+    })).filter((opt) => opt.count > 0);
+  }, [baseHierarchyProducts]);
+
+  const popoverTypeOptions = useMemo(() => {
+    return availableAttributes.types.map((t) => ({
+      label: t,
+      value: t,
+      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'type', t)).length
+    })).filter((opt) => opt.count > 0);
+  }, [availableAttributes.types, baseHierarchyProducts]);
+
+  const popoverGradeOptions = useMemo(() => {
+    return availableAttributes.grades.map((g) => ({
+      label: g,
+      value: g,
+      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'grade', g)).length
+    })).filter((opt) => opt.count > 0);
+  }, [availableAttributes.grades, baseHierarchyProducts]);
+
+  const popoverPackSizeOptions = useMemo(() => {
+    return availableAttributes.packSizes.map((ps) => ({
+      label: ps,
+      value: ps,
+      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'pack_size', ps)).length
+    })).filter((opt) => opt.count > 0);
+  }, [availableAttributes.packSizes, baseHierarchyProducts]);
+
+  const popoverThicknessOptions = useMemo(() => {
+    return availableAttributes.thicknesses.map((th) => ({
+      label: th,
+      value: th,
+      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'thickness', th)).length
+    })).filter((opt) => opt.count > 0);
+  }, [availableAttributes.thicknesses, baseHierarchyProducts]);
+
+  const popoverSizeOptions = useMemo(() => {
+    return availableAttributes.sizes.map((sz) => ({
+      label: sz,
+      value: sz,
+      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'size', sz)).length
+    })).filter((opt) => opt.count > 0);
+  }, [availableAttributes.sizes, baseHierarchyProducts]);
+
+  const popoverColorOptions = useMemo(() => {
+    return availableAttributes.colors.map((c) => ({
+      label: c,
+      value: c,
+      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'color', c)).length
+    })).filter((opt) => opt.count > 0);
+  }, [availableAttributes.colors, baseHierarchyProducts]);
+
+  const popoverMaterialOptions = useMemo(() => {
+    return availableAttributes.materials.map((m) => ({
+      label: m,
+      value: m,
+      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'material', m)).length
+    })).filter((opt) => opt.count > 0);
+  }, [availableAttributes.materials, baseHierarchyProducts]);
+
   const cartCount = useMemo(() => {
     if (!Array.isArray(cart) || cart.length === 0) return 0;
     const uniqueCategories = new Set();
@@ -741,20 +1262,48 @@ export default function Storefront({ categories, products, offers = [], content,
 
   const chooseCategory = (id, options = {}) => {
     const nextSearch = typeof options.search === "string" ? options.search : "";
+    const parentCategory = options.parentCategory || null;
+    const subcategory = options.subcategory || null;
+    const exploreParent = Boolean(options.exploreParent);
+
+    if (id === 'all' && !parentCategory && !nextSearch) {
+      goToAllCategories();
+      return;
+    }
+
+    if (exploreParent && parentCategory) {
+      handleExploreParentCategory(parentCategory);
+      return;
+    }
+
+    if (parentCategory && subcategory) {
+      handleSelectSubcategory(subcategory, parentCategory);
+      return;
+    }
+
+    if (nextSearch && parentCategory) {
+      handleSelectSubcategory(nextSearch, parentCategory);
+      return;
+    }
+
     setActiveCategory(id);
-    setBrandFilter('all');
+    resetAttributeFilters();
     setSearch(nextSearch);
-    const url = new URL(window.location.href);
     const selected = categories.find((category) => String(category.id) === String(id));
+    if (selected) {
+      const resolved = resolveParentAndSubFromParam(selected.name, null, categories);
+      setSelectedParentNav(resolved.parentLabel);
+      setSelectedSubNav(resolved.subLabel);
+    }
+    const url = new URL(window.location.href);
     if (selected) url.searchParams.set('category', selected.name);
     else url.searchParams.delete('category');
     if (nextSearch) url.searchParams.set('q', nextSearch);
     else url.searchParams.delete('q');
     window.history.replaceState(window.history.state, '', url);
     if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (!noScroll) window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-    // Immediately drop focus from the clicked card so :focus style never sticks during scroll
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   };
 
@@ -764,6 +1313,7 @@ export default function Storefront({ categories, products, offers = [], content,
       <div className="storefront-mobile">
         <MobileStorefront
           categories={categories}
+          mainCategories={mainCategories}
           products={products}
           catalog={catalog}
           content={content}
@@ -786,6 +1336,7 @@ export default function Storefront({ categories, products, offers = [], content,
           onSelectCoupon={onSelectCoupon}
           onClearCoupon={onClearCoupon}
           promotions={promotions}
+          onOpenLocationModal={onOpenLocationModal}
         />
       </div>
 
@@ -795,7 +1346,7 @@ export default function Storefront({ categories, products, offers = [], content,
           <div className="store-header-inner">
             <Link href="/" className="store-brand" aria-label="MTBOSS home"><picture className="store-brand-picture"><Image src="/logo.png" alt="MTBOSS" width={46} height={46} sizes="(max-width: 560px) 34px, (max-width: 800px) 39px, 46px" /></picture><small>SHOP</small></Link>
             <div className="store-location-wrap">
-              <button type="button" className="store-location" onClick={() => setCityOpen(!cityOpen)} aria-expanded={cityOpen}>
+              <button type="button" className="store-location" onClick={() => (onOpenLocationModal ? onOpenLocationModal() : setCityOpen(!cityOpen))} aria-expanded={cityOpen}>
                 <MapPin size={20} /><span><strong>Deliver to {selectedCity || "your city"}</strong><small>{selectedCity ? "Change location" : "Select delivery location"}</small></span><ChevronDown size={16} />
               </button>
               {cityOpen && <div className="store-city-popover"><label htmlFor="store-city">Choose your city</label><select id="store-city" value={selectedCity} onChange={(e) => { setSelectedCity(e.target.value); setCityOpen(false); }}><option value="">Select city</option>{[...new Set(cities)].map((city) => <option key={city} value={city}>{city}</option>)}</select><p>Availability is checked at checkout.</p></div>}
@@ -816,6 +1367,8 @@ export default function Storefront({ categories, products, offers = [], content,
             </Link>
             <Link
               href="/ShopNow/cart"
+              id="desktop-store-cart-btn"
+              data-cart-target="desktop-cart"
               className="store-cart-button"
               aria-label="Shopping Cart"
             >
@@ -831,25 +1384,57 @@ export default function Storefront({ categories, products, offers = [], content,
           products={products}
           activeCategory={activeCategory}
           activeSearch={search}
+          activeParentCategory={selectedParentNav}
+          activeSubcategory={selectedSubNav}
           onSelectCategory={chooseCategory}
         />
 
         <main className="store-main">
-          {/* Breadcrumb Navigation */}
+          {/* Breadcrumb Navigation (3-Level Flow) */}
           <div className="store-breadcrumb">
             <Link href="/">Home</Link>
             <span>/</span>
-            {!searchTerm && activeCategory === "all" ? (
+            {!selectedParentNav && !selectedSubNav && !searchTerm && activeCategory === "all" ? (
               <strong>Shop materials</strong>
             ) : (
               <>
-                <button type="button" className="store-breadcrumb-btn" onClick={() => chooseCategory("all")}>
+                <button type="button" className="store-breadcrumb-btn" onClick={goToAllCategories}>
                   Shop materials
                 </button>
-                <span>/</span>
-                <strong className="store-breadcrumb-btn is-current">
-                  {searchTerm && !activeCatObj ? `Search: “${search}”` : (activeCatObj?.name || 'Category')}
-                </strong>
+                {selectedParentNav && (
+                  <>
+                    <span>/</span>
+                    {selectedSubNav ? (
+                      <button
+                        type="button"
+                        className="store-breadcrumb-btn"
+                        onClick={() => handleExploreParentCategory(currentParentCategory || selectedParentNav)}
+                      >
+                        {currentParentCategory?.label || selectedParentNav}
+                      </button>
+                    ) : (
+                      <strong className="store-breadcrumb-btn is-current">
+                        {currentParentCategory?.label || selectedParentNav}
+                      </strong>
+                    )}
+                  </>
+                )}
+                {selectedSubNav && (
+                  <>
+                    <span>/</span>
+                    <strong className="store-breadcrumb-btn is-current">
+                      {selectedSubNav}
+                    </strong>
+                  </>
+                )}
+                {searchTerm && !selectedSubNav && (
+                  <>
+                    <span>/</span>
+                    <strong className="store-breadcrumb-btn is-current">
+                      Search: “{search}”
+                    </strong>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -860,7 +1445,7 @@ export default function Storefront({ categories, products, offers = [], content,
               <span className="store-eyebrow">{content.hero_kicker}</span>
               <h1>{content.hero_title} <em>{content.hero_highlight}</em></h1>
               <p>{content.hero_description}</p>
-              <button type="button" className="store-hero-button" onClick={() => chooseCategory("all")}>
+              <button type="button" className="store-hero-button" onClick={goToAllCategories}>
                 {content.hero_button} <ArrowRight size={18} />
               </button>
             </div>
@@ -870,7 +1455,7 @@ export default function Storefront({ categories, products, offers = [], content,
             </div>
           </section>
 
-          {/* 4 Value Proposition Badges (Always shown) */}
+          {/* 4 Value Proposition Badges */}
           <div className="store-hero-value-props" aria-label="Store highlights">
             <div className="store-value-badge">
               <Truck size={22} style={{ color: "var(--brand-blue, #0077c8)", flexShrink: 0 }} />
@@ -890,289 +1475,589 @@ export default function Storefront({ categories, products, offers = [], content,
             </div>
           </div>
 
-          {!searchTerm && activeCategory === "all" ? (
-            /* ── HOMEPAGE OVERVIEW FLOW (HomeRun Style) ── */
+          {!selectedParentNav && !selectedSubNav && !searchTerm && activeCategory === "all" ? (
+            /* ── LEVEL 1: HOMEPAGE OVERVIEW (Navbar Main Categories Grid) ── */
             <>
               <section className="store-section" aria-labelledby="store-categories-heading">
-
-                <div className="store-section-heading"><div><span className="store-section-kicker">START SHOPPING</span><h2 id="store-categories-heading">{content.categories_heading}</h2></div><span className="store-section-note">Pick a category to see materials</span></div>
-                {loading ? <div className="store-loading">Loading categories...</div> : categories.length ? <div className="store-category-grid">{categories.map((category) => {
-                  const { tone, Icon } = categoryStyle(category.name);
-                  const catImgs = Array.from(new Set([
-                    category.image,
-                    ...(Array.isArray(category.images) ? category.images : [])
-                  ].filter(Boolean)));
-                  return <button type="button" key={category.id} className={`store-category store-category-${tone}`} onClick={() => chooseCategory(category.id)}>
-                    <span className="store-category-art" style={{ position: 'relative', display: 'block', overflow: 'hidden' }}>
-                      {catImgs.length > 0 ? (
-                        <AutoSwipeGallery images={catImgs} alt={category.name} delay={3000} />
-                      ) : (
-                        <Icon size={37} strokeWidth={1.5} />
-                      )}
-                    </span>
-                    <strong>{category.name}</strong>
-                    <span>Explore <ArrowRight size={13} /></span>
-                  </button>;
-                })}</div> : <div className="store-empty">Categories are being added. Please check back soon.</div>}
-              </section>
-
-              {deals.length > 0 && <section className="store-section" aria-labelledby="store-deals-heading"><div className="store-section-heading"><div><span className="store-section-kicker">CURRENT OFFERS</span><h2 id="store-deals-heading">{content.deals_heading}</h2></div><span className="store-section-note">Request today&apos;s best supplier quote</span></div><div className="store-product-grid">{deals.map((product) => <ProductCard key={product.id} product={product} quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0} canAdd={cart.length < 20} onAdd={onAdd} onChangeQty={onChangeQty} onQuote={onQuote} onBuy={onBuy} selectedCity={selectedCity} promotions={promotions} shippingSettings={shippingSettings} />)}</div></section>}
-
-              {arrivals.length > 0 && <section className="store-section" aria-labelledby="store-arrivals-heading"><div className="store-section-heading"><div><span className="store-section-kicker">JUST ADDED</span><h2 id="store-arrivals-heading">{content.arrivals_heading}</h2></div><span className="store-section-note">Recently added products</span></div><div className="store-product-grid">{arrivals.map((product) => <ProductCard key={product.id} product={product} quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0} canAdd={cart.length < 20} onAdd={onAdd} onChangeQty={onChangeQty} onQuote={onQuote} onBuy={onBuy} selectedCity={selectedCity} promotions={promotions} shippingSettings={shippingSettings} />)}</div></section>}
-
-              <section className="store-section store-catalog" id="store-products" aria-labelledby="store-products-heading">
-                <div className="store-homerun-header">
-                  <h2 className="store-homerun-title" id="store-products-heading">
-                    {content.catalog_heading || "All Materials"}
-                  </h2>
-                  <div className="store-homerun-filter-bar">
-                    <div className="store-homerun-filter-left">
-                      <span className="store-homerun-filter-label">Filter:</span>
-                      <div className="store-homerun-select-wrap">
-                        <select
-                          value={activeCategory}
-                          onChange={(e) => chooseCategory(e.target.value)}
-                          className="store-homerun-filter-select"
-                          aria-label="Filter by Category"
-                        >
-                          <option value="all">Category: All</option>
-                          {categories.map((cat) => (
-                            <option key={cat.id} value={cat.id}>{cat.name}</option>
-                          ))}
-                        </select>
-                        <ChevronDown size={14} className="store-homerun-select-icon" />
-                      </div>
-
-                      {brands.length > 0 && (
-                        <div className="store-homerun-select-wrap">
-                          <select
-                            value={brandFilter}
-                            onChange={(e) => setBrandFilter(e.target.value)}
-                            className="store-homerun-filter-select"
-                            aria-label="Filter by Brand"
-                          >
-                            <option value="all">Brand: All</option>
-                            {brands.map((brand) => (
-                              <option key={brand} value={brand}>{brand}</option>
-                            ))}
-                          </select>
-                          <ChevronDown size={14} className="store-homerun-select-icon" />
-                        </div>
-                      )}
-
-                      <div className="store-homerun-select-wrap">
-                        <select
-                          value={sortBy.startsWith('price') ? sortBy : 'all'}
-                          onChange={(e) => {
-                            if (e.target.value !== 'all') setSortBy(e.target.value);
-                          }}
-                          className="store-homerun-filter-select"
-                          aria-label="Filter by Price"
-                        >
-                          <option value="all">Price ▾</option>
-                          <option value="price-asc">Price: Low to High</option>
-                          <option value="price-desc">Price: High to Low</option>
-                        </select>
-                        <ChevronDown size={14} className="store-homerun-select-icon" />
-                      </div>
-                    </div>
-
-                    <div className="store-homerun-filter-right">
-                      <span className="store-homerun-product-count">
-                        {visible.length} {visible.length === 1 ? 'product' : 'products'}
-                      </span>
-                      <div className="store-homerun-sort-wrap">
-                        <span className="store-homerun-sort-label">Sort by:</span>
-                        <div className="store-homerun-select-wrap">
-                          <select
-                            value={sortBy}
-                            onChange={(e) => setSortBy(e.target.value)}
-                            className="store-homerun-sort-select"
-                            aria-label="Sort by"
-                          >
-                            <option value="featured">Relevance</option>
-                            <option value="price-asc">Price: Low to High</option>
-                            <option value="price-desc">Price: High to Low</option>
-                            <option value="name">Name: A to Z</option>
-                          </select>
-                          <ChevronDown size={14} className="store-homerun-select-icon" />
-                        </div>
-                      </div>
-                    </div>
+                <div className="store-section-heading">
+                  <div>
+                    <span className="store-section-kicker">START SHOPPING</span>
+                    <h2 id="store-categories-heading">{content.categories_heading || "Shop by category"}</h2>
                   </div>
+                  <span className="store-section-note">Pick a category to explore subcategories</span>
                 </div>
 
-                {loading ? <div className="store-loading">Loading materials...</div> : visible.length ? <div className="store-product-grid">{visible.map((product) => <ProductCard key={product.id} product={product} quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0} canAdd={cart.length < 20} onAdd={onAdd} onChangeQty={onChangeQty} onQuote={onQuote} onBuy={onBuy} selectedCity={selectedCity} promotions={promotions} shippingSettings={shippingSettings} />)}</div> : <div className="store-empty">No materials found. Try another search or category.</div>}
+                {loading ? (
+                  <div className="store-loading">Loading categories...</div>
+                ) : mainCategories.length ? (
+                  <div className="store-category-grid">
+                    {mainCategories.map((mainCat) => {
+                      const { tone, Icon } = categoryStyle(mainCat.label || mainCat.name);
+                      const catImgs = mainCat.images && mainCat.images.length > 0 ? mainCat.images : (mainCat.image ? [mainCat.image] : []);
+                      return (
+                        <button
+                          type="button"
+                          key={mainCat.id}
+                          className={`store-category store-category-${tone}`}
+                          onClick={() => handleExploreParentCategory(mainCat)}
+                        >
+                          <span className="store-category-art" style={{ position: 'relative', display: 'block', overflow: 'hidden' }}>
+                            {catImgs.length > 0 ? (
+                              <AutoSwipeGallery images={catImgs} alt={mainCat.label} delay={3000} />
+                            ) : (
+                              <Icon size={37} strokeWidth={1.5} />
+                            )}
+                          </span>
+                          <strong>{mainCat.label.toUpperCase()}</strong>
+                          <span>Explore <ArrowRight size={13} /></span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="store-empty">Categories are being added. Please check back soon.</div>
+                )}
               </section>
+
+              {deals.length > 0 && (
+                <section className="store-section" aria-labelledby="store-deals-heading">
+                  <div className="store-section-heading">
+                    <div>
+                      <span className="store-section-kicker">CURRENT OFFERS</span>
+                      <h2 id="store-deals-heading">{content.deals_heading}</h2>
+                    </div>
+                    <span className="store-section-note">Request today&apos;s best supplier quote</span>
+                  </div>
+                  <div className="store-product-grid">
+                    {deals.map((product) => (
+                      <ProductCard
+                        key={product.id}
+                        product={product}
+                        quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0}
+                        canAdd={cart.length < 20}
+                        onAdd={onAdd}
+                        onChangeQty={onChangeQty}
+                        onQuote={onQuote}
+                        onBuy={onBuy}
+                        selectedCity={selectedCity}
+                        promotions={promotions}
+                        shippingSettings={shippingSettings}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {arrivals.length > 0 && (
+                <section className="store-section" aria-labelledby="store-arrivals-heading">
+                  <div className="store-section-heading">
+                    <div>
+                      <span className="store-section-kicker">JUST ADDED</span>
+                      <h2 id="store-arrivals-heading">{content.arrivals_heading}</h2>
+                    </div>
+                    <span className="store-section-note">Recently added products</span>
+                  </div>
+                  <div className="store-product-grid">
+                    {arrivals.map((product) => (
+                      <ProductCard
+                        key={product.id}
+                        product={product}
+                        quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0}
+                        canAdd={cart.length < 20}
+                        onAdd={onAdd}
+                        onChangeQty={onChangeQty}
+                        onQuote={onQuote}
+                        onBuy={onBuy}
+                        selectedCity={selectedCity}
+                        promotions={promotions}
+                        shippingSettings={shippingSettings}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              
             </>
-          ) : (
-            /* ── CATEGORY / SEARCH COLLECTION FLOW (Exact Image 2 Style) ── */
-            <section className="store-section store-catalog" id="store-products" style={{ marginTop: 0, paddingTop: 0 }}>
-              <div className="store-homerun-header">
-                {/* Breadcrumb Navigation (Image 2 style) */}
-                <nav aria-label="Breadcrumb" className="store-breadcrumb" style={{ margin: "0 0 12px 0" }}>
-                  <Link href="/">Home</Link>
-                  <span>›</span>
-                  <button type="button" className="store-breadcrumb-btn" onClick={() => chooseCategory("all")}>
-                    Shop materials
-                  </button>
-                  {activeCatObj && (
-                    <>
-                      <span>›</span>
+          ) : selectedParentNav && !selectedSubNav && !searchTerm ? (
+            /* ── LEVEL 2: SUBCATEGORIES FLOW (When Main Category Explored) ── */
+            <section className="store-section store-subcategories-section" aria-labelledby="store-subcategories-heading" style={{ marginTop: 0, paddingTop: 10 }}>
+              <div style={{ marginBottom: 16 }}>
+                <button
+                  type="button"
+                  onClick={goToAllCategories}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    color: 'var(--brand-blue, #0077c8)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 0
+                  }}
+                >
+                  <ArrowLeft size={16} /> Back to all categories
+                </button>
+              </div>
+
+              <div className="store-section-heading">
+                <div>
+                  <span className="store-section-kicker">EXPLORE {currentParentCategory?.label?.toUpperCase()}</span>
+                  <h2 id="store-subcategories-heading">{currentParentCategory?.label} Subcategories</h2>
+                </div>
+                <span className="store-section-note">Pick a subcategory to see materials</span>
+              </div>
+
+              {parentSubcategories.length > 0 ? (
+                <div className="store-category-grid">
+                  {parentSubcategories.map((sub) => {
+                    const { tone, Icon } = categoryStyle(sub.name);
+                    const subImgs = sub.images && sub.images.length > 0 ? sub.images : (sub.image ? [sub.image] : []);
+                    return (
                       <button
                         type="button"
-                        className={`store-breadcrumb-btn ${!searchTerm ? "is-current" : ""}`}
-                        onClick={() => {
-                          setSearch("");
-                          const url = new URL(window.location.href);
-                          url.searchParams.delete('q');
-                          window.history.replaceState(window.history.state, '', url);
-                        }}
+                        key={sub.name}
+                        className={`store-category store-category-${tone}`}
+                        onClick={() => handleSelectSubcategory(sub.name, currentParentCategory?.label)}
                       >
-                        {activeCatObj.name}
+                        <span className="store-category-art" style={{ position: 'relative', display: 'block', overflow: 'hidden' }}>
+                          {subImgs.length > 0 ? (
+                            <AutoSwipeGallery images={subImgs} alt={sub.name} delay={3000} />
+                          ) : (
+                            <Icon size={37} strokeWidth={1.5} />
+                          )}
+                        </span>
+                        <strong>{sub.name.toUpperCase()}</strong>
+                        <span>Explore Products <ArrowRight size={13} /></span>
                       </button>
-                    </>
-                  )}
-                  {searchTerm && (
-                    <>
-                      <span>›</span>
-                      <strong className="is-current">{search}</strong>
-                    </>
-                  )}
-                </nav>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="store-empty">Subcategories are being added. You can browse all materials below.</div>
+              )}
 
-                {/* Heading (Image 2 style) */}
-                <h1 className="store-homerun-title">
-                  {searchTerm ? search : (activeCatObj?.name || 'Materials')}
-                </h1>
+              {/* All products under this parent category */}
+              <div className="store-homerun-header" style={{ marginTop: 36, paddingTop: 24, borderTop: '1px solid #e2e8f0' }}>
+                <h3 className="store-homerun-title" style={{ fontSize: '22px', fontWeight: 800 }}>
+                  All {currentParentCategory?.label} Materials
+                </h3>
+                {/* HomeRun Popover Filter Bar (Image 1 Exact Match) */}
+                <div className="homerun-filter-bar-container">
+                  <div className="homerun-filter-bar-left">
+                    <span className="homerun-filter-bar-label">Filter:</span>
 
-                {/* Single Unified Filter Bar (Image 2 style) */}
-                <div className="store-homerun-filter-bar">
-                  <div className="store-homerun-filter-left">
-                    <span className="store-homerun-filter-label">Filter:</span>
+                    {/* Category Popover */}
+                    <FilterPopover
+                      label="Category"
+                      options={popoverCategoryOptions}
+                      selected={selectedSubcategories}
+                      onToggle={(val) => toggleFilter(setSelectedSubcategories, val)}
+                      onReset={() => setSelectedSubcategories([])}
+                      isOpen={openFilterMenu === 'lvl2_category'}
+                      onOpen={() => setOpenFilterMenu('lvl2_category')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
 
-                    {/* Category Dropdown */}
-                    <div className="store-homerun-select-wrap">
-                      <select
-                        value={activeCategory}
-                        onChange={(e) => chooseCategory(e.target.value)}
-                        className="store-homerun-filter-select"
-                        aria-label="Filter by Category"
-                      >
-                        <option value="all">Category: All</option>
-                        {categories.map((cat) => (
-                          <option key={cat.id} value={cat.id}>{cat.name}</option>
-                        ))}
-                      </select>
-                      <ChevronDown size={14} className="store-homerun-select-icon" />
-                    </div>
+                    {/* Brand Popover */}
+                    <FilterPopover
+                      label="Brand"
+                      options={popoverBrandOptions}
+                      selected={selectedBrands}
+                      onToggle={(val) => toggleFilter(setSelectedBrands, val)}
+                      onReset={() => setSelectedBrands([])}
+                      isOpen={openFilterMenu === 'lvl2_brand'}
+                      onOpen={() => setOpenFilterMenu('lvl2_brand')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
 
-                    {/* Sub-category / Type Dropdown */}
-                    {activeSubcats.length > 0 && (
-                      <div className="store-homerun-select-wrap">
-                        <select
-                          value={searchTerm || "all"}
-                          onChange={(e) => {
-                            const val = e.target.value === "all" ? "" : e.target.value;
-                            setSearch(val);
-                            const url = new URL(window.location.href);
-                            if (val) url.searchParams.set('q', val);
-                            else url.searchParams.delete('q');
-                            window.history.replaceState(window.history.state, '', url);
-                          }}
-                          className="store-homerun-filter-select"
-                          aria-label="Filter by Subcategory"
-                        >
-                          <option value="all">Sub-category: All</option>
-                          {activeSubcats.map((sub, sIdx) => {
-                            const subName = typeof sub === 'object' && sub !== null ? sub.name : sub;
-                            return (
-                              <option key={`${subName}-${sIdx}`} value={subName}>
-                                {subName}
-                              </option>
-                            );
-                          })}
-                        </select>
-                        <ChevronDown size={14} className="store-homerun-select-icon" />
-                      </div>
-                    )}
+                    {/* Type Popover */}
+                    <FilterPopover
+                      label="Type"
+                      options={popoverTypeOptions}
+                      selected={selectedTypes}
+                      onToggle={(val) => toggleFilter(setSelectedTypes, val)}
+                      onReset={() => setSelectedTypes([])}
+                      isOpen={openFilterMenu === 'lvl2_type'}
+                      onOpen={() => setOpenFilterMenu('lvl2_type')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
 
-                    {/* Brand Dropdown */}
-                    {brands.length > 0 && (
-                      <div className="store-homerun-select-wrap">
-                        <select
-                          value={brandFilter}
-                          onChange={(e) => setBrandFilter(e.target.value)}
-                          className="store-homerun-filter-select"
-                          aria-label="Filter by Brand"
-                        >
-                          <option value="all">Brand: All</option>
-                          {brands.map((brand) => (
-                            <option key={brand} value={brand}>{brand}</option>
-                          ))}
-                        </select>
-                        <ChevronDown size={14} className="store-homerun-select-icon" />
-                      </div>
-                    )}
+                    {/* Grade Popover */}
+                    <FilterPopover
+                      label="Grade"
+                      options={popoverGradeOptions}
+                      selected={selectedGrades}
+                      onToggle={(val) => toggleFilter(setSelectedGrades, val)}
+                      onReset={() => setSelectedGrades([])}
+                      isOpen={openFilterMenu === 'lvl2_grade'}
+                      onOpen={() => setOpenFilterMenu('lvl2_grade')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
 
-                    {/* Price Filter */}
-                    <div className="store-homerun-select-wrap">
-                      <select
-                        value={sortBy.startsWith('price') ? sortBy : 'all'}
-                        onChange={(e) => {
-                          if (e.target.value !== 'all') setSortBy(e.target.value);
-                        }}
-                        className="store-homerun-filter-select"
-                        aria-label="Filter by Price"
-                      >
-                        <option value="all">Price ▾</option>
-                        <option value="price-asc">Price: Low to High</option>
-                        <option value="price-desc">Price: High to Low</option>
-                      </select>
-                      <ChevronDown size={14} className="store-homerun-select-icon" />
-                    </div>
+                    {/* Price Popover */}
+                    <PriceSortPopover
+                      selectedPriceRanges={selectedPriceRanges}
+                      onTogglePriceRange={(val) => toggleFilter(setSelectedPriceRanges, val)}
+                      onResetPrice={() => setSelectedPriceRanges([])}
+                      isOpen={openFilterMenu === 'lvl2_price'}
+                      onOpen={() => setOpenFilterMenu('lvl2_price')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Pack Size Popover */}
+                    <FilterPopover
+                      label="Pack Size"
+                      options={popoverPackSizeOptions}
+                      selected={selectedPackSizes}
+                      onToggle={(val) => toggleFilter(setSelectedPackSizes, val)}
+                      onReset={() => setSelectedPackSizes([])}
+                      isOpen={openFilterMenu === 'lvl2_pack_size'}
+                      onOpen={() => setOpenFilterMenu('lvl2_pack_size')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Thickness Popover */}
+                    <FilterPopover
+                      label="Thickness"
+                      options={popoverThicknessOptions}
+                      selected={selectedThicknesses}
+                      onToggle={(val) => toggleFilter(setSelectedThicknesses, val)}
+                      onReset={() => setSelectedThicknesses([])}
+                      isOpen={openFilterMenu === 'lvl2_thickness'}
+                      onOpen={() => setOpenFilterMenu('lvl2_thickness')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Size Popover */}
+                    <FilterPopover
+                      label="Size"
+                      options={popoverSizeOptions}
+                      selected={selectedSizes}
+                      onToggle={(val) => toggleFilter(setSelectedSizes, val)}
+                      onReset={() => setSelectedSizes([])}
+                      isOpen={openFilterMenu === 'lvl2_size'}
+                      onOpen={() => setOpenFilterMenu('lvl2_size')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Color Popover */}
+                    <FilterPopover
+                      label="Colors"
+                      options={popoverColorOptions}
+                      selected={selectedColors}
+                      onToggle={(val) => toggleFilter(setSelectedColors, val)}
+                      onReset={() => setSelectedColors([])}
+                      isOpen={openFilterMenu === 'lvl2_color'}
+                      onOpen={() => setOpenFilterMenu('lvl2_color')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Material Popover */}
+                    <FilterPopover
+                      label="Material"
+                      options={popoverMaterialOptions}
+                      selected={selectedMaterials}
+                      onToggle={(val) => toggleFilter(setSelectedMaterials, val)}
+                      onReset={() => setSelectedMaterials([])}
+                      isOpen={openFilterMenu === 'lvl2_material'}
+                      onOpen={() => setOpenFilterMenu('lvl2_material')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
 
                     {/* Reset Button */}
-                    {(activeCategory !== 'all' || searchTerm || brandFilter !== 'all') && (
+                    {hasActiveAttributeFilters && (
                       <button
                         type="button"
-                        className="store-homerun-reset-btn"
-                        onClick={() => {
-                          chooseCategory("all");
-                          setBrandFilter("all");
-                        }}
+                        className="homerun-filter-popover-reset"
+                        onClick={resetAttributeFilters}
+                        style={{ fontSize: '13.5px', marginLeft: 4 }}
                       >
                         Reset
                       </button>
                     )}
                   </div>
 
-                  <div className="store-homerun-filter-right">
-                    <span className="store-homerun-product-count">
+                  <div className="homerun-filter-bar-right">
+                    <span className="homerun-filter-product-count">
                       {visible.length} {visible.length === 1 ? 'product' : 'products'}
                     </span>
-                    <div className="store-homerun-sort-wrap">
-                      <span className="store-homerun-sort-label">Sort by:</span>
-                      <div className="store-homerun-select-wrap">
-                        <select
-                          value={sortBy}
-                          onChange={(e) => setSortBy(e.target.value)}
-                          className="store-homerun-sort-select"
-                          aria-label="Sort by"
-                        >
-                          <option value="featured">Relevance</option>
-                          <option value="price-asc">Price: Low to High</option>
-                          <option value="price-desc">Price: High to Low</option>
-                          <option value="name">Name: A to Z</option>
-                        </select>
-                        <ChevronDown size={14} className="store-homerun-select-icon" />
-                      </div>
+                    <div className="homerun-filter-sort-wrap">
+                      <span>Sort by:</span>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className="store-homerun-sort-select"
+                        aria-label="Sort by"
+                        style={{
+                          border: 'none',
+                          background: 'transparent',
+                          padding: '0 20px 0 4px',
+                          fontWeight: '600',
+                          color: '#1f2937',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <option value="featured">Relevance</option>
+                        <option value="price-asc">Price: Low to High</option>
+                        <option value="price-desc">Price: High to Low</option>
+                        <option value="name">Name: A to Z</option>
+                      </select>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {loading ? <div className="store-loading">Loading materials...</div> : visible.length ? <div className="store-product-grid">{visible.map((product) => <ProductCard key={product.id} product={product} quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0} canAdd={cart.length < 20} onAdd={onAdd} onChangeQty={onChangeQty} onQuote={onQuote} onBuy={onBuy} selectedCity={selectedCity} promotions={promotions} shippingSettings={shippingSettings} />)}</div> : <div className="store-empty">No materials found in this category. Try another filter or search.</div>}
+              {loading ? (
+                <div className="store-loading">Loading materials...</div>
+              ) : visible.length ? (
+                <div className="store-product-grid">
+                  {visible.map((product) => (
+                    <ProductCard
+                      key={product.id}
+                      product={product}
+                      quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0}
+                      canAdd={cart.length < 20}
+                      onAdd={onAdd}
+                      onChangeQty={onChangeQty}
+                      onQuote={onQuote}
+                      onBuy={onBuy}
+                      selectedCity={selectedCity}
+                      promotions={promotions}
+                      shippingSettings={shippingSettings}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="store-empty">No materials found in this category.</div>
+              )}
+            </section>
+          ) : (
+            /* ── LEVEL 3: SUBCATEGORY PRODUCTS / SEARCH FLOW ── */
+            <section className="store-section store-catalog" id="store-products" style={{ marginTop: 0, paddingTop: 10 }}>
+              {currentParentCategory && (
+                <div style={{ marginBottom: 14 }}>
+                  <button
+                    type="button"
+                    onClick={() => handleExploreParentCategory(currentParentCategory)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: '13px',
+                      fontWeight: '700',
+                      color: 'var(--brand-blue, #0077c8)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: 0
+                    }}
+                  >
+                    <ArrowLeft size={16} /> Back to {currentParentCategory.label} Subcategories
+                  </button>
+                </div>
+              )}
+
+              <div className="store-homerun-header">
+                {/* Heading */}
+                <h1 className="store-homerun-title">
+                  {searchTerm ? `Search: “${search}”` : (selectedSubNav || currentParentCategory?.label || activeCatObj?.name || 'Materials')}
+                </h1>
+
+                
+
+                {/* HomeRun Popover Filter Bar (Image 1 Exact Match) */}
+                <div className="homerun-filter-bar-container">
+                  <div className="homerun-filter-bar-left">
+                    <span className="homerun-filter-bar-label">Filter:</span>
+
+                    {/* Category Popover */}
+                    <FilterPopover
+                      label="Category"
+                      options={popoverCategoryOptions}
+                      selected={selectedSubcategories}
+                      onToggle={(val) => toggleFilter(setSelectedSubcategories, val)}
+                      onReset={() => setSelectedSubcategories([])}
+                      isOpen={openFilterMenu === 'category'}
+                      onOpen={() => setOpenFilterMenu('category')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Brand Popover */}
+                    <FilterPopover
+                      label="Brand"
+                      options={popoverBrandOptions}
+                      selected={selectedBrands}
+                      onToggle={(val) => toggleFilter(setSelectedBrands, val)}
+                      onReset={() => setSelectedBrands([])}
+                      isOpen={openFilterMenu === 'brand'}
+                      onOpen={() => setOpenFilterMenu('brand')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Type Popover */}
+                    <FilterPopover
+                      label="Type"
+                      options={popoverTypeOptions}
+                      selected={selectedTypes}
+                      onToggle={(val) => toggleFilter(setSelectedTypes, val)}
+                      onReset={() => setSelectedTypes([])}
+                      isOpen={openFilterMenu === 'type'}
+                      onOpen={() => setOpenFilterMenu('type')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Grade Popover */}
+                    <FilterPopover
+                      label="Grade"
+                      options={popoverGradeOptions}
+                      selected={selectedGrades}
+                      onToggle={(val) => toggleFilter(setSelectedGrades, val)}
+                      onReset={() => setSelectedGrades([])}
+                      isOpen={openFilterMenu === 'grade'}
+                      onOpen={() => setOpenFilterMenu('grade')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Price Popover */}
+                    <PriceSortPopover
+                      selectedPriceRanges={selectedPriceRanges}
+                      onTogglePriceRange={(val) => toggleFilter(setSelectedPriceRanges, val)}
+                      onResetPrice={() => setSelectedPriceRanges([])}
+                      isOpen={openFilterMenu === 'price'}
+                      onOpen={() => setOpenFilterMenu('price')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Pack Size Popover */}
+                    <FilterPopover
+                      label="Pack Size"
+                      options={popoverPackSizeOptions}
+                      selected={selectedPackSizes}
+                      onToggle={(val) => toggleFilter(setSelectedPackSizes, val)}
+                      onReset={() => setSelectedPackSizes([])}
+                      isOpen={openFilterMenu === 'pack_size'}
+                      onOpen={() => setOpenFilterMenu('pack_size')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Thickness Popover */}
+                    <FilterPopover
+                      label="Thickness"
+                      options={popoverThicknessOptions}
+                      selected={selectedThicknesses}
+                      onToggle={(val) => toggleFilter(setSelectedThicknesses, val)}
+                      onReset={() => setSelectedThicknesses([])}
+                      isOpen={openFilterMenu === 'thickness'}
+                      onOpen={() => setOpenFilterMenu('thickness')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Size Popover */}
+                    <FilterPopover
+                      label="Size"
+                      options={popoverSizeOptions}
+                      selected={selectedSizes}
+                      onToggle={(val) => toggleFilter(setSelectedSizes, val)}
+                      onReset={() => setSelectedSizes([])}
+                      isOpen={openFilterMenu === 'size'}
+                      onOpen={() => setOpenFilterMenu('size')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Color Popover */}
+                    <FilterPopover
+                      label="Colors"
+                      options={popoverColorOptions}
+                      selected={selectedColors}
+                      onToggle={(val) => toggleFilter(setSelectedColors, val)}
+                      onReset={() => setSelectedColors([])}
+                      isOpen={openFilterMenu === 'color'}
+                      onOpen={() => setOpenFilterMenu('color')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Material Popover */}
+                    <FilterPopover
+                      label="Material"
+                      options={popoverMaterialOptions}
+                      selected={selectedMaterials}
+                      onToggle={(val) => toggleFilter(setSelectedMaterials, val)}
+                      onReset={() => setSelectedMaterials([])}
+                      isOpen={openFilterMenu === 'material'}
+                      onOpen={() => setOpenFilterMenu('material')}
+                      onClose={() => setOpenFilterMenu(null)}
+                    />
+
+                    {/* Reset Button */}
+                    {hasActiveAttributeFilters && (
+                      <button
+                        type="button"
+                        className="homerun-filter-popover-reset"
+                        onClick={resetAttributeFilters}
+                        style={{ fontSize: '13.5px', marginLeft: 4 }}
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="homerun-filter-bar-right">
+                    <span className="homerun-filter-product-count">
+                      {visible.length} {visible.length === 1 ? 'product' : 'products'}
+                    </span>
+                    <div className="homerun-filter-sort-wrap">
+                      <span>Sort by:</span>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className="store-homerun-sort-select"
+                        aria-label="Sort by"
+                        style={{
+                          border: 'none',
+                          background: 'transparent',
+                          padding: '0 20px 0 4px',
+                          fontWeight: '600',
+                          color: '#1f2937',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <option value="featured">Relevance</option>
+                        <option value="price-asc">Price: Low to High</option>
+                        <option value="price-desc">Price: High to Low</option>
+                        <option value="name">Name: A to Z</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {loading ? (
+                <div className="store-loading">Loading materials...</div>
+              ) : visible.length ? (
+                <div className="store-product-grid">
+                  {visible.map((product) => (
+                    <ProductCard
+                      key={product.id}
+                      product={product}
+                      quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0}
+                      canAdd={cart.length < 20}
+                      onAdd={onAdd}
+                      onChangeQty={onChangeQty}
+                      onQuote={onQuote}
+                      onBuy={onBuy}
+                      selectedCity={selectedCity}
+                      promotions={promotions}
+                      shippingSettings={shippingSettings}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="store-empty">No materials found in this subcategory. Try another filter or search.</div>
+              )}
             </section>
           )}
 

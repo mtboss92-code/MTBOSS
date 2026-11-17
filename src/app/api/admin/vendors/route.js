@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { requireAdmin } from '@/lib/agent-auth';
+import { createInitializationGuard } from '@/lib/api-utils';
 import { ensureServiceCitiesSchema } from '@/lib/service-cities';
 import { getManagedCities } from '@/lib/cities';
 import { ensurePackageSchema } from '@/lib/packages';
 
-// ═══════════════════════════════════════════════════════════════════════
-// VERIFY ADMIN TOKEN
-// ═══════════════════════════════════════════════════════════════════════
+const ensureVendorAdminColumns = createInitializationGuard(async () => {
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pan_number VARCHAR(20)`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pan_image BYTEA`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pan_image_mime VARCHAR(100)`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_number VARCHAR(30)`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_image BYTEA`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_image_mime VARCHAR(100)`);
+});
 
 // ═══════════════════════════════════════════════════════════════════════
 // GET - FETCH ALL VENDORS
@@ -22,8 +28,6 @@ export async function GET(req) {
         { status: 401 }
       );
     }
-    await ensureServiceCitiesSchema();
-    await ensurePackageSchema();
 
     const { searchParams } = new URL(req.url);
     const status = String(searchParams.get('status') || '').trim();
@@ -32,6 +36,13 @@ export async function GET(req) {
     const offset = (page - 1) * limit;
     const countsOnly = searchParams.get('counts') === '1';
     const lite = searchParams.get('lite') === '1' || countsOnly;
+
+    // Count-only badge endpoints must not run package/cities DDL on every poll.
+    if (!countsOnly) {
+      await ensureServiceCitiesSchema();
+      await ensurePackageSchema();
+      await ensureVendorAdminColumns();
+    }
 
     const vals = [];
     const where = [];
@@ -75,6 +86,10 @@ export async function GET(req) {
             v.aadhar_number,
             (v.profile_photo IS NOT NULL) AS profile_photo,
             (v.aadhar_image  IS NOT NULL) AS aadhar_image,
+            v.pan_number,
+            (v.pan_image IS NOT NULL) AS pan_image,
+            v.gst_number,
+            (v.gst_image IS NOT NULL) AS gst_image,
             v.status, v.verification_status, v.is_approved,
             v.package_id, v.package_name, v.package_price, v.package_status,
             v.created_at, v.updated_at,

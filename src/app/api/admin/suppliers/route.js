@@ -9,6 +9,11 @@ const ensureSupplierColumns = createInitializationGuard(async () => {
   await ensurePackageSchema();
   await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE`);
   await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS product_categories TEXT[] DEFAULT '{}'`);
+  await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS aadhaar_document TEXT`);
+  await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS pan_number VARCHAR(20)`);
+  await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS pan_document TEXT`);
+  await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS gst_number VARCHAR(30)`);
+  await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS gst_document TEXT`);
 });
 
 // GET — list all suppliers with earnings summary
@@ -17,15 +22,18 @@ export async function GET(req) {
     const admin = await requireAdmin(req);
     if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    await ensureSupplierColumns();
-    await ensurePayUIntentSchema();
-
     const { searchParams } = new URL(req.url);
     const status = String(searchParams.get('status') || '').trim();
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(searchParams.get('limit') || '100', 10) || 100));
     const offset = (page - 1) * limit;
     const countsOnly = searchParams.get('counts') === '1';
+
+    // Count-only badge polls only need suppliers.status — skip package/PayU DDL.
+    if (!countsOnly) {
+      await ensureSupplierColumns();
+      await ensurePayUIntentSchema();
+    }
 
     const vals = [];
     const where = [];
@@ -51,11 +59,14 @@ export async function GET(req) {
         s.id, s.email, s.shop_name, s.phone,
         s.city, s.state, s.country, s.postal_code,
         s.aadhaar_number, s.aadhaar_status,
+        s.aadhaar_document, s.pan_number, s.pan_document, s.gst_number, s.gst_document,
         s.product_categories,
-         s.status, s.is_active, s.package_name, s.package_price, s.package_status,
-         payment.txnid AS payment_reference, payment.status AS payment_status,
-         payment.amount AS payment_amount, payment.gateway_id AS payment_gateway_id,
-         payment.completed_at AS payment_completed_at,
+        s.status, s.is_active, s.package_id, s.package_name, s.package_price, s.package_status,
+        s.package_starts_at, s.package_expires_at,
+        CASE WHEN COALESCE(s.package_price, 0) <= 0 OR s.package_id = 'pkg_free_1m' THEN TRUE ELSE FALSE END AS is_free_tier,
+        payment.txnid AS payment_reference, payment.status AS payment_status,
+        payment.amount AS payment_amount, payment.gateway_id AS payment_gateway_id,
+        payment.completed_at AS payment_completed_at,
         s.rejection_reason,
         s.created_at, s.updated_at,
         COALESCE(e.total_earned, 0)      AS total_earned,
@@ -113,9 +124,18 @@ export async function PUT(req) {
 
     if (action === 'approve') {
       query = `UPDATE suppliers
-               SET status = 'approved', is_active = TRUE, rejection_reason = NULL, updated_at = NOW()
+               SET status = 'approved',
+                   is_active = TRUE,
+                   rejection_reason = NULL,
+                   package_status = CASE WHEN package_status = 'pending' THEN 'active' ELSE package_status END,
+                   package_starts_at = COALESCE(package_starts_at, NOW()),
+                   package_expires_at = CASE
+                     WHEN COALESCE(package_price, 0) <= 0 OR package_id = 'pkg_free_1m' THEN NULL
+                     ELSE COALESCE(package_expires_at, NOW() + (COALESCE(package_duration_months, 1) || ' months')::INTERVAL)
+                   END,
+                   updated_at = NOW()
                WHERE id = $1 AND package_status IN ('pending', 'active')
-               RETURNING id, email, shop_name, status, is_active`;
+               RETURNING id, email, shop_name, status, is_active, package_status, package_expires_at`;
       values = [supplier_id];
     } else if (action === 'reject') {
       query = `UPDATE suppliers SET status = 'rejected', is_active = FALSE, rejection_reason = $2, updated_at = NOW() WHERE id = $1 RETURNING id, email, shop_name, status, is_active`;

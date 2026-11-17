@@ -1,4 +1,5 @@
 'use client';
+import RequiredAsterisk from './RequiredAsterisk';
 
 import React, { useState, useEffect, useCallback, useMemo, useId, useRef } from 'react';
 import { useSubmitAction } from '../../hooks/useSubmitAction';
@@ -23,7 +24,7 @@ function Input({ label, name, type = 'text', value, set, required, placeholder, 
   return (
     <label htmlFor={inputId}>
       <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>
-        {label} {required && <span style={{ color: '#ef4444' }}>*</span>}
+        {label} {required && <RequiredAsterisk />}
       </small>
       <input
         id={inputId}
@@ -78,7 +79,7 @@ function UnitSelector({ label = 'Unit / इकाई', value = 'bags', onChange,
   return (
     <label>
       <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>
-        {label} {required && <span style={{ color: '#ef4444' }}>*</span>}
+        {label} {required && <RequiredAsterisk />}
       </small>
       {!customActive ? (
         <select
@@ -168,6 +169,31 @@ async function api(path, opts = {}) {
 }
 
 async function uploadFile(file) {
+  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+  const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+  if (cloudName && uploadPreset) {
+    try {
+      const cldBody = new FormData();
+      cldBody.append('file', file);
+      cldBody.append('upload_preset', uploadPreset);
+      cldBody.append('folder', 'MTBOSS/bills');
+      const cldRes = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`, {
+        method: 'POST',
+        body: cldBody,
+      });
+      const cldData = await cldRes.json();
+      if (cldRes.ok && cldData.secure_url) {
+        return {
+          success: true,
+          url: cldData.secure_url,
+          filename: file.name || 'bill',
+        };
+      }
+    } catch (cldErr) {
+      console.warn('Direct Cloudinary client upload failed, falling back to /api/upload:', cldErr);
+    }
+  }
+
   const isAgentContext =
     _globalIsAgent ||
     (typeof window !== 'undefined' && window.location.pathname.startsWith('/agent'));
@@ -191,6 +217,37 @@ async function uploadFile(file) {
   return data;
 }
 
+
+
+function computeVendorWage(workersCount, ratePerWorker, status, shiftType = 'day', overtimeHours = 0) {
+  const workers = Number(workersCount || 1);
+  const rate = Number(ratePerWorker || 0);
+  const ot = Math.max(0, Number(overtimeHours || 0));
+  const hourlyRate = rate > 0 ? (rate / 8) : 0;
+  const otAmount = Math.round(workers * ot * hourlyRate * 100) / 100;
+
+  if (status === 'absent' || !status) return 0;
+  let base = workers * rate;
+  if (shiftType === 'double') base = workers * rate * 2;
+  else if (status === 'half_day') base = Math.round(workers * rate * 0.5 * 100) / 100;
+
+  return Math.round((base + otAmount) * 100) / 100;
+}
+
+function computeLaborWage(dailyRate, status, shiftType = 'day', overtimeHours = 0) {
+  const rate = Number(dailyRate || 0);
+  const ot = Math.max(0, Number(overtimeHours || 0));
+  const hourlyRate = rate > 0 ? (rate / 8) : 0;
+  const otAmount = Math.round(ot * hourlyRate * 100) / 100;
+
+  if (status === 'absent' || !status) return 0;
+  let base = rate;
+  if (shiftType === 'double') base = rate * 2;
+  else if (status === 'half_day') base = Math.round(rate * 0.5 * 100) / 100;
+
+  return Math.round((base + otAmount) * 100) / 100;
+}
+
 const partyBlank = { name: '', phone: '', email: '', gst_no: '', address: '' };
 const projectBlank = {
   name: '',
@@ -210,7 +267,25 @@ const projectBlank = {
 };
 
 const materialBlank = { name: '', unit: 'bags', category: 'Civil', min_stock_level: 0, is_active: true };
-const receivedBlank = { material_id: '', material_name: '', unit: 'bags', supplier_id: '', quantity: '', rate: '', received_date: today(), supplier_name: '', challan_no: '', note: '', bill_url: '', bill_filename: '' };
+const receivedBlank = { material_id: '', material_name: '', unit: 'bags', supplier_id: '', quantity: '', rate: '', received_date: today(), supplier_name: '', challan_no: '', note: '', bill_url: '', bill_filename: '', vehicle_no: '', driver_name: '', driver_phone: '', received_by: '' };
+const staffBlank = { name: '', phone: '', role: 'Site Supervisor', pay_type: 'monthly', salary_rate: '', commission_rate: '', commission_notes: '', is_active: true };
+const staffRolesList = [
+  'Site Supervisor',
+  'Site Engineer',
+  'Project Manager',
+  'Store Keeper / Incharge',
+  'Accountant',
+  'HR',
+  'Quality Surveyor',
+  'Safety Officer',
+  'Driver / Logistics',
+  'Field Officer',
+  'Designer',
+  'Cleaning Staff',
+  'Office Staff',
+  'Forman',
+  'Other',
+];
 const contractorTrades = ['General Vendor', 'Civil Contractor', 'Plumber / Plumbing', 'Electrician', 'Mason', 'Carpenter', 'Painter', 'Fabricator', 'Tile / Flooring', 'Waterproofing', 'HVAC', 'Other'];
 const matchesContractorType = (trade, filter) => {
   if (!filter || filter === 'all') return true;
@@ -264,7 +339,74 @@ export function packExpenseNote(itemName, noteText) {
   return cleanNote ? `[Item: ${cleanItem}] ${cleanNote}` : `[Item: ${cleanItem}]`;
 }
 
+export function formatDateIST(dateVal) {
+  if (!dateVal) return '—';
+  if (typeof dateVal === 'string') {
+    const trimmed = dateVal.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+    if (trimmed.includes('T')) {
+      try {
+        return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(trimmed));
+      } catch {
+        return trimmed.slice(0, 10);
+      }
+    }
+    return trimmed.slice(0, 10);
+  }
+  if (dateVal instanceof Date) {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(dateVal);
+    } catch {
+      return dateVal.toISOString().slice(0, 10);
+    }
+  }
+  return String(dateVal).slice(0, 10);
+}
+
+export function isEditableWithin48Hours(dateOrTimestamp) {
+  if (!dateOrTimestamp) return false;
+  try {
+    const str = String(dateOrTimestamp).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      const todayStr = today();
+      const targetDate = new Date(`${str}T00:00:00+05:30`);
+      const todayDate = new Date(`${todayStr}T00:00:00+05:30`);
+      const diffMs = todayDate.getTime() - targetDate.getTime();
+      const diffDays = Math.round(diffMs / (24 * 60 * 60 * 1000));
+      return diffDays >= 0 && diffDays <= 2;
+    }
+    const targetTime = new Date(dateOrTimestamp).getTime();
+    if (Number.isNaN(targetTime)) return false;
+    const diffHours = (Date.now() - targetTime) / (1000 * 60 * 60);
+    return diffHours >= -1 && diffHours <= 48;
+  } catch {
+    return false;
+  }
+}
+
+export function isSameDayIST(dateOrTimestamp) {
+  return isEditableWithin48Hours(dateOrTimestamp);
+}
+
 export default function PartyProjectManagement({ initialScreen = 'parties', initialProjectId = null, isDarkMode, isAgent, agent: passedAgent }) {
+  const [internalDark, setInternalDark] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const html = document.documentElement;
+    const sync = () =>
+      setInternalDark(
+        html.classList.contains('dark-mode') ||
+        html.classList.contains('dark') ||
+        localStorage.getItem('theme') === 'dark'
+      );
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(html, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+  const effectiveDark = isDarkMode !== undefined ? Boolean(isDarkMode) : internalDark;
   const submitAction = useSubmitAction();
   if (isAgent) {
     _globalIsAgent = true;
@@ -341,6 +483,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
       tabs.push('suppliers');
     }
     tabs.push('commission');
+    tabs.push('staff');
     return tabs;
   }, [isAgent, isSupervisor, agentSpecs]);
 
@@ -348,6 +491,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
     const subs = [];
     if (!isAgent || agentSpecs.includes('vendor')) subs.push('vendor');
     if (!isAgent || agentSpecs.includes('labor')) subs.push('labor');
+    subs.push('staff');
     return subs;
   }, [isAgent, agentSpecs]);
 
@@ -368,6 +512,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
     if (s === 'construction' || s === 'materials' || s === 'expenses') return 'construction';
     if (s === 'suppliers' || s === 'supplier') return 'suppliers';
     if (s === 'commission' || s === 'commissions') return 'commission';
+    if (s === 'staff') return 'staff';
     return null;
   };
 
@@ -376,6 +521,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
     const s = sub.toLowerCase().trim();
     if (s === 'labor' || s === 'labor-attendance' || s === 'labor_attendance') return 'labor';
     if (s === 'vendor' || s === 'vendor-attendance' || s === 'vendor_attendance') return 'vendor';
+    if (s === 'staff' || s === 'staff-attendance' || s === 'staff_attendance') return 'staff';
     return null;
   };
 
@@ -386,12 +532,14 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
     if (s === 'party' || s === 'party-payment' || s === 'party_payment') return 'party';
     if (s === 'vendor' || s === 'vendor-payment' || s === 'vendor_payment') return 'vendor';
     if (s === 'supplier' || s === 'supplier-payment' || s === 'supplier_payment') return 'supplier';
+    if (s === 'staff' || s === 'staff-payment' || s === 'staff_payment') return 'staff';
     return null;
   };
 
   const normalizeConstructionSub = (sub) => {
     if (!sub) return null;
     const s = sub.toLowerCase().trim();
+    if (s === 'used' || s === 'material_used' || s === 'material-used' || s === 'daily_usage' || s === 'daily-usage' || s === 'consumption') return 'used';
     if (s === 'adjustments' || s === 'adjustment' || s === 'wastage') return 'adjustments';
     if (s === 'return' || s === 'return_material' || s === 'return-material' || s === 'returns') return 'return';
     if (s === 'scrap' || s === 'scrap_material' || s === 'scrap-material') return 'scrap';
@@ -439,7 +587,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
     const rawSub = getUrlParam('sub');
     const norm = normalizeConstructionSub(rawSub);
     if (norm) return norm;
-    return 'adjustments';
+    return 'used';
   });
 
   useEffect(() => {
@@ -494,6 +642,10 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
   const handleAttendanceSubChange = (sub) => {
     setAttendanceSubTab(sub);
     updateUrlParams('attendance', sub);
+    if (sub === 'staff' && project?.id) {
+      loadStaffAttendance(project.id, staffAttendanceDate);
+      loadProjectStaff(project.id);
+    }
   };
 
   const handlePaymentsSubChange = (sub) => {
@@ -501,6 +653,11 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
     updateUrlParams('payments', sub);
     if (sub === 'supplier' && project?.id) {
       loadSupplierPayments(project.id);
+    }
+    if (sub === 'staff' && project?.id) {
+      loadStaffPayments(project.id);
+      loadProjectStaff(project.id);
+      refreshProjectData(project.id);
     }
   };
 
@@ -543,6 +700,12 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
   // Phase 1: Party payments
   const [partyPayments, setPartyPayments] = useState([]);
   const [partyPaymentForm, setPartyPaymentForm] = useState({ amount: '', payment_date: today(), mode: 'bank', note: '', transaction_reference: '' });
+  const [partyPaymentModal, setPartyPaymentModal] = useState(false);
+  const [editingPartyPaymentId, setEditingPartyPaymentId] = useState(null);
+  const [vendorPaymentModal, setVendorPaymentModal] = useState(false);
+  const [editingVendorPaymentId, setEditingVendorPaymentId] = useState(null);
+  const [editingSupplierPaymentId, setEditingSupplierPaymentId] = useState(null);
+  const [modalReadOnly, setModalReadOnly] = useState(false);
 
   // Phase 2: Project Vendors
   const [projectVendors, setProjectVendors] = useState([]);
@@ -568,6 +731,14 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
     note: '',
   });
   const [vendorTypeFilter, setVendorTypeFilter] = useState('all');
+  const [localVendorModal, setLocalVendorModal] = useState(false);
+  const [localVendorForm, setLocalVendorForm] = useState({
+    name: '',
+    phone: '',
+    city: '',
+    material_type: '',
+    address: '',
+  });
   const [contractorMenuOpen, setContractorMenuOpen] = useState(false);
   const [supplierView, setSupplierView] = useState(false);
   const [addVendorModal, setAddVendorModal] = useState(false);
@@ -678,6 +849,8 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
   // checkbox UI is intentionally hidden in favor of per-worker marking.
   const [selectedLaborIds, setSelectedLaborIds] = useState([]);
   const [modalError, setModalError] = useState('');
+  const [attendanceDetailModal, setAttendanceDetailModal] = useState(null);
+  const [savingAttendanceDetail, setSavingAttendanceDetail] = useState(false);
 
   // ── Phase 3: Materials & Stock State ───────────────────────────────────────
   const [materialsMaster, setMaterialsMaster] = useState([]);
@@ -743,6 +916,29 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
   const [commissionForm, setCommissionForm] = useState(commissionBlank);
   const [editingCommissionId, setEditingCommissionId] = useState(null);
 
+  // ── Staff State ────────────────────────────────────────────────────────────
+  const [projectStaff, setProjectStaff] = useState([]);
+  const [staffSummary, setStaffSummary] = useState({ total_staff: 0, total_present: 0, total_half_day: 0, total_paid: 0, total_commission_paid: 0, total_commission_allocated: 0 });
+  const [staffSearch, setStaffSearch] = useState('');
+  const [staffRoleFilter, setStaffRoleFilter] = useState('');
+  const [staffModal, setStaffModal] = useState(false);
+  const [staffForm, setStaffForm] = useState(staffBlank);
+  const [editingStaffId, setEditingStaffId] = useState(null);
+  const [staffSubTab, setStaffSubTab] = useState('directory'); // 'directory' | 'attendance' | 'payments'
+  const [staffAttendanceDate, setStaffAttendanceDate] = useState(today());
+  const [staffDailyAttendance, setStaffDailyAttendance] = useState([]);
+  const [staffAttendanceLoading, setStaffAttendanceLoading] = useState(false);
+  const [savingStaffAttendance, setSavingStaffAttendance] = useState(false);
+  const [projectStaffAttendanceHistory, setProjectStaffAttendanceHistory] = useState([]);
+  const [staffPayments, setStaffPayments] = useState([]);
+  const [staffPaymentsSummary, setStaffPaymentsSummary] = useState({ total_amount: 0, salary_amount: 0, commission_amount: 0, bonus_amount: 0 });
+  const [staffPaymentModal, setStaffPaymentModal] = useState(false);
+  const [staffPaymentForm, setStaffPaymentForm] = useState({ staff_id: '', amount: '', payment_date: today(), payment_type: 'salary', mode: 'bank', transaction_reference: '', note: '' });
+  const [editingStaffPaymentId, setEditingStaffPaymentId] = useState(null);
+  const [staffPaymentFilterType, setStaffPaymentFilterType] = useState('');
+  const staffSavingRef = useRef(false);
+  const staffPaymentSavingRef = useRef(false);
+
   const expenseItemSuggestions = useMemo(() => {
     const set = new Set();
     (expenseRows || []).forEach((row) => {
@@ -755,9 +951,295 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
   // ── Phase 3: Reports State ────────────────────────────────────────────────
   const [reportType, setReportType] = useState('cost_summary');
   const [reportProjectFilter, setReportProjectFilter] = useState('');
-  const [reportData, setReportData] = useState({ title: '', headers: [], data: [] });
+  const [reportMaterialFilter, setReportMaterialFilter] = useState('');
+  const [reportProjectStatus, setReportProjectStatus] = useState('all');
+  const [reportEntityType, setReportEntityType] = useState('all');
+  const [reportFrequency, setReportFrequency] = useState('all');
+  const [reportSearch, setReportSearch] = useState('');
+  const [reportStartDate, setReportStartDate] = useState('');
+  const [reportEndDate, setReportEndDate] = useState('');
+  const [reportData, setReportData] = useState({ title: '', headers: [], data: [], summary: null });
   const [loadingReport, setLoadingReport] = useState(false);
   const [allProjectsList, setAllProjectsList] = useState([]);
+
+  // ── Omni-Search & Cross-Project Quick Action State ──────────────────────────
+  const [omniSearchQuery, setOmniSearchQuery] = useState('');
+  const [omniSearchResults, setOmniSearchResults] = useState(null);
+  const [omniSearchLoading, setOmniSearchLoading] = useState(false);
+  const [omniSearchOpen, setOmniSearchOpen] = useState(false);
+  const [omniActiveTab, setOmniActiveTab] = useState('all');
+
+  // Quick Attendance Modal state
+  const [quickAttendanceModal, setQuickAttendanceModal] = useState(false);
+  const [quickAttendanceForm, setQuickAttendanceForm] = useState({
+    labor_id: '',
+    labor_name: '',
+    project_id: '',
+    project_name: '',
+    attendance_date: new Date().toISOString().slice(0, 10),
+    status: 'present',
+    shift_type: 'day',
+    overtime_hours: 0,
+    daily_rate: 0,
+    wage_amount: 0,
+    note: '',
+    available_projects: [],
+  });
+  const [savingQuickAttendance, setSavingQuickAttendance] = useState(false);
+
+  // Quick Payment Modal state
+  const [quickPaymentModal, setQuickPaymentModal] = useState(false);
+  const [quickPaymentForm, setQuickPaymentForm] = useState({
+    type: 'labor', // 'labor' | 'vendor'
+    id: '', // labor_id or project_vendor_id
+    name: '',
+    project_id: '',
+    project_name: '',
+    amount: '',
+    payment_date: new Date().toISOString().slice(0, 10),
+    mode: 'cash',
+    note: '',
+    transaction_reference: '',
+    balance_due: 0,
+    available_projects: [],
+  });
+  const [savingQuickPayment, setSavingQuickPayment] = useState(false);
+
+  // Omni Search Debounce
+  useEffect(() => {
+    const q = omniSearchQuery.trim();
+    if (!q) {
+      setOmniSearchResults(null);
+      setOmniSearchLoading(false);
+      return;
+    }
+    setOmniSearchLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api(`/api/admin/project-management/omni-search?q=${encodeURIComponent(q)}`);
+        if (res.success) {
+          setOmniSearchResults(res);
+          setOmniSearchOpen(true);
+        }
+      } catch (err) {
+        console.error('Omni-search error:', err);
+      } finally {
+        setOmniSearchLoading(false);
+      }
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [omniSearchQuery]);
+
+  // Open Quick Attendance Modal
+  const openQuickAttendance = (worker, proj = null) => {
+    const defaultProj = proj || (worker.projects && worker.projects[0]) || {
+      labor_id: worker.labor_id || worker.id,
+      project_id: worker.project_id,
+      project_name: worker.project_name,
+      daily_rate: worker.daily_rate,
+    };
+    const rate = Number(defaultProj?.daily_rate || worker.daily_rate || 0);
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+
+    setQuickAttendanceForm({
+      labor_id: defaultProj?.labor_id || worker.labor_id || worker.id || '',
+      labor_name: worker.name || worker.labor_name || worker.entity_name || '',
+      project_id: defaultProj?.project_id || '',
+      project_name: defaultProj?.project_name || '',
+      attendance_date: today,
+      status: 'present',
+      shift_type: 'day',
+      overtime_hours: 0,
+      daily_rate: rate,
+      wage_amount: rate,
+      note: '',
+      available_projects: worker.projects && worker.projects.length > 0 ? worker.projects : [defaultProj],
+    });
+    setQuickAttendanceModal(true);
+  };
+
+  // Save Quick Attendance
+  const handleSaveQuickAttendance = async (e) => {
+    e?.preventDefault?.();
+    if (!quickAttendanceForm.labor_id || !quickAttendanceForm.project_id) {
+      setMessage('Labor and Project are required');
+      return;
+    }
+    setSavingQuickAttendance(true);
+    try {
+      const body = {
+        entries: [{
+          labor_id: Number(quickAttendanceForm.labor_id),
+          attendance_date: quickAttendanceForm.attendance_date,
+          status: quickAttendanceForm.status,
+          shift_type: quickAttendanceForm.shift_type,
+          overtime_hours: Number(quickAttendanceForm.overtime_hours || 0),
+          note: quickAttendanceForm.note,
+        }],
+        admin_override: true,
+      };
+      const res = await api('/api/admin/project-management/labor/attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.success) {
+        setMessage(`✓ Attendance recorded for ${quickAttendanceForm.labor_name} in ${quickAttendanceForm.project_name || 'project'}`);
+        setQuickAttendanceModal(false);
+        if (omniSearchQuery.trim()) {
+          const updated = await api(`/api/admin/project-management/omni-search?q=${encodeURIComponent(omniSearchQuery.trim())}`);
+          if (updated.success) setOmniSearchResults(updated);
+        }
+        if (screen === 'reports') {
+          loadReportsData(reportType, reportProjectFilter, reportMaterialFilter, reportProjectStatus, reportSearch, reportEntityType, reportFrequency, reportStartDate, reportEndDate);
+        }
+      } else {
+        setMessage(res.error || 'Failed to record attendance');
+      }
+    } catch (err) {
+      setMessage(err.message || 'Error recording attendance');
+    } finally {
+      setSavingQuickAttendance(false);
+    }
+  };
+
+  // Open Quick Payment Modal
+  const openQuickPayment = (entity, type = 'labor', proj = null) => {
+    const isSupplier =
+      type === 'supplier' ||
+      entity.entity_kind === 'supplier' ||
+      entity.pay_type === 'material_supply' ||
+      entity.trade === 'Material Supplier' ||
+      entity.trade === 'Material Vendor' ||
+      (type === 'vendor' && !entity.project_vendor_id && !proj?.project_vendor_id);
+    const isLabor = type === 'labor' && !isSupplier;
+    const resolvedType = isLabor ? 'labor' : (isSupplier ? 'supplier' : 'contractor');
+
+    const defaultProj = proj || (entity.projects && entity.projects[0]) || {
+      id: isLabor ? (entity.labor_id || entity.id) : (entity.project_vendor_id || entity.id),
+      labor_id: entity.labor_id || entity.id,
+      project_vendor_id: entity.project_vendor_id || entity.id,
+      project_id: entity.project_id,
+      project_name: entity.project_name,
+      supplier_name: entity.supplier_name || entity.name,
+      balance: entity.balance_due ?? entity.total_balance ?? 0,
+    };
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+
+    setQuickPaymentForm({
+      type: resolvedType,
+      id: isLabor ? (defaultProj?.labor_id || entity.labor_id || entity.id || '') : (defaultProj?.project_vendor_id || entity.project_vendor_id || entity.id || ''),
+      supplier_name: entity.supplier_name || defaultProj?.supplier_name || entity.name || entity.labor_name || entity.vendor_name || entity.entity_name || '',
+      supplier_id: entity.supplier_id || defaultProj?.supplier_id || null,
+      name: entity.name || entity.labor_name || entity.vendor_name || entity.entity_name || '',
+      project_id: defaultProj?.project_id || entity.project_id || '',
+      project_name: defaultProj?.project_name || entity.project_name || '',
+      amount: '',
+      payment_date: today,
+      mode: 'cash',
+      note: '',
+      transaction_reference: '',
+      balance_due: defaultProj?.balance ?? entity.total_balance ?? entity.balance_due ?? 0,
+      available_projects: entity.projects && entity.projects.length > 0 ? entity.projects : [defaultProj],
+    });
+    setQuickPaymentModal(true);
+  };
+
+  // Save Quick Payment
+  const handleSaveQuickPayment = async (e) => {
+    e?.preventDefault?.();
+    if (!quickPaymentForm.amount || Number(quickPaymentForm.amount) <= 0) {
+      setMessage('Please enter a valid payment amount');
+      return;
+    }
+    if (quickPaymentForm.type !== 'supplier' && !quickPaymentForm.id) {
+      setMessage('Payee identification missing');
+      return;
+    }
+    if (!quickPaymentForm.project_id) {
+      setMessage('Please select a project');
+      return;
+    }
+    setSavingQuickPayment(true);
+    try {
+      if (quickPaymentForm.type === 'labor') {
+        const body = {
+          labor_id: Number(quickPaymentForm.id),
+          amount: Number(quickPaymentForm.amount),
+          payment_date: quickPaymentForm.payment_date,
+          mode: quickPaymentForm.mode,
+          note: quickPaymentForm.note,
+          transaction_reference: quickPaymentForm.transaction_reference,
+        };
+        const res = await api('/api/admin/project-management/labor/payments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.success) {
+          setMessage(`✓ Payment of ₹${quickPaymentForm.amount} recorded for ${quickPaymentForm.name}`);
+          setQuickPaymentModal(false);
+        } else {
+          setMessage(res.error || 'Failed to record payment');
+        }
+      } else if (quickPaymentForm.type === 'supplier') {
+        const body = {
+          project_id: Number(quickPaymentForm.project_id),
+          supplier_name: (quickPaymentForm.supplier_name || quickPaymentForm.name || '').trim(),
+          supplier_id: quickPaymentForm.supplier_id ? Number(quickPaymentForm.supplier_id) : null,
+          amount: Number(quickPaymentForm.amount),
+          payment_date: quickPaymentForm.payment_date,
+          mode: quickPaymentForm.mode,
+          note: quickPaymentForm.note,
+          transaction_reference: quickPaymentForm.transaction_reference,
+        };
+        const res = await api('/api/admin/project-management/supplier-payments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.success) {
+          setMessage(`✓ Payment of ₹${quickPaymentForm.amount} recorded for ${quickPaymentForm.name}`);
+          setQuickPaymentModal(false);
+        } else {
+          setMessage(res.error || 'Failed to record payment');
+        }
+      } else {
+        const body = {
+          project_vendor_id: Number(quickPaymentForm.id),
+          amount: Number(quickPaymentForm.amount),
+          payment_date: quickPaymentForm.payment_date,
+          mode: quickPaymentForm.mode,
+          payment_type: 'labour',
+          note: quickPaymentForm.note,
+          transaction_reference: quickPaymentForm.transaction_reference,
+        };
+        const res = await api('/api/admin/project-management/vendor-payments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.success) {
+          setMessage(`✓ Payment of ₹${quickPaymentForm.amount} recorded for ${quickPaymentForm.name}`);
+          setQuickPaymentModal(false);
+        } else {
+          setMessage(res.error || 'Failed to record payment');
+        }
+      }
+
+      if (omniSearchQuery.trim()) {
+        const updated = await api(`/api/admin/project-management/omni-search?q=${encodeURIComponent(omniSearchQuery.trim())}`);
+        if (updated.success) setOmniSearchResults(updated);
+      }
+      if (screen === 'reports') {
+        loadReportsData(reportType, reportProjectFilter, reportMaterialFilter, reportProjectStatus, reportSearch, reportEntityType, reportFrequency, reportStartDate, reportEndDate);
+      }
+    } catch (err) {
+      setMessage(err.message || 'Error recording payment');
+    } finally {
+      setSavingQuickPayment(false);
+    }
+  };
 
   // ── Agent Assignment State ────────────────────────────────────────────────
   const [projectAgents, setProjectAgents] = useState([]);
@@ -982,6 +1464,8 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
           // A loaded record is informational until the user explicitly changes it.
           // Untouched workers deliberately have no default attendance status.
           status: row.attendance_id ? (row.attendance_status || row.status || 'present') : '',
+          shift_type: row.shift_type || 'day',
+          overtime_hours: Number(row.overtime_hours || 0),
           wage_amount: row.attendance_id ? Number(row.wage_amount) : 0,
           dirty: false,
         }));
@@ -1140,6 +1624,8 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
       loadContractorsList('all');
       loadProjectSuppliers(pid);
       loadSupplierPayments(pid);
+      loadProjectStaff(pid);
+      loadStaffPayments(pid);
       if (selectedSupplier) {
         loadSupplierLedger(pid, selectedSupplier.supplier_id, selectedSupplier.raw_supplier_name || selectedSupplier.supplier_name);
       }
@@ -1149,12 +1635,33 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
   };
 
   // ── Load Reports Data ───────────────────────────────────────────────────────
-  const loadReportsData = useCallback(async (type, projFilter) => {
+  const loadReportsData = useCallback(async (
+    type,
+    projFilter,
+    matFilter,
+    statusFilter,
+    searchFilter,
+    entityFilter,
+    freqFilter,
+    sDate,
+    eDate
+  ) => {
     setLoadingReport(true);
     try {
-      const url = `/api/admin/project-management/reports?type=${type}${projFilter ? `&projectId=${projFilter}` : ''}`;
+      const params = new URLSearchParams();
+      params.set('type', type);
+      if (projFilter) params.set('projectId', projFilter);
+      if (matFilter) params.set('materialId', matFilter);
+      if (statusFilter && statusFilter !== 'all') params.set('projectStatus', statusFilter);
+      if (searchFilter && searchFilter.trim()) params.set('search', searchFilter.trim());
+      if (entityFilter && entityFilter !== 'all') params.set('entityType', entityFilter);
+      if (freqFilter && freqFilter !== 'all') params.set('frequency', freqFilter);
+      if (sDate) params.set('startDate', sDate);
+      if (eDate) params.set('endDate', eDate);
+
+      const url = `/api/admin/project-management/reports?${params.toString()}`;
       const res = await api(url);
-      setReportData(res);
+      setReportData(res || { title: '', headers: [], data: [], summary: null });
     } catch (e) {
       setMessage(e.message);
     } finally {
@@ -1165,17 +1672,125 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
   const openReportsScreen = async () => {
     setScreen('reports');
     try {
-      const pRes = await api('/api/admin/project-management/projects?pageSize=100').catch(() => ({ data: [] }));
-      setAllProjectsList(pRes.data || []);
+      const pRes = await api('/api/admin/project-management/projects?pageSize=200').catch(() => ({ data: [] }));
+      if (pRes?.data && Array.isArray(pRes.data)) setAllProjectsList(pRes.data);
+      const mRes = await api('/api/admin/project-management/materials?pageSize=200').catch(() => ({ data: [] }));
+      if (mRes?.data && Array.isArray(mRes.data)) setMaterialsMaster(mRes.data);
     } catch {}
-    loadReportsData(reportType, reportProjectFilter);
   };
 
   useEffect(() => {
     if (screen === 'reports') {
-      loadReportsData(reportType, reportProjectFilter);
+      api('/api/admin/project-management/projects?pageSize=200')
+        .then((pRes) => {
+          if (pRes?.data && Array.isArray(pRes.data)) setAllProjectsList(pRes.data);
+        })
+        .catch(() => {});
+      api('/api/admin/project-management/materials?pageSize=200')
+        .then((mRes) => {
+          if (mRes?.data && Array.isArray(mRes.data)) setMaterialsMaster(mRes.data);
+        })
+        .catch(() => {});
     }
-  }, [screen, reportType, reportProjectFilter, loadReportsData]);
+  }, [screen]);
+
+  const availableReportProjects = useMemo(() => {
+    const map = new Map();
+    (allProjectsList || []).forEach((p) => {
+      if (p && p.id) {
+        map.set(String(p.id), { id: String(p.id), name: p.name, status: p.status });
+      }
+    });
+    if (Array.isArray(reportData?.data)) {
+      reportData.data.forEach((r) => {
+        if (r && r.project_id && !map.has(String(r.project_id))) {
+          map.set(String(r.project_id), {
+            id: String(r.project_id),
+            name: r.project_name || `Project #${r.project_id}`,
+            status: r.project_status || r.status || '',
+          });
+        }
+      });
+    }
+    return Array.from(map.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [allProjectsList, reportData]);
+
+  const availableReportMaterials = useMemo(() => {
+    const map = new Map();
+    (materialsMaster || []).forEach((m) => {
+      if (m && m.id) {
+        map.set(String(m.id), { id: String(m.id), name: m.name, unit: m.unit });
+      }
+    });
+    if (Array.isArray(reportData?.data)) {
+      reportData.data.forEach((r) => {
+        if (r && r.material_id && !map.has(String(r.material_id))) {
+          map.set(String(r.material_id), {
+            id: String(r.material_id),
+            name: r.material_name || `Material #${r.material_id}`,
+            unit: r.unit || r.material_unit || '',
+          });
+        }
+      });
+    }
+    return Array.from(map.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [materialsMaster, reportData]);
+
+  useEffect(() => {
+    if (screen === 'reports') {
+      const timer = setTimeout(() => {
+        loadReportsData(
+          reportType,
+          reportProjectFilter,
+          reportMaterialFilter,
+          reportProjectStatus,
+          reportSearch,
+          reportEntityType,
+          reportFrequency,
+          reportStartDate,
+          reportEndDate
+        );
+      }, 250);
+      return () => clearTimeout(timer);
+    }
+  }, [
+    screen,
+    reportType,
+    reportProjectFilter,
+    reportMaterialFilter,
+    reportProjectStatus,
+    reportSearch,
+    reportEntityType,
+    reportFrequency,
+    reportStartDate,
+    reportEndDate,
+    loadReportsData,
+  ]);
+
+  const reportCsvUrl = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('type', reportType);
+    params.set('format', 'csv');
+    if (reportProjectFilter) params.set('projectId', reportProjectFilter);
+    if (reportMaterialFilter) params.set('materialId', reportMaterialFilter);
+    if (reportProjectStatus && reportProjectStatus !== 'all') params.set('projectStatus', reportProjectStatus);
+    if (reportSearch && reportSearch.trim()) params.set('search', reportSearch.trim());
+    if (reportEntityType && reportEntityType !== 'all') params.set('entityType', reportEntityType);
+    if (reportFrequency && reportFrequency !== 'all') params.set('frequency', reportFrequency);
+    if (reportStartDate) params.set('startDate', reportStartDate);
+    if (reportEndDate) params.set('endDate', reportEndDate);
+    return `/api/admin/project-management/reports?${params.toString()}`;
+  }, [
+    reportType,
+    reportProjectFilter,
+    reportMaterialFilter,
+    reportProjectStatus,
+    reportSearch,
+    reportEntityType,
+    reportFrequency,
+    reportStartDate,
+    reportEndDate,
+  ]);
 
   // ── Open Timeline Drawer ────────────────────────────────────────────────────
   const openMaterialTimeline = async (material) => {
@@ -1303,19 +1918,35 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
 
   // ── Save Supplier Payment ──────────────────────────────────────────────────
   const saveSupplierPayment = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!project?.id) return;
     try {
-      const payload = {
-        ...supplierPaymentForm,
-        project_id: project.id,
-      };
-      const res = await api('/api/admin/project-management/supplier-payments', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      setMessage(res.is_advance ? `Supplier payment recorded as advance of ${INR(res.advance_amount)}` : 'Supplier payment recorded successfully');
-      setSupplierPaymentModal(false);
+      if (editingSupplierPaymentId) {
+        await api(`/api/admin/project-management/supplier-payments?id=${editingSupplierPaymentId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            amount: Number(supplierPaymentForm.amount),
+            payment_date: supplierPaymentForm.payment_date,
+            mode: supplierPaymentForm.mode,
+            transaction_reference: supplierPaymentForm.transaction_reference,
+            note: supplierPaymentForm.note,
+          }),
+        });
+        setMessage('Vendor payment updated successfully');
+        setSupplierPaymentModal(false);
+        setEditingSupplierPaymentId(null);
+      } else {
+        const payload = {
+          ...supplierPaymentForm,
+          project_id: project.id,
+        };
+        const res = await api('/api/admin/project-management/supplier-payments', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        setMessage(res.is_advance ? `Vendor payment recorded as advance of ${INR(res.advance_amount)}` : 'Vendor payment recorded successfully');
+        setSupplierPaymentModal(false);
+      }
       setSupplierPaymentForm({
         supplier_id: '',
         supplier_name: '',
@@ -1333,6 +1964,34 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
       }
     } catch (err) {
       setModalError(err.message);
+      throw err;
+    }
+  };
+
+  // ── Save Local Vendor ────────────────────────────────────────────────────────
+  const saveLocalVendor = async (e) => {
+    e.preventDefault();
+    if (!project?.id) return;
+    try {
+      const res = await api('/api/admin/project-management/local-vendors', {
+        method: 'POST',
+        body: JSON.stringify({
+          projectId: project.id,
+          ...localVendorForm,
+        }),
+      });
+      setMessage(res.message || 'Local vendor saved successfully');
+      setLocalVendorModal(false);
+      setLocalVendorForm({
+        name: '',
+        phone: '',
+        city: '',
+        material_type: '',
+        address: '',
+      });
+      await loadProjectSuppliers(project.id);
+    } catch (err) {
+      setModalError(err.message || 'Failed to save local vendor');
       throw err;
     }
   };
@@ -1572,9 +2231,241 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
       setEditingCommissionId(null);
       setModalError('');
       setCommissionForm(commissionBlank);
+      refreshProjectData(project.id);
     } catch (err) {
       setMessage(err.message);
       throw err;
+    }
+  };
+
+  // ── Staff Management Handlers & Loaders ─────────────────────────────────────
+  const loadProjectStaff = useCallback(async (projId) => {
+    const pid = projId || project?.id;
+    if (!pid) return;
+    try {
+      const res = await api(`/api/admin/project-management/staff?projectId=${pid}&pageSize=100`);
+      setProjectStaff(res.data || []);
+      if (res.summary) setStaffSummary(res.summary);
+    } catch (e) {
+      console.error('Error loading project staff:', e);
+    }
+  }, [project?.id]);
+
+  const computeStaffWage = (salaryRate, payType, status, shiftType = 'day', overtimeHours = 0) => {
+    if (status === 'absent' || !status || status === 'unmarked') return 0;
+    const mult = shiftType === 'double' ? 2 : 1;
+    let base = 0;
+    const rate = Number(salaryRate || 0);
+    if (payType === 'per_day') {
+      base = status === 'half_day' ? rate * 0.5 : rate * mult;
+    } else {
+      // Monthly pay: daily approx rate = rate / 30
+      const dailyApprox = rate / 30;
+      base = status === 'half_day' ? Math.round(dailyApprox * 0.5) : Math.round(dailyApprox * mult);
+    }
+    let ot = 0;
+    if (Number(overtimeHours) > 0) {
+      const hourly = rate > 0 ? (rate / (payType === 'monthly' ? 240 : 8)) : 0;
+      ot = Math.round(hourly * Number(overtimeHours));
+    }
+    return Math.round(base + ot);
+  };
+
+  const loadStaffAttendance = useCallback(async (projId, date) => {
+    const pid = projId || project?.id;
+    const targetDate = date || staffAttendanceDate || today();
+    if (!pid) return;
+    setStaffAttendanceLoading(true);
+    try {
+      const res = await api(`/api/admin/project-management/staff/attendance?projectId=${pid}&date=${targetDate}`);
+      const rows = (res.data || []).map((r) => ({
+        ...r,
+        dirty: false,
+        shift_type: r.shift_type || 'day',
+        overtime_hours: Number(r.overtime_hours || 0),
+        wage_amount: Number(r.wage_amount || 0) || computeStaffWage(r.salary_rate, r.pay_type, r.status, r.shift_type, r.overtime_hours),
+        note: r.note || '',
+      }));
+      setStaffDailyAttendance(rows);
+      if (res.history) {
+        setProjectStaffAttendanceHistory(res.history);
+      }
+    } catch (e) {
+      console.error('Error loading staff attendance:', e);
+    } finally {
+      setStaffAttendanceLoading(false);
+    }
+  }, [project?.id, staffAttendanceDate]);
+
+  const saveAllStaffAttendance = async () => {
+    if (!project?.id) return;
+    if (!isEditableWithin48Hours(staffAttendanceDate)) {
+      setMessage('❌ Sirf pichle 48 hours (aaj aur pichle 2 din) ki attendance save ki ja sakti hai.');
+      return;
+    }
+    setSavingStaffAttendance(true);
+    try {
+      const dirtyRows = staffDailyAttendance.filter((r) => r.dirty);
+      if (!dirtyRows.length) return;
+      const entries = dirtyRows.map((r) => ({
+        staff_id: r.staff_id,
+        attendance_date: staffAttendanceDate,
+        status: r.status,
+        shift_type: r.shift_type || 'day',
+        overtime_hours: Number(r.overtime_hours || 0),
+        wage_amount: r.wage_amount,
+        note: r.note || '',
+      }));
+      await api('/api/admin/project-management/staff/attendance', {
+        method: 'POST',
+        body: JSON.stringify({
+          attendance_date: staffAttendanceDate,
+          entries,
+        }),
+      });
+      setMessage('✅ Staff attendance saved successfully');
+      loadStaffAttendance(project.id, staffAttendanceDate);
+      loadProjectStaff(project.id);
+      refreshProjectData(project.id);
+    } catch (e) {
+      setMessage(`❌ ${e.message || 'Could not save staff attendance'}`);
+    } finally {
+      setSavingStaffAttendance(false);
+    }
+  };
+
+  const loadStaffPayments = useCallback(async (projId) => {
+    const pid = projId || project?.id;
+    if (!pid) return;
+    try {
+      const res = await api(`/api/admin/project-management/staff/payments?projectId=${pid}&pageSize=100`);
+      setStaffPayments(res.data || []);
+      if (res.summary) setStaffPaymentsSummary(res.summary);
+    } catch (e) {
+      console.error('Error loading staff payments:', e);
+    }
+  }, [project?.id]);
+
+  const saveStaffMember = async (e) => {
+    if (e) e.preventDefault();
+    if (!project?.id) return;
+    if (staffSavingRef.current) return;
+    staffSavingRef.current = true;
+    try {
+      const payload = {
+        ...staffForm,
+        project_id: project.id,
+        salary_rate: Number(staffForm.salary_rate || 0),
+        commission_rate: Number(staffForm.commission_rate || 0),
+      };
+
+      if (editingStaffId) {
+        await api(`/api/admin/project-management/staff/${editingStaffId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+        setMessage('Staff member updated successfully');
+      } else {
+        await api('/api/admin/project-management/staff', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        setMessage('Staff member assigned to project');
+      }
+      setStaffModal(false);
+      setEditingStaffId(null);
+      setStaffForm(staffBlank);
+      setModalError('');
+      loadProjectStaff(project.id);
+      loadStaffAttendance(project.id, staffAttendanceDate);
+      refreshProjectData(project.id);
+      refreshProjectData(project.id);
+    } catch (err) {
+      setModalError(err.message || 'Could not save staff member');
+      setMessage(err.message);
+      throw err;
+    } finally {
+      staffSavingRef.current = false;
+    }
+  };
+
+  const markStaffAttendance = async (staffId, status, overtimeHours = 0, note = '') => {
+    if (!project?.id) return;
+    try {
+      await api('/api/admin/project-management/staff/attendance', {
+        method: 'POST',
+        body: JSON.stringify({
+          staff_id: staffId,
+          attendance_date: staffAttendanceDate,
+          status,
+          overtime_hours: overtimeHours,
+          note,
+        }),
+      });
+      setMessage(`Staff attendance marked as ${status}`);
+      loadStaffAttendance(project.id, staffAttendanceDate);
+      loadProjectStaff(project.id);
+    } catch (err) {
+      setMessage(err.message);
+    }
+  };
+
+  const saveStaffPayment = async (e) => {
+    if (e) e.preventDefault();
+    if (!project?.id) return;
+    if (staffPaymentSavingRef.current) return;
+    staffPaymentSavingRef.current = true;
+    try {
+      await api('/api/admin/project-management/staff/payments', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...staffPaymentForm,
+          project_id: project.id,
+          amount: Number(staffPaymentForm.amount),
+        }),
+      });
+      setMessage('Staff payment recorded successfully');
+      setStaffPaymentModal(false);
+      setStaffPaymentForm({ staff_id: '', amount: '', payment_date: today(), payment_type: 'salary', mode: 'bank', transaction_reference: '', note: '' });
+      setModalError('');
+      loadStaffPayments(project.id);
+      loadProjectStaff(project.id);
+      refreshProjectData(project.id);
+      refreshProjectData(project.id);
+    } catch (err) {
+      setModalError(err.message || 'Could not record staff payment');
+      setMessage(err.message);
+      throw err;
+    } finally {
+      staffPaymentSavingRef.current = false;
+    }
+  };
+
+  const deleteStaffMember = async (staffId) => {
+    if (!project?.id) return;
+    if (!confirm('Are you sure you want to remove/deactivate this staff member?')) return;
+    try {
+      const res = await api(`/api/admin/project-management/staff/${staffId}`, { method: 'DELETE' });
+      setMessage(res.message || 'Staff member removed');
+      loadProjectStaff(project.id);
+      loadStaffAttendance(project.id, staffAttendanceDate);
+      refreshProjectData(project.id);
+    } catch (err) {
+      setMessage(err.message);
+    }
+  };
+
+  const deleteStaffPayment = async (paymentId) => {
+    if (!project?.id) return;
+    if (!confirm('Are you sure you want to delete this payment record?')) return;
+    try {
+      await api(`/api/admin/project-management/staff/payments?id=${paymentId}`, { method: 'DELETE' });
+      setMessage('Staff payment deleted');
+      loadStaffPayments(project.id);
+      loadProjectStaff(project.id);
+      refreshProjectData(project.id);
+    } catch (err) {
+      setMessage(err.message);
     }
   };
 
@@ -1669,6 +2560,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
           ...prev,
           totalAmount: Math.max(0, Number(prev.totalAmount || 0) - Number(deletedComm?.amount || 0)),
         }));
+        refreshProjectData();
       } else if (kind === 'labor') {
         await api(`/api/admin/project-management/labor/${id}`, { method: 'DELETE' });
         loadProjectLabors(project.id);
@@ -1687,14 +2579,31 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
 
   // ── Phase 1: Party Payment ───────────────────────────────────────────────────
   const savePartyPayment = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     try {
-      await api('/api/admin/project-management/payments', {
-        method: 'POST',
-        body: JSON.stringify({ ...partyPaymentForm, project_id: project.id }),
-      });
-      setPartyPaymentForm({ amount: '', payment_date: today(), mode: 'bank', note: '', transaction_reference: '' });
-      setMessage('Party payment recorded');
+      if (editingPartyPaymentId) {
+        await api(`/api/admin/project-management/payments/${editingPartyPaymentId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            amount: Number(partyPaymentForm.amount),
+            payment_date: partyPaymentForm.payment_date,
+            mode: partyPaymentForm.mode,
+            transaction_reference: partyPaymentForm.transaction_reference,
+            note: partyPaymentForm.note,
+          }),
+        });
+        setMessage('Party payment updated successfully');
+        setPartyPaymentModal(false);
+        setEditingPartyPaymentId(null);
+      } else {
+        await api('/api/admin/project-management/payments', {
+          method: 'POST',
+          body: JSON.stringify({ ...partyPaymentForm, project_id: project.id }),
+        });
+        setPartyPaymentForm({ amount: '', payment_date: today(), mode: 'bank', note: '', transaction_reference: '' });
+        setMessage('Party payment recorded successfully');
+        setPartyPaymentModal(false);
+      }
       refreshProjectData();
     } catch (e) {
       setMessage(e.message);
@@ -1815,11 +2724,15 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
         const mult = initialStatus === 'present' ? 1 : initialStatus === 'half_day' ? 0.5 : 0;
         const wage = isMarked ? Number(ex.wage_amount) : mult * workers * rate;
 
+        const shiftType = ex?.shift_type || 'day';
+        const otHours = Number(ex?.overtime_hours || 0);
         return {
           project_vendor_id: pv.id,
           vendor_name: pv.vendor_name,
           trade: pv.trade,
           status: initialStatus,
+          shift_type: shiftType,
+          overtime_hours: otHours,
           workers_count: workers,
           rate_per_worker: rate,
           wage_amount: wage,
@@ -1858,6 +2771,8 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
           project_vendor_id: r.project_vendor_id,
           attendance_date: attendanceDate,
           status: r.status,
+          shift_type: r.shift_type || 'day',
+          overtime_hours: Number(r.overtime_hours || 0),
           workers_count: r.workers_count,
           rate_per_worker: r.rate_per_worker,
           note: r.note,
@@ -1915,23 +2830,55 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
     }
   }, [projectTab, paymentsSubTab, attendanceSubTab, loadProjectLabors, project?.id]);
 
+  useEffect(() => {
+    if (project?.id) {
+      if (projectTab === 'staff') {
+        loadProjectStaff(project.id);
+      } else if (projectTab === 'attendance' && attendanceSubTab === 'staff') {
+        loadProjectStaff(project.id);
+        loadStaffAttendance(project.id, staffAttendanceDate);
+      } else if (projectTab === 'payments' && paymentsSubTab === 'staff') {
+        loadProjectStaff(project.id);
+        loadStaffPayments(project.id);
+      }
+    }
+  }, [projectTab, attendanceSubTab, paymentsSubTab, project?.id, staffAttendanceDate, loadProjectStaff, loadStaffAttendance, loadStaffPayments]);
+
   const saveVendorPayment = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     try {
-      await api('/api/admin/project-management/vendor-payments', {
-        method: 'POST',
-        body: JSON.stringify(vendorPaymentForm),
-      });
-      setMessage('Vendor payment recorded');
-      setVendorPaymentForm({
-        project_vendor_id: '',
-        amount: '',
-        payment_date: today(),
-        mode: 'bank',
-        payment_type: 'labour',
-        note: '',
-        transaction_reference: '',
-      });
+      if (editingVendorPaymentId) {
+        await api(`/api/admin/project-management/vendor-payments/${editingVendorPaymentId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            amount: Number(vendorPaymentForm.amount),
+            payment_date: vendorPaymentForm.payment_date,
+            mode: vendorPaymentForm.mode,
+            payment_type: vendorPaymentForm.payment_type,
+            transaction_reference: vendorPaymentForm.transaction_reference,
+            note: vendorPaymentForm.note,
+          }),
+        });
+        setMessage('Service provider payment updated successfully');
+        setVendorPaymentModal(false);
+        setEditingVendorPaymentId(null);
+      } else {
+        await api('/api/admin/project-management/vendor-payments', {
+          method: 'POST',
+          body: JSON.stringify(vendorPaymentForm),
+        });
+        setMessage('Service provider payment recorded successfully');
+        setVendorPaymentForm({
+          project_vendor_id: '',
+          amount: '',
+          payment_date: today(),
+          mode: 'bank',
+          payment_type: 'labour',
+          note: '',
+          transaction_reference: '',
+        });
+        setVendorPaymentModal(false);
+      }
       refreshProjectData();
       loadVendorPayments();
     } catch (e) {
@@ -2018,8 +2965,8 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
 
   /* Bulk checkbox controls intentionally removed; attendance is per worker. */
   const applyBulkStatus = (status) => {
-    if (laborAttendanceDate !== today()) {
-      setMessage(`❌ Purani date par attendance edit nahi kar sakte.`);
+    if (!isEditableWithin48Hours(laborAttendanceDate)) {
+      setMessage(`❌ 48 hours se purani date par attendance edit nahi kar sakte.`);
       return;
     }
     const selectedSet = new Set(selectedLaborIds);
@@ -2048,8 +2995,8 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
 
   const saveAllLaborAttendance = async (customRows, includeUntouched = false) => {
     if (!project?.id) return;
-    if (laborAttendanceDate !== today()) {
-      setMessage(`❌ Sirf aaj ki date (${today()}) ki attendance save ki ja sakti hai.`);
+    if (!isEditableWithin48Hours(laborAttendanceDate)) {
+      setMessage(`❌ Sirf pichle 48 hours (aaj aur pichle 2 din) ki attendance save ki ja sakti hai.`);
       return;
     }
     const rowsToSave = (customRows || laborAttendanceRows).filter((row) =>
@@ -2065,6 +3012,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
         labor_id: Number(r.labor_id || r.id),
         attendance_date: laborAttendanceDate,
         status: r.status || 'present',
+        shift_type: r.shift_type || 'day',
         overtime_hours: Number(r.overtime_hours || 0),
         wage_amount: Number(r.wage_amount || 0),
         note: r.note || '',
@@ -2090,6 +3038,71 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
       setMessage(`❌ ${e.message || 'Could not save labor attendance'}`);
     } finally {
       setSavingLaborAttendance(false);
+    }
+  };
+
+  const saveAttendanceDetailModal = async (e) => {
+    if (e) e.preventDefault();
+    if (!attendanceDetailModal || !project?.id) return;
+    setSavingAttendanceDetail(true);
+    try {
+      if (attendanceDetailModal.type === 'labor') {
+        const payload = [{
+          labor_id: Number(attendanceDetailModal.labor_id),
+          attendance_date: attendanceDetailModal.attendance_date,
+          status: attendanceDetailModal.status || 'present',
+          shift_type: attendanceDetailModal.shift_type || 'day',
+          overtime_hours: Number(attendanceDetailModal.overtime_hours || 0),
+          wage_amount: Number(attendanceDetailModal.wage_amount || 0),
+          note: attendanceDetailModal.note || '',
+        }];
+
+        await api('/api/admin/project-management/labor/attendance', {
+          method: 'PUT',
+          body: JSON.stringify({
+            project_id: project.id,
+            attendance_date: attendanceDetailModal.attendance_date,
+            entries: payload,
+            records: payload,
+          }),
+        });
+        setMessage(`✅ Attendance updated successfully for ${attendanceDetailModal.labor_name}`);
+        setAttendanceDetailModal(null);
+        loadLaborAttendance(laborAttendanceDate, project.id);
+        loadProjectLabors(project.id);
+        refreshProjectData(project.id);
+        loadProjectLaborAttendanceHistory(project.id);
+      } else if (attendanceDetailModal.type === 'vendor') {
+        const payload = [{
+          project_vendor_id: Number(attendanceDetailModal.project_vendor_id),
+          attendance_date: attendanceDetailModal.attendance_date,
+          status: attendanceDetailModal.status || 'present',
+          shift_type: attendanceDetailModal.shift_type || 'day',
+          overtime_hours: Number(attendanceDetailModal.overtime_hours || 0),
+          workers_count: Number(attendanceDetailModal.workers_count || 1),
+          rate_per_worker: Number(attendanceDetailModal.rate_per_worker || 0),
+          wage_amount: Number(attendanceDetailModal.wage_amount || 0),
+          note: attendanceDetailModal.note || '',
+        }];
+
+        await api('/api/admin/project-management/attendance', {
+          method: 'POST',
+          body: JSON.stringify({
+            attendance_date: attendanceDetailModal.attendance_date,
+            entries: payload,
+            records: payload,
+          }),
+        });
+        setMessage(`✅ Attendance updated successfully for ${attendanceDetailModal.vendor_name}`);
+        setAttendanceDetailModal(null);
+        refreshProjectData();
+        loadDailyAttendance(attendanceDate);
+        loadProjectVendorAttendanceHistory(project?.id);
+      }
+    } catch (err) {
+      alert(`❌ ${err.message || 'Could not update attendance'}`);
+    } finally {
+      setSavingAttendanceDetail(false);
     }
   };
 
@@ -2141,7 +3154,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
   };
 
   return (
-    <section className={`pm-container${isDarkMode ? ' dark-mode' : ''}`}>
+    <section className={`pm-container${effectiveDark ? ' dark-mode' : ''}`}>
       <SubmitToast toast={submitAction.toast} onDismiss={submitAction.dismissToast} />
       {/* ── TOP NAV BAR ───────────────────────────────────────────────────── */}
       <div className="bar" style={{ justifyContent: 'space-between', marginBottom: 16 }}>
@@ -2165,6 +3178,60 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
               {role.toUpperCase()}
             </span>
           )}
+        </div>
+
+        {/* ── Global Omni-Search Bar ── */}
+        <div style={{ position: 'relative', flex: '1 1 320px', maxWidth: 460, minWidth: 200, margin: '0 8px' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              background: effectiveDark ? '#18181c' : '#fff',
+              border: omniSearchOpen ? '1.5px solid #0284c7' : (effectiveDark ? '1.5px solid #2a2a30' : '1.5px solid #cbd5e1'),
+              borderRadius: 8,
+              padding: '6px 12px',
+              boxShadow: effectiveDark ? '0 1px 3px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.06)',
+            }}
+          >
+            <span style={{ marginRight: 8, color: '#64748b', fontSize: 13 }}>🔍</span>
+            <input
+              type="text"
+              value={omniSearchQuery}
+              onChange={(e) => setOmniSearchQuery(e.target.value)}
+              onFocus={() => { if (omniSearchResults) setOmniSearchOpen(true); }}
+              placeholder="Search Labor, Vendor, Material, Project (Name/Phone)..."
+              style={{
+                border: 'none',
+                outline: 'none',
+                width: '100%',
+                fontSize: 13,
+                background: 'transparent',
+                color: effectiveDark ? '#f0f0f5' : '#0f172a',
+              }}
+            />
+            {omniSearchLoading && <span style={{ fontSize: 11, color: '#0ea5e9', marginRight: 4 }}>⏳</span>}
+            {omniSearchQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOmniSearchQuery('');
+                  setOmniSearchResults(null);
+                  setOmniSearchOpen(false);
+                }}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  color: '#94a3b8',
+                  fontSize: 14,
+                  padding: '0 4px',
+                  fontWeight: 'bold',
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -2699,7 +3766,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                           <small>Total Labour Cost</small>
                           <b>{INR(project.total_labour_cost)}</b>
                           <span style={{ fontSize: 10, color: '#64748b', display: 'block', marginTop: 2 }}>
-                            Vendor: {INR(project.vendor_labour_cost ?? (Number(project.daily_labour_cost || 0) + Number(project.contract_labour_cost || 0)))} | Labor: {INR(project.individual_labour_cost || 0)}
+                            Service Provider: {INR(project.vendor_labour_cost ?? (Number(project.daily_labour_cost || 0) + Number(project.contract_labour_cost || 0)))} | Labor: {INR(project.individual_labour_cost || 0)}
                           </span>
                         </div>
                       )}
@@ -2713,6 +3780,17 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                             </span>
                           </div>
                           <div className="stat">
+                            <small>Staff Cost</small>
+                            <b style={{ color: '#0284c7' }}>{INR(project.total_staff_cost || 0)}</b>
+                            <span style={{ fontSize: 10, color: '#64748b', display: 'block', marginTop: 2 }}>
+                              Paid: {INR(project.total_paid_to_staff || 0)} | Due: {INR(Math.max(0, Number(project.total_staff_cost || 0) - Number(project.total_paid_to_staff || 0)))}
+                            </span>
+                          </div>
+                          <div className="stat">
+                            <small>Commission</small>
+                            <b style={{ color: '#d97706' }}>{INR(project.total_commission || 0)}</b>
+                          </div>
+                          <div className="stat">
                             <small>Other Expenses</small>
                             <b>{INR(project.total_other_expenses)}</b>
                           </div>
@@ -2723,14 +3801,28 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                           <div className="stat">
                             <small>Total Project Expense</small>
                             <b style={{ color: '#b45309' }}>{INR(project.total_expense)}</b>
+                            <span style={{ fontSize: 10, color: '#64748b', display: 'block', marginTop: 2 }}>
+                              Labour + Mat + Staff + Comm + Exp
+                            </span>
                           </div>
                           <div className="stat">
-                            <small>Paid to Vendors</small>
+                            <small>Paid to Contractors</small>
                             <b style={{ color: '#ea580c' }}>{INR(project.total_paid_to_vendors)}</b>
                           </div>
                           <div className="stat">
-                            <small>Paid to Suppliers</small>
+                            <small>Paid to Vendors</small>
                             <b style={{ color: '#0284c7' }}>{INR(project.total_paid_to_suppliers ?? projectSuppliers.reduce((sum, s) => sum + (Number(s.total_paid) || 0), 0))}</b>
+                          </div>
+                          <div className="stat">
+                            <small>Paid to Staff</small>
+                            <b style={{ color: '#16a34a' }}>{INR(project.total_paid_to_staff || 0)}</b>
+                          </div>
+                          <div className="stat">
+                            <small>Total Balance Due</small>
+                            <b style={{ color: '#dc2626' }}>{INR(project.total_pending_payable || 0)}</b>
+                            <span style={{ fontSize: 10, color: '#dc2626', display: 'block', marginTop: 2 }}>
+                              Total Pending Payable
+                            </span>
                           </div>
                           <div className="stat" style={{ background: Number(project.profit_or_loss ?? project.profit_so_far) >= 0 ? '#f0fdf4' : '#fef2f2', border: `1px solid ${Number(project.profit_or_loss ?? project.profit_so_far) >= 0 ? '#bbf7d0' : '#fecaca'}` }}>
                             <small style={{ color: Number(project.profit_or_loss ?? project.profit_so_far) >= 0 ? '#166534' : '#991b1b' }}>Profit So Far</small>
@@ -2795,7 +3887,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                         className={projectTab === 'suppliers' ? 'active' : ''}
                         onClick={() => { setSelectedSupplier(null); setContractorMenuOpen(false); handleSectionChange('suppliers'); }}
                       >
-                        🚚 Suppliers ({projectSuppliers.length})
+                        🚚 Vendors ({projectSuppliers.length})
                       </button>
                     )}
                     {allowedMainTabs.includes('commission') && (
@@ -2806,11 +3898,19 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                         🤝 Commission ({commissionRows.length})
                       </button>
                     )}
+                    {allowedMainTabs.includes('staff') && (
+                      <button
+                        className={projectTab === 'staff' ? 'active' : ''}
+                        onClick={() => { setSelectedSupplier(null); setContractorMenuOpen(false); handleSectionChange('staff'); }}
+                      >
+                        👔 Staff ({projectStaff.length})
+                      </button>
+                    )}
                   </div>
 
                   {contractorMenuOpen && projectTab === 'vendors' && (
                     <div className="card" style={{ margin: '-8px 0 16px', padding: 12, border: '1px solid #bfdbfe', background: '#f8fbff' }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: '#1e3a8a' }}>Select contractor / vendor type</div>
+                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: '#1e3a8a' }}>Select contractor / service provider type</div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                         <button className={vendorTypeFilter === 'all' ? 'active-btn' : 'muted'} onClick={() => setVendorTypeFilter('all')}>All Contractors</button>
                         {contractorTrades.map((trade) => (
@@ -2896,101 +3996,112 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                     </div>
                   </div>
 
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Vendor</th>
-                        <th>Trade</th>
-                        <th>Work Description</th>
-                        <th>Pay Type</th>
-                        {(!isAgent || hasAgentPayment) && <th>Rate / Contract</th>}
-                        {(!isAgent || hasAgentPayment) && <th>Total Earned</th>}
-                        {!isSupervisor && (!isAgent || hasAgentPayment) && <th>Total Paid</th>}
-                        {!isSupervisor && (!isAgent || hasAgentPayment) && <th>Balance</th>}
-                        <th>Status</th>
-                        <th style={{ textAlign: 'right' }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {projectVendors.filter((pv) => matchesContractorType(pv.trade, vendorTypeFilter)).map((pv) => {
-                        const earnedVal = pv.total_earned ?? pv.earned ?? 0;
-                        const paidVal = pv.total_paid ?? pv.paid ?? 0;
-                        const dueVal = pv.balance_due ?? pv.balance ?? (Number(earnedVal) - Number(paidVal));
-                        const isAdvance = Number(dueVal || 0) < 0;
-                        const isDue = Number(dueVal || 0) > 0;
-                        return (
-                          <tr
-                            key={pv.id}
-                            className="clickable-row"
-                            onClick={() => openVendorDetail(pv)}
-                            title="Click to open contractor detail page"
-                          >
-                            <td>
-                              <b>{pv.vendor_name}</b>
-                              <br />
-                              <span style={{ fontSize: 11, color: '#64748b' }}>{pv.vendor_phone || '—'}</span>
-                            </td>
-                            <td>{pv.trade || 'General'}</td>
-                            <td>{pv.work_description}</td>
-                            <td>
-                              <span className="badge badge-active">
-                                {pv.pay_type === 'daily_wage' ? 'Daily Wage' : 'Contract'}
-                              </span>
-                            </td>
-                            {(!isAgent || hasAgentPayment) && (
+                  <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', margin: '8px 0 16px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                    <table style={{ minWidth: 1050, width: '100%', borderCollapse: 'collapse', margin: 0 }}>
+                      <thead>
+                        <tr style={{ background: '#f8fafc' }}>
+                          <th style={{ minWidth: 140, whiteSpace: 'nowrap' }}>Vendor</th>
+                          <th style={{ minWidth: 110, whiteSpace: 'nowrap' }}>Trade</th>
+                          <th style={{ minWidth: 140, whiteSpace: 'nowrap' }}>Work Description</th>
+                          <th style={{ minWidth: 100, whiteSpace: 'nowrap' }}>Pay Type</th>
+                          {(!isAgent || hasAgentPayment) && <th style={{ minWidth: 110, whiteSpace: 'nowrap' }}>Rate / Contract</th>}
+                          {(!isAgent || hasAgentPayment) && <th style={{ minWidth: 100, whiteSpace: 'nowrap' }}>Total Earned</th>}
+                          {!isSupervisor && (!isAgent || hasAgentPayment) && <th style={{ minWidth: 100, whiteSpace: 'nowrap' }}>Total Paid</th>}
+                          {!isSupervisor && (!isAgent || hasAgentPayment) && <th style={{ minWidth: 110, whiteSpace: 'nowrap' }}>Balance</th>}
+                          <th style={{ minWidth: 90, whiteSpace: 'nowrap' }}>Status</th>
+                          <th style={{ minWidth: 140, textAlign: 'right', whiteSpace: 'nowrap' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {projectVendors.filter((pv) => matchesContractorType(pv.trade, vendorTypeFilter)).map((pv) => {
+                          const earnedVal = pv.total_earned ?? pv.earned ?? 0;
+                          const paidVal = pv.total_paid ?? pv.paid ?? 0;
+                          const dueVal = pv.balance_due ?? pv.balance ?? (Number(earnedVal) - Number(paidVal));
+                          const isAdvance = Number(dueVal || 0) < 0;
+                          const isDue = Number(dueVal || 0) > 0;
+                          return (
+                            <tr
+                              key={pv.id}
+                              className="clickable-row"
+                              onClick={() => openVendorDetail(pv)}
+                              title="Click to open contractor detail page"
+                            >
                               <td>
-                                {pv.pay_type === 'daily_wage' ? `${INR(pv.daily_rate)}/day` : INR(pv.contract_amount)}
+                                <b>{pv.vendor_name}</b>
+                                <br />
+                                <span style={{ fontSize: 11, color: '#64748b' }}>{pv.vendor_phone || '—'}</span>
                               </td>
-                            )}
-                            {(!isAgent || hasAgentPayment) && (
-                              <td style={{ fontWeight: 600 }}>{INR(earnedVal)}</td>
-                            )}
-                            {!isSupervisor && (!isAgent || hasAgentPayment) && <td style={{ color: '#16a34a' }}>{INR(paidVal)}</td>}
-                            {!isSupervisor && (!isAgent || hasAgentPayment) && (
+                              <td>{pv.trade || 'General'}</td>
+                              <td>{pv.work_description}</td>
                               <td>
-                                {isDue ? (
-                                  <span style={{ fontWeight: 700, color: '#ea580c' }}>
-                                    Due: {INR(dueVal)}
-                                  </span>
-                                ) : isAdvance ? (
-                                  <span className="badge badge-active" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                                    Advance: {INR(Math.abs(dueVal))}
-                                  </span>
-                                ) : (
-                                  <span style={{ color: '#64748b', fontWeight: 600 }}>Settled (₹0)</span>
-                                )}
+                                <span className="badge badge-active">
+                                  {pv.pay_type === 'daily_wage' ? 'Daily Wage' : 'Contract'}
+                                </span>
                               </td>
-                            )}
-                            <td>
-                              <span className={`badge ${pv.status === 'completed' ? 'badge-completed' : 'badge-active'}`}>
-                                {pv.status}
-                              </span>
-                            </td>
-                            <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6, flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                className="muted"
-                                style={{ padding: '4px 8px', fontSize: 12 }}
-                                onClick={() => openVendorDetail(pv)}
-                              >
-                                👥 Team &amp; Details
-                              </button>
-                              <button onClick={() => openVendorDetail(pv)}>View Details &amp; History &rarr;</button>
+                              {(!isAgent || hasAgentPayment) && (
+                                <td>
+                                  {pv.pay_type === 'daily_wage' ? `${INR(pv.daily_rate)}/day` : INR(pv.contract_amount)}
+                                </td>
+                              )}
+                              {(!isAgent || hasAgentPayment) && (
+                                <td style={{ fontWeight: 600 }}>{INR(earnedVal)}</td>
+                              )}
+                              {!isSupervisor && (!isAgent || hasAgentPayment) && <td style={{ color: '#16a34a' }}>{INR(paidVal)}</td>}
+                              {!isSupervisor && (!isAgent || hasAgentPayment) && (
+                                <td>
+                                  {isDue ? (
+                                    <span style={{ fontWeight: 700, color: '#ea580c' }}>
+                                      Due: {INR(dueVal)}
+                                    </span>
+                                  ) : isAdvance ? (
+                                    <span className="badge badge-active" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                      Advance: {INR(Math.abs(dueVal))}
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: '#64748b', fontWeight: 600 }}>Settled (₹0)</span>
+                                  )}
+                                </td>
+                              )}
+                              <td>
+                                <span className={`badge ${pv.status === 'completed' ? 'badge-completed' : 'badge-active'}`}>
+                                  {pv.status}
+                                </span>
+                              </td>
+                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  className="muted"
+                                  style={{
+                                    padding: '5px 12px',
+                                    fontSize: 12,
+                                    borderRadius: 6,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                  }}
+                                  onClick={() => openVendorDetail(pv)}
+                                >
+                                  <span>👥 Team &amp; Details</span>
+                                  <span style={{ fontSize: 11, color: '#64748b' }}>&rarr;</span>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {projectVendors.filter((pv) => matchesContractorType(pv.trade, vendorTypeFilter)).length === 0 && (
+                          <tr>
+                            <td colSpan={(!isAgent || hasAgentPayment) ? (isSupervisor ? 8 : 10) : 6} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
+                              {vendorTypeFilter === 'all'
+                                ? 'No contractors assigned to this project yet.'
+                                : `No ${vendorTypeFilter.toLowerCase().endsWith('contractor') ? vendorTypeFilter : `${vendorTypeFilter} contractor`} assigned to this project.`} Click &ldquo;+ Add Contractor&rdquo; above.
                             </td>
                           </tr>
-                        );
-                      })}
-                      {projectVendors.filter((pv) => matchesContractorType(pv.trade, vendorTypeFilter)).length === 0 && (
-                        <tr>
-                          <td colSpan={(!isAgent || hasAgentPayment) ? (isSupervisor ? 8 : 10) : 6} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
-                            {vendorTypeFilter === 'all'
-                              ? 'No contractors assigned to this project yet.'
-                              : `No ${vendorTypeFilter.toLowerCase().endsWith('contractor') ? vendorTypeFilter : `${vendorTypeFilter} contractor`} assigned to this project.`} Click &ldquo;+ Add Contractor&rdquo; above.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 
@@ -3204,6 +4315,14 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                               Labor Attendance
                             </button>
                           )}
+                          {allowedAttendanceSubTabs.includes('staff') && (
+                            <button
+                              className={attendanceSubTab === 'staff' ? 'active-btn' : 'muted'}
+                              onClick={() => handleAttendanceSubChange('staff')}
+                            >
+                              Staff Attendance
+                            </button>
+                          )}
                         </div>
 
                         {attendanceSubTab === 'vendor' && (
@@ -3218,7 +4337,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                               }}
                               style={{ maxWidth: 170 }}
                             />
-                            <button onClick={saveAllAttendance} disabled={savingAttendance || !attendanceRows.some((row) => row.dirty)}>
+                            <button onClick={saveAllAttendance} disabled={savingAttendance || !isEditableWithin48Hours(attendanceDate) || !attendanceRows.some((row) => row.dirty)}>
                               {savingAttendance ? 'Saving...' : `💾 Save Attendance (${attendanceRows.filter((row) => row.dirty).length} marked)`}
                             </button>
                             {attendanceRows.some((r) => r.is_marked) ? (
@@ -3262,8 +4381,8 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                             )}
                             <button
                               onClick={() => saveAllLaborAttendance()}
-                              disabled={savingLaborAttendance || laborAttendanceDate !== today()}
-                              style={{ opacity: laborAttendanceDate !== today() ? 0.6 : 1 }}
+                              disabled={savingLaborAttendance || !isEditableWithin48Hours(laborAttendanceDate)}
+                              style={{ opacity: !isEditableWithin48Hours(laborAttendanceDate) ? 0.6 : 1 }}
                             >
                               {savingLaborAttendance ? 'Saving...' : '💾 Save Attendance'}
                             </button>
@@ -3278,13 +4397,65 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                             )}
                           </div>
                         )}
+
+                        {attendanceSubTab === 'staff' && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 13, fontWeight: 600 }}>Date:</span>
+                            <input
+                              type="date"
+                              value={staffAttendanceDate}
+                              max={today()}
+                              onChange={(e) => {
+                                const d = e.target.value;
+                                setStaffAttendanceDate(d);
+                                loadStaffAttendance(project.id, d);
+                              }}
+                              style={{ maxWidth: 160 }}
+                            />
+                            {staffAttendanceDate !== today() && (
+                              <button
+                                type="button"
+                                className="active-btn"
+                                style={{ fontSize: 12, padding: '4px 10px' }}
+                                onClick={() => {
+                                  setStaffAttendanceDate(today());
+                                  loadStaffAttendance(project.id, today());
+                                }}
+                              >
+                                ↩️ Go to Today ({today()})
+                              </button>
+                            )}
+                            <button
+                              onClick={saveAllStaffAttendance}
+                              disabled={savingStaffAttendance || !isEditableWithin48Hours(staffAttendanceDate) || !staffDailyAttendance.some((row) => row.dirty)}
+                              style={{ opacity: !isEditableWithin48Hours(staffAttendanceDate) ? 0.6 : 1 }}
+                            >
+                              {savingStaffAttendance
+                                ? 'Saving...'
+                                : `💾 Save Attendance (${staffDailyAttendance.filter((row) => row.dirty).length} marked)`}
+                            </button>
+                            {staffDailyAttendance.some((r) => r.is_marked || (r.status && r.status !== 'unmarked')) ? (
+                              <span style={{ fontSize: 12, padding: '4px 8px', borderRadius: 4, background: '#dcfce7', color: '#166534', fontWeight: 600 }}>
+                                ✓ Marked for {staffAttendanceDate}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: 12, padding: '4px 8px', borderRadius: 4, background: '#fef3c7', color: '#92400e', fontWeight: 600 }}>
+                                ⏳ Not yet saved for {staffAttendanceDate}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {attendanceSubTab === 'labor' && laborAttendanceDate !== today() && (
-                        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 8, padding: '8px 14px', fontSize: 12, margin: '10px 0 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span>🔒</span>
+                        <div style={{ background: isEditableWithin48Hours(laborAttendanceDate) ? '#ecfdf5' : '#fffbeb', border: `1px solid ${isEditableWithin48Hours(laborAttendanceDate) ? '#86efac' : '#fde68a'}`, color: isEditableWithin48Hours(laborAttendanceDate) ? '#166534' : '#92400e', borderRadius: 8, padding: '8px 14px', fontSize: 12, margin: '10px 0 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span>{isEditableWithin48Hours(laborAttendanceDate) ? '✓' : '🔒'}</span>
                           <span>
-                            <b>Past Date View ({laborAttendanceDate}):</b> Sirf aaj ki date ({today()}) ki attendance mark/edit ki ja sakti hai. Purani date ki attendance view mode me locked hai.
+                            {isEditableWithin48Hours(laborAttendanceDate) ? (
+                              <><b>Back-date attendance ({laborAttendanceDate}):</b> Is date ki attendance aaj mark ya edit ki ja sakti hai. Pichle 48 hours (aaj aur pichle 2 din) tak editing allowed hai.</>
+                            ) : (
+                              <><b>Past Date View ({laborAttendanceDate}):</b> Yeh date 48 hours se purani hai, isliye attendance sirf view mode me available hai.</>
+                            )}
                           </span>
                           <button
                             type="button"
@@ -3300,112 +4471,229 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                         </div>
                       )}
 
+                      {attendanceSubTab === 'staff' && staffAttendanceDate !== today() && (
+                        <div style={{ background: isEditableWithin48Hours(staffAttendanceDate) ? '#ecfdf5' : 'rgba(245,158,11,0.1)', border: `1px solid ${isEditableWithin48Hours(staffAttendanceDate) ? '#86efac' : 'rgba(245,158,11,0.3)'}`, color: isEditableWithin48Hours(staffAttendanceDate) ? '#166534' : '#f59e0b', borderRadius: 8, padding: '8px 14px', fontSize: 12, margin: '10px 0 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span>{isEditableWithin48Hours(staffAttendanceDate) ? '✓' : '🔒'}</span>
+                          <span>
+                            {isEditableWithin48Hours(staffAttendanceDate) ? (
+                              <><b>Back-date attendance ({staffAttendanceDate}):</b> Is date ki attendance aaj mark ya edit ki ja sakti hai. Pichle 48 hours (aaj aur pichle 2 din) tak editing allowed hai.</>
+                            ) : (
+                              <><b>Past Date View ({staffAttendanceDate}):</b> Yeh date 48 hours se purani hai, isliye attendance sirf view mode me available hai.</>
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            className="active-btn"
+                            style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 8px' }}
+                            onClick={() => {
+                              setStaffAttendanceDate(today());
+                              loadStaffAttendance(project.id, today());
+                            }}
+                          >
+                            Jump to Today
+                          </button>
+                        </div>
+                      )}
+
                       {attendanceSubTab === 'vendor' && (
                         <div>
-                          <table>
-                    <thead>
-                      <tr>
-                        <th>Vendor (Daily Wage)</th>
-                        <th>Trade</th>
-                        <th>Status</th>
-                        <th>Workers Count</th>
-                        <th>Rate / Worker</th>
-                        <th>Wage Amount</th>
-                        <th>Note</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {attendanceRows.map((row, idx) => (
-                        <tr key={row.project_vendor_id}>
-                          <td>
-                            <b>{row.vendor_name}</b>
-                            {row.has_linked_labor && (
-                              <div style={{ fontSize: 11, color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', padding: '2px 6px', borderRadius: 4, display: 'inline-block', marginTop: 3 }}>
-                                👥 Has Team
-                              </div>
-                            )}
-                          </td>
-                          <td>{row.trade || '—'}</td>
-                          <td>
-                            <div style={{ display: 'flex', gap: 4 }}>
-                              {['present', 'half_day', 'absent'].map((st) => (
-                                <button
-                                  key={st}
-                                  type="button"
-                                  onClick={() => {
-                                    const next = [...attendanceRows];
-                                    next[idx].status = st;
-                                    next[idx].dirty = true;
-                                    const mult = st === 'present' ? 1 : st === 'half_day' ? 0.5 : 0;
-                                    next[idx].wage_amount = mult * Number(next[idx].workers_count) * Number(next[idx].rate_per_worker);
-                                    setAttendanceRows(next);
-                                  }}
-                                  className={row.status === st ? 'active-btn' : 'muted'}
-                                  style={{ padding: '3px 8px', fontSize: 11 }}
-                                >
-                                  {st === 'present' ? 'Present' : st === 'half_day' ? 'Half Day' : 'Absent'}
-                                </button>
-                              ))}
-                            </div>
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              min="0.5"
-                              step="0.5"
-                              value={row.workers_count}
-                              onChange={(e) => {
-                                const next = [...attendanceRows];
-                                next[idx].workers_count = e.target.value;
-                                const mult = row.status === 'present' ? 1 : row.status === 'half_day' ? 0.5 : 0;
-                                next[idx].wage_amount = mult * Number(e.target.value) * Number(row.rate_per_worker);
-                                setAttendanceRows(next);
-                              }}
-                              style={{ width: 70 }}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              min="0"
-                              value={row.rate_per_worker}
-                              onChange={(e) => {
-                                const next = [...attendanceRows];
-                                next[idx].rate_per_worker = e.target.value;
-                                const mult = row.status === 'present' ? 1 : row.status === 'half_day' ? 0.5 : 0;
-                                next[idx].wage_amount = mult * Number(row.workers_count) * Number(e.target.value);
-                                setAttendanceRows(next);
-                              }}
-                              style={{ width: 90 }}
-                            />
-                          </td>
-                          <td style={{ fontWeight: 700, color: '#16a34a' }}>
-                            {INR(row.wage_amount)}
-                          </td>
-                          <td>
-                            <input
-                              type="text"
-                              placeholder="Note..."
-                              value={row.note}
-                              onChange={(e) => {
-                                const next = [...attendanceRows];
-                                next[idx].note = e.target.value;
-                                setAttendanceRows(next);
-                              }}
-                              style={{ width: 140 }}
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                      {attendanceRows.length === 0 && (
-                        <tr>
-                          <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
-                            No daily-wage vendors assigned to this project. Assign a daily wage vendor under the &ldquo;Vendors&rdquo; tab.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', margin: '8px 0 16px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                            <table style={{ minWidth: 1060, width: '100%', borderCollapse: 'collapse', margin: 0 }}>
+                              <thead>
+                                <tr style={{ background: '#f8fafc' }}>
+                                  <th style={{ minWidth: 170, whiteSpace: 'nowrap' }}>Service Provider (Daily Wage)</th>
+                                  <th style={{ minWidth: 110, whiteSpace: 'nowrap' }}>Trade</th>
+                                  <th style={{ minWidth: 200, whiteSpace: 'nowrap' }}>Status</th>
+                                  <th style={{ minWidth: 140, whiteSpace: 'nowrap' }}>Shift</th>
+                                  <th style={{ minWidth: 90, whiteSpace: 'nowrap' }}>Workers Count</th>
+                                  <th style={{ minWidth: 120, whiteSpace: 'nowrap' }}>Overtime (OT)</th>
+                                  <th style={{ minWidth: 110, whiteSpace: 'nowrap' }}>Rate / Worker</th>
+                                  <th style={{ minWidth: 110, whiteSpace: 'nowrap' }}>Wage Amount</th>
+                                  <th style={{ minWidth: 140, whiteSpace: 'nowrap' }}>Note</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {attendanceRows.map((row, idx) => (
+                                  <tr key={row.project_vendor_id}>
+                                    <td>
+                                      <b>{row.vendor_name}</b>
+                                      {row.has_linked_labor && (
+                                        <div style={{ fontSize: 11, color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', padding: '2px 6px', borderRadius: 4, display: 'inline-block', marginTop: 3 }}>
+                                          👥 Has Team
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td>{row.trade || '—'}</td>
+                                    <td>
+                                      <div style={{ display: 'flex', gap: 4, whiteSpace: 'nowrap' }}>
+                                        {['present', 'half_day', 'absent'].map((st) => (
+                                          <button
+                                            key={st}
+                                            type="button"
+                                            onClick={() => {
+                                              const next = [...attendanceRows];
+                                              next[idx].status = st;
+                                              next[idx].dirty = true;
+                                              next[idx].wage_amount = computeVendorWage(next[idx].workers_count, next[idx].rate_per_worker, st, next[idx].shift_type, next[idx].overtime_hours);
+                                              setAttendanceRows(next);
+                                            }}
+                                            className={row.status === st ? 'active-btn' : 'muted'}
+                                            style={{
+                                              padding: '4px 8px',
+                                              fontSize: 11,
+                                              borderRadius: 4,
+                                              fontWeight: row.status === st ? 700 : 500,
+                                              background: row.status === st ? (st === 'present' ? '#16a34a' : st === 'half_day' ? '#d97706' : '#dc2626') : undefined,
+                                              borderColor: row.status === st ? 'transparent' : undefined,
+                                              color: row.status === st ? '#ffffff' : undefined,
+                                            }}
+                                          >
+                                            {st === 'present' ? 'Present' : st === 'half_day' ? 'Half Day' : 'Absent'}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <select
+                                        disabled={row.status === 'absent'}
+                                        value={row.shift_type || 'day'}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          const next = [...attendanceRows];
+                                          next[idx].shift_type = val;
+                                          next[idx].dirty = true;
+                                          if (!next[idx].status || next[idx].status === 'absent') {
+                                            next[idx].status = 'present';
+                                          }
+                                          next[idx].wage_amount = computeVendorWage(next[idx].workers_count, next[idx].rate_per_worker, next[idx].status, val, next[idx].overtime_hours);
+                                          setAttendanceRows(next);
+                                        }}
+                                        style={{
+                                          padding: '5px 8px',
+                                          fontSize: 12,
+                                          borderRadius: 6,
+                                          background: row.shift_type === 'night' ? '#0f172a' : row.shift_type === 'double' ? '#fef3c7' : '#ffffff',
+                                          color: row.shift_type === 'night' ? '#f8fafc' : row.shift_type === 'double' ? '#92400e' : '#0f172a',
+                                          fontWeight: row.shift_type && row.shift_type !== 'day' ? 700 : 500,
+                                          border: '1px solid #cbd5e1',
+                                          width: '100%',
+                                          minWidth: 125,
+                                          cursor: row.status === 'absent' ? 'not-allowed' : 'pointer',
+                                          opacity: row.status === 'absent' ? 0.6 : 1,
+                                        }}
+                                      >
+                                        <option value="day">☀️ Day (1x)</option>
+                                        <option value="night">🌙 Night (1x)</option>
+                                        <option value="double">⚡ Double (2x)</option>
+                                      </select>
+                                    </td>
+                                    <td>
+                                      <input
+                                        type="number"
+                                        min="0.5"
+                                        step="0.5"
+                                        value={row.workers_count}
+                                        onChange={(e) => {
+                                          const next = [...attendanceRows];
+                                          next[idx].workers_count = e.target.value;
+                                          next[idx].dirty = true;
+                                          if (!next[idx].status && Number(e.target.value) > 0) {
+                                            next[idx].status = 'present';
+                                          }
+                                          next[idx].wage_amount = computeVendorWage(e.target.value, next[idx].rate_per_worker, next[idx].status, next[idx].shift_type, next[idx].overtime_hours);
+                                          setAttendanceRows(next);
+                                        }}
+                                        style={{ width: 65, padding: '5px 8px', fontSize: 12, borderRadius: 4, border: '1px solid #cbd5e1' }}
+                                      />
+                                    </td>
+                                    <td>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="16"
+                                          step="0.5"
+                                          disabled={row.status === 'absent'}
+                                          value={row.overtime_hours !== undefined ? row.overtime_hours : 0}
+                                          onChange={(e) => {
+                                            const val = Math.max(0, Number(e.target.value || 0));
+                                            const next = [...attendanceRows];
+                                            next[idx].overtime_hours = val;
+                                            next[idx].dirty = true;
+                                            if (!next[idx].status || next[idx].status === 'absent') {
+                                              next[idx].status = 'present';
+                                            }
+                                            next[idx].wage_amount = computeVendorWage(next[idx].workers_count, next[idx].rate_per_worker, next[idx].status, next[idx].shift_type, val);
+                                            setAttendanceRows(next);
+                                          }}
+                                          style={{
+                                            width: 55,
+                                            padding: '5px 8px',
+                                            fontSize: 12,
+                                            textAlign: 'center',
+                                            borderRadius: 4,
+                                            border: '1px solid #cbd5e1',
+                                            cursor: row.status === 'absent' ? 'not-allowed' : 'text',
+                                            opacity: row.status === 'absent' ? 0.6 : 1,
+                                          }}
+                                        />
+                                        <span style={{ fontSize: 11, color: '#64748b' }}>hrs</span>
+                                      </div>
+                                      {Number(row.overtime_hours || 0) > 0 && (
+                                        <span style={{ fontSize: 10, color: '#0284c7', fontWeight: 600, display: 'block', marginTop: 2 }}>
+                                          +{INR(Math.round(Number(row.workers_count || 1) * Number(row.overtime_hours) * (Number(row.rate_per_worker || 0) / 8)))}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        value={row.rate_per_worker}
+                                        onChange={(e) => {
+                                          const next = [...attendanceRows];
+                                          next[idx].rate_per_worker = e.target.value;
+                                          next[idx].dirty = true;
+                                          next[idx].wage_amount = computeVendorWage(next[idx].workers_count, e.target.value, next[idx].status, next[idx].shift_type, next[idx].overtime_hours);
+                                          setAttendanceRows(next);
+                                        }}
+                                        style={{ width: 85, padding: '5px 8px', fontSize: 12, borderRadius: 4, border: '1px solid #cbd5e1' }}
+                                      />
+                                    </td>
+                                    <td style={{ fontWeight: 700, color: '#16a34a' }}>
+                                      <div>{INR(row.wage_amount)}</div>
+                                      {row.status !== 'absent' && (row.shift_type === 'double' || Number(row.overtime_hours || 0) > 0) && (
+                                        <div style={{ fontSize: 10, color: '#64748b', fontWeight: 400, marginTop: 2 }}>
+                                          {row.shift_type === 'double' ? '2x Shift' : '1x Base'}
+                                          {Number(row.overtime_hours || 0) > 0 ? ` + ${row.overtime_hours}h OT` : ''}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td>
+                                      <input
+                                        type="text"
+                                        placeholder="Note..."
+                                        value={row.note || ''}
+                                        onChange={(e) => {
+                                          const next = [...attendanceRows];
+                                          next[idx].note = e.target.value;
+                                          setAttendanceRows(next);
+                                        }}
+                                        style={{ width: 140, padding: '5px 8px', fontSize: 12, borderRadius: 4, border: '1px solid #cbd5e1' }}
+                                      />
+                                    </td>
+                                  </tr>
+                                ))}
+                                {attendanceRows.length === 0 && (
+                                  <tr>
+                                    <td colSpan={9} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
+                                      No daily-wage vendors assigned to this project. Assign a daily wage vendor under the &ldquo;Vendors&rdquo; tab.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
 
                   {/* Contractors Attendance History Log */}
                   <div style={{ marginTop: 24, borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
@@ -3416,26 +4704,28 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                       </span>
                     </h4>
                     {projectVendorAttendanceHistory.length > 0 ? (
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Date</th>
-                            <th>Vendor</th>
-                            <th>Trade</th>
-                            <th>Status</th>
-                            <th>Workers</th>
-                            <th>Rate / Worker</th>
-                            <th>Wage Amount</th>
-                            <th>Marked By</th>
-                            <th>Action</th>
-                          </tr>
-                        </thead>
+                      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', margin: '8px 0 16px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                        <table style={{ minWidth: 920, width: '100%', borderCollapse: 'collapse', margin: 0 }}>
+                          <thead>
+                            <tr style={{ background: '#f8fafc' }}>
+                              <th style={{ minWidth: 100 }}>Date</th>
+                              <th style={{ minWidth: 140 }}>Vendor</th>
+                              <th style={{ minWidth: 100 }}>Trade</th>
+                              <th style={{ minWidth: 160 }}>Status</th>
+                              <th style={{ minWidth: 80 }}>Workers</th>
+                              <th style={{ minWidth: 100 }}>Rate / Worker</th>
+                              <th style={{ minWidth: 100 }}>Wage Amount</th>
+                              <th style={{ minWidth: 130 }}>Marked By</th>
+                              <th style={{ minWidth: 110 }}>Action</th>
+                            </tr>
+                          </thead>
                         <tbody>
-                          {projectVendorAttendanceHistory.map((h) => {
-                            const dateStr = typeof h.attendance_date === 'string' ? h.attendance_date.slice(0, 10) : new Date(h.attendance_date).toISOString().slice(0, 10);
+                          {projectVendorAttendanceHistory.map((h, i) => {
+                            const dateStr = formatDateIST(h.attendance_date);
+                            const isToday = isSameDayIST(h.attendance_date || h.created_at);
                             return (
                               <tr
-                                key={h.id}
+                                key={h.id || i}
                                 className="clickable-row"
                                 onClick={() => {
                                   const pv = projectVendors.find((v) => Number(v.id) === Number(h.project_vendor_id));
@@ -3447,32 +4737,83 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                 <td>{h.vendor_name}</td>
                                 <td>{h.trade || '—'}</td>
                                 <td>
-                                  <span className={`badge badge-${h.status === 'present' ? 'active' : h.status === 'half_day' ? 'warning' : 'danger'}`}>
-                                    {h.status === 'present' ? 'Present' : h.status === 'half_day' ? 'Half Day' : 'Absent'}
-                                  </span>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                    <span className={`badge badge-${h.status === 'present' ? 'active' : h.status === 'half_day' ? 'warning' : 'danger'}`}>
+                                      {h.status === 'present' ? 'Present' : h.status === 'half_day' ? 'Half Day' : 'Absent'}
+                                      {h.shift_type && h.shift_type !== 'day' ? ` • ${h.shift_type === 'double' ? '⚡ Double' : '🌙 Night'}` : ''}
+                                    </span>
+                                    {Number(h.overtime_hours || 0) > 0 && (
+                                      <span style={{ fontSize: 10, color: '#0284c7', fontWeight: 600 }}>
+                                        ⏱️ +{h.overtime_hours} hrs OT
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                                 <td>{h.workers_count || 1}</td>
                                 <td>{INR(h.rate_per_worker)}</td>
                                 <td style={{ fontWeight: 600, color: '#16a34a' }}>{INR(h.wage_amount)}</td>
                                 <td style={{ fontSize: 12, color: '#64748b' }}>{h.created_by || '—'}</td>
                                 <td onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    type="button"
-                                    className="muted"
-                                    style={{ padding: '2px 8px', fontSize: 11 }}
-                                    onClick={() => {
-                                      setAttendanceDate(dateStr);
-                                      loadDailyAttendance(dateStr);
-                                    }}
-                                  >
-                                    View / Edit Date
-                                  </button>
+                                  {isToday ? (
+                                    <button
+                                      type="button"
+                                      className="active-btn"
+                                      style={{ padding: '4px 10px', fontSize: 12, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                      onClick={() => {
+                                        setAttendanceDetailModal({
+                                          type: 'vendor',
+                                          isToday: true,
+                                          project_vendor_id: h.project_vendor_id,
+                                          vendor_name: h.vendor_name || 'Vendor',
+                                          trade: h.trade || '—',
+                                          attendance_date: dateStr,
+                                          status: h.status || 'present',
+                                          shift_type: h.shift_type || 'day',
+                                          overtime_hours: Number(h.overtime_hours || 0),
+                                          workers_count: Number(h.workers_count || 1),
+                                          rate_per_worker: Number(h.rate_per_worker || 0),
+                                          wage_amount: Number(h.wage_amount || 0),
+                                          note: h.note || '',
+                                          marked_by: h.created_by || '—',
+                                        });
+                                      }}
+                                    >
+                                      ✏️ Edit Attendance
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="muted"
+                                      style={{ padding: '4px 10px', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                      onClick={() => {
+                                        setAttendanceDetailModal({
+                                          type: 'vendor',
+                                          isToday: false,
+                                          project_vendor_id: h.project_vendor_id,
+                                          vendor_name: h.vendor_name || 'Vendor',
+                                          trade: h.trade || '—',
+                                          attendance_date: dateStr,
+                                          status: h.status || 'present',
+                                          shift_type: h.shift_type || 'day',
+                                          overtime_hours: Number(h.overtime_hours || 0),
+                                          workers_count: Number(h.workers_count || 1),
+                                          rate_per_worker: Number(h.rate_per_worker || 0),
+                                          wage_amount: Number(h.wage_amount || 0),
+                                          note: h.note || '',
+                                          marked_by: h.created_by || '—',
+                                        });
+                                      }}
+                                    >
+                                      👁️ View (Read Only)
+                                    </button>
+                                  )}
                                 </td>
                               </tr>
                             );
                           })}
                         </tbody>
                       </table>
+                      </div>
                     ) : (
                       <p style={{ color: '#64748b', fontSize: 13, margin: '8px 0' }}>
                         No attendance recorded yet for this project.
@@ -3586,7 +4927,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                           })()}
 
                           {(() => {
-                            const isLaborDateToday = laborAttendanceDate === today();
+                            const isLaborDateToday = isEditableWithin48Hours(laborAttendanceDate);
                             const visibleLaborAttendanceRows = laborAttendanceRows.filter((r) => {
                               const isContractor = Boolean(r.project_vendor_id || r.vendor_name);
                               if (laborAttendanceSection === 'direct' && isContractor) return false;
@@ -3772,37 +5113,40 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                       </span>
                                     </h4>
 
-                                    <table>
-                                      <thead>
-                                        <tr>
-                                          <th style={{ width: 40, textAlign: 'center', display: 'none' }}>
-                                            <input
-                                              type="checkbox"
-                                              disabled={!isLaborDateToday}
-                                              checked={
-                                                groups[grpTitle].length > 0 &&
-                                                groups[grpTitle].every((r) => selectedLaborIds.includes(r.labor_id || r.id))
-                                              }
-                                              onChange={(e) => {
-                                                const grpIds = groups[grpTitle].map((r) => r.labor_id || r.id);
-                                                if (e.target.checked) {
-                                                  setSelectedLaborIds((prev) => Array.from(new Set([...prev, ...grpIds])));
-                                                } else {
-                                                  const grpSet = new Set(grpIds);
-                                                  setSelectedLaborIds((prev) => prev.filter((id) => !grpSet.has(id)));
+                                    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', margin: '4px 0', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                                      <table style={{ minWidth: 980, width: '100%', borderCollapse: 'collapse', margin: 0 }}>
+                                        <thead>
+                                          <tr style={{ background: '#f8fafc' }}>
+                                            <th style={{ width: 40, textAlign: 'center', display: 'none' }}>
+                                              <input
+                                                type="checkbox"
+                                                disabled={!isLaborDateToday}
+                                                checked={
+                                                  groups[grpTitle].length > 0 &&
+                                                  groups[grpTitle].every((r) => selectedLaborIds.includes(r.labor_id || r.id))
                                                 }
-                                              }}
-                                              style={{ cursor: isLaborDateToday ? 'pointer' : 'not-allowed' }}
-                                            />
-                                          </th>
-                                          <th>Labor Name</th>
-                                          <th>Trade</th>
-                                          <th>Daily Rate</th>
-                                          <th>Status</th>
-                                          <th>Wage Amount</th>
-                                          <th>Note</th>
-                                        </tr>
-                                      </thead>
+                                                onChange={(e) => {
+                                                  const grpIds = groups[grpTitle].map((r) => r.labor_id || r.id);
+                                                  if (e.target.checked) {
+                                                    setSelectedLaborIds((prev) => Array.from(new Set([...prev, ...grpIds])));
+                                                  } else {
+                                                    const grpSet = new Set(grpIds);
+                                                    setSelectedLaborIds((prev) => prev.filter((id) => !grpSet.has(id)));
+                                                  }
+                                                }}
+                                                style={{ cursor: isLaborDateToday ? 'pointer' : 'not-allowed' }}
+                                              />
+                                            </th>
+                                            <th style={{ minWidth: 160, whiteSpace: 'nowrap' }}>Labor Name</th>
+                                            <th style={{ minWidth: 110, whiteSpace: 'nowrap' }}>Trade</th>
+                                            <th style={{ minWidth: 105, whiteSpace: 'nowrap' }}>Daily Rate</th>
+                                            <th style={{ minWidth: 190, whiteSpace: 'nowrap' }}>Status</th>
+                                            <th style={{ minWidth: 135, whiteSpace: 'nowrap' }}>Shift</th>
+                                            <th style={{ minWidth: 115, whiteSpace: 'nowrap' }}>Overtime (OT)</th>
+                                            <th style={{ minWidth: 110, whiteSpace: 'nowrap' }}>Wage Amount</th>
+                                            <th style={{ minWidth: 130, whiteSpace: 'nowrap' }}>Note</th>
+                                          </tr>
+                                        </thead>
                                       <tbody>
                                         {groups[grpTitle].map((row) => {
                                           const rowId = row.labor_id || row.id;
@@ -3875,8 +5219,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                                         const next = [...laborAttendanceRows];
                                                         next[idx].status = st;
                                                         next[idx].dirty = true;
-                                                        const mult = st === 'present' ? 1 : st === 'half_day' ? 0.5 : 0;
-                                                        next[idx].wage_amount = Math.round(mult * Number(row.daily_rate || 0) * 100) / 100;
+                                                        next[idx].wage_amount = computeLaborWage(row.daily_rate, st, row.shift_type || 'day', row.overtime_hours || 0);
                                                         setLaborAttendanceRows(next);
                                                       }}
                                                       className={row.status === st ? 'active-btn' : 'muted'}
@@ -3892,8 +5235,87 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                                   ))}
                                                 </div>
                                               </td>
+                                              <td>
+                                                <select
+                                                  disabled={!isLaborDateToday || row.status === 'absent'}
+                                                  value={row.shift_type || 'day'}
+                                                  onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    const next = [...laborAttendanceRows];
+                                                    next[idx].shift_type = val;
+                                                    next[idx].dirty = true;
+                                                    if (!next[idx].status || next[idx].status === 'absent') {
+                                                      next[idx].status = 'present';
+                                                    }
+                                                    next[idx].wage_amount = computeLaborWage(row.daily_rate, next[idx].status, val, row.overtime_hours || 0);
+                                                    setLaborAttendanceRows(next);
+                                                  }}
+                                                  style={{
+                                                    padding: '5px 8px',
+                                                    fontSize: 12,
+                                                    borderRadius: 6,
+                                                    background: row.shift_type === 'night' ? '#0f172a' : row.shift_type === 'double' ? '#fef3c7' : '#ffffff',
+                                                    color: row.shift_type === 'night' ? '#f8fafc' : row.shift_type === 'double' ? '#92400e' : '#0f172a',
+                                                    fontWeight: row.shift_type && row.shift_type !== 'day' ? 700 : 500,
+                                                    border: '1px solid #cbd5e1',
+                                                    width: '100%',
+                                                    minWidth: 125,
+                                                    cursor: !isLaborDateToday || row.status === 'absent' ? 'not-allowed' : 'pointer',
+                                                    opacity: !isLaborDateToday || row.status === 'absent' ? 0.6 : 1,
+                                                  }}
+                                                >
+                                                  <option value="day">☀️ Day (1x)</option>
+                                                  <option value="night">🌙 Night (1x)</option>
+                                                  <option value="double">⚡ Double (2x)</option>
+                                                </select>
+                                              </td>
+                                              <td>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                  <input
+                                                    type="number"
+                                                    min="0"
+                                                    max="16"
+                                                    step="0.5"
+                                                    disabled={!isLaborDateToday || row.status === 'absent'}
+                                                    value={row.overtime_hours !== undefined ? row.overtime_hours : 0}
+                                                    onChange={(e) => {
+                                                      const val = Math.max(0, Number(e.target.value || 0));
+                                                      const next = [...laborAttendanceRows];
+                                                      next[idx].overtime_hours = val;
+                                                      next[idx].dirty = true;
+                                                      if (!next[idx].status || next[idx].status === 'absent') {
+                                                        next[idx].status = 'present';
+                                                      }
+                                                      next[idx].wage_amount = computeLaborWage(row.daily_rate, next[idx].status, row.shift_type || 'day', val);
+                                                      setLaborAttendanceRows(next);
+                                                    }}
+                                                    style={{
+                                                      width: 55,
+                                                      padding: '5px 8px',
+                                                      fontSize: 12,
+                                                      textAlign: 'center',
+                                                      borderRadius: 4,
+                                                      border: '1px solid #cbd5e1',
+                                                      cursor: !isLaborDateToday || row.status === 'absent' ? 'not-allowed' : 'text',
+                                                      opacity: !isLaborDateToday || row.status === 'absent' ? 0.6 : 1,
+                                                    }}
+                                                  />
+                                                  <span style={{ fontSize: 11, color: '#64748b' }}>hrs</span>
+                                                </div>
+                                                {Number(row.overtime_hours || 0) > 0 && (
+                                                  <span style={{ fontSize: 10, color: '#0284c7', fontWeight: 600, display: 'block', marginTop: 2 }}>
+                                                    +{INR(Math.round(Number(row.overtime_hours) * (Number(row.daily_rate || 0) / 8)))}
+                                                  </span>
+                                                )}
+                                              </td>
                                               <td style={{ fontWeight: 700, color: '#16a34a' }}>
-                                                {INR(row.wage_amount)}
+                                                <div>{INR(row.wage_amount)}</div>
+                                                {row.status !== 'absent' && (row.shift_type === 'double' || Number(row.overtime_hours || 0) > 0) && (
+                                                  <div style={{ fontSize: 10, color: '#64748b', fontWeight: 400, marginTop: 2 }}>
+                                                    {row.shift_type === 'double' ? '2x Shift' : '1x Base'}
+                                                    {Number(row.overtime_hours || 0) > 0 ? ` + ${row.overtime_hours}h OT` : ''}
+                                                  </div>
+                                                )}
                                               </td>
                                               <td>
                                                 <input
@@ -3914,6 +5336,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                         })}
                                       </tbody>
                                     </table>
+                                    </div>
                                   </div>
                                 ))}
 
@@ -4018,12 +5441,12 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {projectLaborAttendanceHistory.map((h) => {
-                                    const dateStr = typeof h.attendance_date === 'string' ? h.attendance_date.slice(0, 10) : new Date(h.attendance_date).toISOString().slice(0, 10);
-                                    const isTodayEntry = dateStr === today();
+                                  {projectLaborAttendanceHistory.map((h, i) => {
+                                    const dateStr = formatDateIST(h.attendance_date);
+                                    const isTodayEntry = isSameDayIST(h.attendance_date || h.created_at);
                                     return (
                                       <tr
-                                        key={h.id}
+                                        key={h.id || i}
                                         className="clickable-row"
                                         onClick={() => {
                                           const lab = projectLabors.find((l) => Number(l.id) === Number(h.labor_id));
@@ -4035,33 +5458,70 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                         <td>{h.labor_name}</td>
                                         <td>{h.trade || 'Helper'}</td>
                                         <td>
-                                          <span className={`badge badge-${h.status === 'present' ? 'active' : h.status === 'half_day' ? 'warning' : 'danger'}`}>
-                                            {h.status === 'present' ? 'Present' : h.status === 'half_day' ? 'Half Day' : 'Absent'}
-                                          </span>
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                            <span className={`badge badge-${h.status === 'present' ? 'active' : h.status === 'half_day' ? 'warning' : 'danger'}`}>
+                                              {h.status === 'present' ? 'Present' : h.status === 'half_day' ? 'Half Day' : 'Absent'}
+                                              {h.shift_type && h.shift_type !== 'day' ? ` • ${h.shift_type === 'double' ? '⚡ Double' : '🌙 Night'}` : ''}
+                                            </span>
+                                            {Number(h.overtime_hours || 0) > 0 && (
+                                              <span style={{ fontSize: 10, color: '#0284c7', fontWeight: 600 }}>
+                                                ⏱️ +{h.overtime_hours} hrs OT
+                                              </span>
+                                            )}
+                                          </div>
                                         </td>
-                                        <td style={{ fontWeight: 600, color: '#16a34a' }}>{INR(h.wage_amount)}</td>
+                                        <td style={{ fontWeight: 600, color: '#22c55e' }}>{INR(h.wage_amount)}</td>
                                         <td style={{ fontSize: 12, color: '#64748b' }}>{h.created_by || '—'}</td>
                                         <td onClick={(e) => e.stopPropagation()}>
                                           {isTodayEntry ? (
                                             <button
                                               type="button"
                                               className="active-btn"
-                                              style={{ padding: '2px 8px', fontSize: 11 }}
+                                              style={{ padding: '4px 10px', fontSize: 12, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}
                                               onClick={() => {
-                                                setLaborAttendanceDate(dateStr);
-                                                loadLaborAttendance(dateStr, project.id);
+                                                const lab = projectLabors.find((l) => Number(l.id) === Number(h.labor_id));
+                                                const dailyRate = Number(lab?.daily_rate || h.daily_rate || 0);
+                                                setAttendanceDetailModal({
+                                                  type: 'labor',
+                                                  isToday: true,
+                                                  labor_id: h.labor_id,
+                                                  labor_name: h.labor_name || lab?.name || 'Worker',
+                                                  trade: h.trade || lab?.trade || 'Helper',
+                                                  daily_rate: dailyRate,
+                                                  attendance_date: dateStr,
+                                                  status: h.status || 'present',
+                                                  shift_type: h.shift_type || 'day',
+                                                  overtime_hours: Number(h.overtime_hours || 0),
+                                                  wage_amount: Number(h.wage_amount || 0),
+                                                  note: h.note || '',
+                                                  marked_by: h.created_by || '—',
+                                                });
                                               }}
                                             >
-                                              ✏️ Edit Today
+                                              ✏️ Edit Attendance
                                             </button>
                                           ) : (
                                             <button
                                               type="button"
                                               className="muted"
-                                              style={{ padding: '2px 8px', fontSize: 11 }}
+                                              style={{ padding: '4px 10px', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                                               onClick={() => {
-                                                setLaborAttendanceDate(dateStr);
-                                                loadLaborAttendance(dateStr, project.id);
+                                                const lab = projectLabors.find((l) => Number(l.id) === Number(h.labor_id));
+                                                setAttendanceDetailModal({
+                                                  type: 'labor',
+                                                  isToday: false,
+                                                  labor_id: h.labor_id,
+                                                  labor_name: h.labor_name || lab?.name || 'Worker',
+                                                  trade: h.trade || lab?.trade || 'Helper',
+                                                  daily_rate: Number(lab?.daily_rate || h.daily_rate || 0),
+                                                  attendance_date: dateStr,
+                                                  status: h.status || 'present',
+                                                  shift_type: h.shift_type || 'day',
+                                                  overtime_hours: Number(h.overtime_hours || 0),
+                                                  wage_amount: Number(h.wage_amount || 0),
+                                                  note: h.note || '',
+                                                  marked_by: h.created_by || '—',
+                                                });
                                               }}
                                             >
                                               👁️ View (Read Only)
@@ -4081,6 +5541,289 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                           </div>
                         </div>
                   )}
+
+                  {/* ── STAFF ATTENDANCE IN ATTENDANCE TAB ── */}
+                  {attendanceSubTab === 'staff' && (() => {
+                    const isStaffDateToday = isEditableWithin48Hours(staffAttendanceDate);
+                    return (
+                      <div>
+                      <div className="card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+                          <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>
+                            👔 Daily Staff Site Attendance
+                          </h4>
+                          <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                            Marking attendance for active staff on site for {staffAttendanceDate}
+                          </span>
+                        </div>
+
+                        {staffAttendanceLoading ? (
+                          <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>Loading attendance…</div>
+                        ) : (
+                          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', margin: '8px 0 16px', borderRadius: 8, border: '1px solid rgba(148,163,184,0.2)' }}>
+                            <table style={{ minWidth: 1060, width: '100%', borderCollapse: 'collapse', margin: 0 }}>
+                              <thead>
+                                <tr>
+                                  <th style={{ minWidth: 170, whiteSpace: 'nowrap' }}>Staff Member</th>
+                                  <th style={{ minWidth: 120, whiteSpace: 'nowrap' }}>Role</th>
+                                  <th style={{ minWidth: 200, whiteSpace: 'nowrap' }}>Status</th>
+                                  <th style={{ minWidth: 140, whiteSpace: 'nowrap' }}>Shift</th>
+                                  <th style={{ minWidth: 120, whiteSpace: 'nowrap' }}>Overtime (OT)</th>
+                                  <th style={{ minWidth: 120, whiteSpace: 'nowrap' }}>Rate / Pay</th>
+                                  <th style={{ minWidth: 110, whiteSpace: 'nowrap' }}>Wage Amount</th>
+                                  <th style={{ minWidth: 140, whiteSpace: 'nowrap' }}>Note</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {staffDailyAttendance.map((row, idx) => (
+                                  <tr key={row.staff_id}>
+                                    <td>
+                                      <b>{row.staff_name}</b>
+                                      {row.phone && (
+                                        <div style={{ fontSize: 11, color: '#94a3b8' }}>📞 {row.phone}</div>
+                                      )}
+                                    </td>
+                                    <td>
+                                      <span className="badge" style={{ background: 'rgba(148,163,184,0.15)', color: '#94a3b8' }}>
+                                        {row.role}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <div style={{ display: 'flex', gap: 4, whiteSpace: 'nowrap' }}>
+                                        {['present', 'half_day', 'absent'].map((st) => (
+                                          <button
+                                            key={st}
+                                            type="button"
+                                            disabled={!isStaffDateToday}
+                                            onClick={() => {
+                                              if (!isStaffDateToday) return;
+                                              const next = [...staffDailyAttendance];
+                                              next[idx].status = st;
+                                              next[idx].dirty = true;
+                                              next[idx].wage_amount = computeStaffWage(next[idx].salary_rate, next[idx].pay_type, st, next[idx].shift_type, next[idx].overtime_hours);
+                                              setStaffDailyAttendance(next);
+                                            }}
+                                            className={row.status === st ? 'active-btn' : 'muted'}
+                                            style={{
+                                              padding: '4px 8px',
+                                              fontSize: 11,
+                                              borderRadius: 4,
+                                              cursor: !isStaffDateToday ? 'not-allowed' : 'pointer',
+                                              opacity: !isStaffDateToday && row.status !== st ? 0.4 : 1,
+                                              fontWeight: row.status === st ? 700 : 500,
+                                              background: row.status === st ? (st === 'present' ? '#16a34a' : st === 'half_day' ? '#d97706' : '#dc2626') : undefined,
+                                              borderColor: row.status === st ? 'transparent' : undefined,
+                                              color: row.status === st ? '#ffffff' : undefined,
+                                            }}
+                                          >
+                                            {st === 'present' ? 'Present' : st === 'half_day' ? 'Half Day' : 'Absent'}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <select
+                                        disabled={!isStaffDateToday || row.status === 'absent'}
+                                        value={row.shift_type || 'day'}
+                                        onChange={(e) => {
+                                          if (!isStaffDateToday) return;
+                                          const val = e.target.value;
+                                          const next = [...staffDailyAttendance];
+                                          next[idx].shift_type = val;
+                                          next[idx].dirty = true;
+                                          if (!next[idx].status || next[idx].status === 'absent' || next[idx].status === 'unmarked') {
+                                            next[idx].status = 'present';
+                                          }
+                                          next[idx].wage_amount = computeStaffWage(next[idx].salary_rate, next[idx].pay_type, next[idx].status, val, next[idx].overtime_hours);
+                                          setStaffDailyAttendance(next);
+                                        }}
+                                        style={{
+                                          padding: '5px 8px',
+                                          fontSize: 12,
+                                          borderRadius: 6,
+                                          width: '100%',
+                                          minWidth: 125,
+                                          cursor: (!isStaffDateToday || row.status === 'absent') ? 'not-allowed' : 'pointer',
+                                          opacity: (!isStaffDateToday || row.status === 'absent') ? 0.6 : 1,
+                                        }}
+                                      >
+                                        <option value="day">☀️ Day (1x)</option>
+                                        <option value="night">🌙 Night (1x)</option>
+                                        <option value="double">⚡ Double (2x)</option>
+                                      </select>
+                                    </td>
+                                    <td>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="16"
+                                          step="0.5"
+                                          disabled={!isStaffDateToday || row.status === 'absent'}
+                                          value={row.overtime_hours !== undefined ? row.overtime_hours : 0}
+                                          onChange={(e) => {
+                                            if (!isStaffDateToday) return;
+                                            const val = Math.max(0, Number(e.target.value || 0));
+                                            const next = [...staffDailyAttendance];
+                                            next[idx].overtime_hours = val;
+                                            next[idx].dirty = true;
+                                            if (!next[idx].status || next[idx].status === 'absent' || next[idx].status === 'unmarked') {
+                                              next[idx].status = 'present';
+                                            }
+                                            next[idx].wage_amount = computeStaffWage(next[idx].salary_rate, next[idx].pay_type, next[idx].status, next[idx].shift_type, val);
+                                            setStaffDailyAttendance(next);
+                                          }}
+                                          style={{
+                                            width: 55,
+                                            padding: '5px 8px',
+                                            fontSize: 12,
+                                            textAlign: 'center',
+                                            borderRadius: 4,
+                                            cursor: (!isStaffDateToday || row.status === 'absent') ? 'not-allowed' : 'text',
+                                            opacity: (!isStaffDateToday || row.status === 'absent') ? 0.6 : 1,
+                                          }}
+                                        />
+                                        <span style={{ fontSize: 11, color: '#94a3b8' }}>hrs</span>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <div style={{ fontSize: 12 }}>
+                                        <b>{INR(row.salary_rate)}</b>
+                                        <span style={{ color: '#94a3b8', marginLeft: 4 }}>
+                                          / {row.pay_type === 'per_day' ? 'day' : row.pay_type === 'monthly' ? 'mo' : 'fee'}
+                                        </span>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <b style={{ color: Number(row.wage_amount || 0) > 0 ? '#22c55e' : '#94a3b8' }}>
+                                        {INR(row.wage_amount || 0)}
+                                      </b>
+                                    </td>
+                                    <td>
+                                      <input
+                                        type="text"
+                                        placeholder="Note..."
+                                        disabled={!isStaffDateToday}
+                                        value={row.note || ''}
+                                        onChange={(e) => {
+                                          if (!isStaffDateToday) return;
+                                          const next = [...staffDailyAttendance];
+                                          next[idx].note = e.target.value;
+                                          next[idx].dirty = true;
+                                          setStaffDailyAttendance(next);
+                                        }}
+                                        style={{ width: 140, padding: '5px 8px', fontSize: 12, borderRadius: 4, cursor: !isStaffDateToday ? 'not-allowed' : 'text', opacity: !isStaffDateToday ? 0.6 : 1 }}
+                                      />
+                                    </td>
+                                  </tr>
+                                ))}
+                                {staffDailyAttendance.length === 0 && (
+                                  <tr>
+                                    <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
+                                      No active staff members assigned to this project to mark attendance. Click &quot;Staff&quot; tab to assign staff.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Staff Attendance History Log */}
+                      <div style={{ marginTop: 24, borderTop: '1px solid rgba(148,163,184,0.2)', paddingTop: 16 }}>
+                        <h4 style={{ margin: '0 0 10px', fontSize: 15, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          📋 Staff Attendance History
+                          <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 400 }}>
+                            ({projectStaffAttendanceHistory.length} records)
+                          </span>
+                        </h4>
+                        {projectStaffAttendanceHistory.length > 0 ? (
+                          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', margin: '8px 0 16px', borderRadius: 8, border: '1px solid rgba(148,163,184,0.2)' }}>
+                            <table style={{ minWidth: 920, width: '100%', borderCollapse: 'collapse', margin: 0 }}>
+                              <thead>
+                                <tr>
+                                  <th style={{ minWidth: 100 }}>Date</th>
+                                  <th style={{ minWidth: 150 }}>Staff Member</th>
+                                  <th style={{ minWidth: 110 }}>Role</th>
+                                  <th style={{ minWidth: 120 }}>Status</th>
+                                  <th style={{ minWidth: 90 }}>Shift</th>
+                                  <th style={{ minWidth: 80 }}>Overtime</th>
+                                  <th style={{ minWidth: 110 }}>Wage Amount</th>
+                                  <th style={{ minWidth: 120 }}>Marked By</th>
+                                  <th style={{ minWidth: 140 }}>Note</th>
+                                  <th style={{ minWidth: 90, textAlign: 'right' }}>Action</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {projectStaffAttendanceHistory.map((h, i) => (
+                                  <tr key={h.id || i}>
+                                    <td>{h.attendance_date ? String(h.attendance_date).slice(0, 10) : '—'}</td>
+                                    <td>
+                                      <b>{h.staff_name}</b>
+                                    </td>
+                                    <td>
+                                      <span className="badge" style={{ background: 'rgba(148,163,184,0.15)', color: '#94a3b8' }}>
+                                        {h.role}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <span
+                                        className="badge"
+                                        style={{
+                                          background: h.status === 'present' ? 'rgba(22,163,74,0.2)' : h.status === 'half_day' ? 'rgba(217,119,6,0.2)' : 'rgba(220,38,38,0.2)',
+                                          color: h.status === 'present' ? '#4ade80' : h.status === 'half_day' ? '#f59e0b' : '#f87171',
+                                          fontWeight: 600,
+                                          textTransform: 'capitalize'
+                                        }}
+                                      >
+                                        {h.status === 'present' ? '✅ Present' : h.status === 'half_day' ? '⛅ Half Day' : '❌ Absent'}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <span style={{ textTransform: 'capitalize' }}>
+                                        {h.shift_type === 'double' ? '⚡ Double' : h.shift_type === 'night' ? '🌙 Night' : '☀️ Day'}
+                                      </span>
+                                    </td>
+                                    <td>{Number(h.overtime_hours || 0) > 0 ? `${h.overtime_hours} hrs` : '—'}</td>
+                                    <td style={{ fontWeight: 600, color: '#22c55e' }}>{INR(h.wage_amount || 0)}</td>
+                                    <td style={{ fontSize: 12, color: '#94a3b8' }}>{h.created_by || '—'}</td>
+                                    <td style={{ fontSize: 12, color: '#94a3b8' }}>{h.note || '—'}</td>
+                                    <td style={{ textAlign: 'right' }}>
+                                      {isEditableWithin48Hours(String(h.attendance_date).slice(0, 10)) ? (
+                                        <button
+                                          type="button"
+                                          className="active-btn"
+                                          style={{ padding: '3px 8px', fontSize: 11 }}
+                                          onClick={() => {
+                                            const date = String(h.attendance_date).slice(0, 10);
+                                            setStaffAttendanceDate(date);
+                                            loadStaffAttendance(project.id, date);
+                                          }}
+                                          title="Edit attendance"
+                                        >
+                                          ✏️ Edit
+                                        </button>
+                                      ) : (
+                                        <span style={{ fontSize: 11, color: '#94a3b8', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                                          🔒 Locked
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <p style={{ color: '#94a3b8', fontSize: 13, margin: '8px 0' }}>
+                            No staff attendance records saved yet for this project.
+                          </p>
+                        )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -4093,7 +5836,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                             className={paymentsSubTab === 'vendor' ? 'active-btn' : 'muted'}
                             onClick={() => handlePaymentsSubChange('vendor')}
                           >
-                            Vendor Payment ({vendorPaymentsList.length})
+                            Service Provider Payment ({vendorPaymentsList.length})
                           </button>
                           <button
                             className={paymentsSubTab === 'labor' ? 'active-btn' : 'muted'}
@@ -4111,7 +5854,13 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                             className={paymentsSubTab === 'supplier' ? 'active-btn' : 'muted'}
                             onClick={() => handlePaymentsSubChange('supplier')}
                           >
-                            Supplier Payment ({supplierPaymentsList.length})
+                            Vendor Payment ({supplierPaymentsList.length})
+                          </button>
+                          <button
+                            className={paymentsSubTab === 'staff' ? 'active-btn' : 'muted'}
+                            onClick={() => handlePaymentsSubChange('staff')}
+                          >
+                            Staff Payment ({staffPayments.length})
                           </button>
                         </div>
 
@@ -4126,21 +5875,45 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                 note: '',
                               });
                               setEditingLaborPaymentId(null);
+                              setModalReadOnly(false);
+                              setModalError('');
                               setLaborPaymentModal(true);
                             }}
                           >
                             + Record Labor Payment
                           </button>
                         )}
+                        {paymentsSubTab === 'staff' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setStaffPaymentForm({
+                                staff_id: projectStaff[0]?.id ? String(projectStaff[0].id) : '',
+                                amount: '',
+                                payment_date: today(),
+                                payment_type: 'salary',
+                                mode: 'bank',
+                                transaction_reference: '',
+                                note: '',
+                              });
+                              setEditingStaffPaymentId(null);
+                              setModalReadOnly(false);
+                              setModalError('');
+                              setStaffPaymentModal(true);
+                            }}
+                          >
+                            + Record Staff Payment
+                          </button>
+                        )}
                       </div>
 
                       {paymentsSubTab === 'vendor' && (
                         <div>
-                          <form onSubmit={(e) => submitAction.submit('vendorPayment', () => saveVendorPayment(e), { successMessage: 'Vendor payment recorded successfully', onError: setMessage })} className="card" style={{ marginBottom: 16 }}>
-                    <h4 style={{ margin: '0 0 12px', fontSize: 15 }}>Record Vendor Payment</h4>
+                          <form onSubmit={(e) => submitAction.submit('vendorPayment', () => saveVendorPayment(e), { successMessage: 'Service provider payment recorded successfully', onError: setMessage })} className="card" style={{ marginBottom: 16 }}>
+                    <h4 style={{ margin: '0 0 12px', fontSize: 15 }}>Record Service Provider Payment</h4>
                     <div className="grid">
                       <label>
-                        <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>Vendor</small>
+                        <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>Service Provider</small>
                         <select
                           required
                           value={vendorPaymentForm.project_vendor_id}
@@ -4154,7 +5927,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                             setVendorPaymentForm({ ...vendorPaymentForm, project_vendor_id: pvid, payment_type: defType });
                           }}
                         >
-                          <option value="">Select Vendor</option>
+                          <option value="">Select Service Provider</option>
                           {projectVendors.map((pv) => {
                             const earned = Number(pv.total_earned ?? pv.earned ?? 0);
                             const paid = Number(pv.total_paid ?? pv.paid ?? 0);
@@ -4179,7 +5952,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                         return (
                           <div style={{ gridColumn: '1 / -1', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 14px', display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
                             <div>
-                              <small style={{ color: '#64748b', display: 'block' }}>Contractor / Vendor</small>
+                              <small style={{ color: '#64748b', display: 'block' }}>Contractor / Service Provider</small>
                               <b>{sel.vendor_name}</b> <span style={{ fontSize: 12, color: '#64748b' }}>({sel.trade || 'General'})</span>
                             </div>
                             <div>
@@ -4187,7 +5960,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                               <span style={{ fontWeight: 600, color: '#0f172a' }}>{rateLabel}</span>
                             </div>
                             <div>
-                              <small style={{ color: '#64748b', display: 'block' }}>Vendor Earned</small>
+                              <small style={{ color: '#64748b', display: 'block' }}>Service Provider Earned</small>
                               <span style={{ fontWeight: 600, color: '#0f172a' }}>{INR(earned)}</span>
                             </div>
                             <div>
@@ -4212,7 +5985,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                       <Input label="Amount (₹)" name="amount" type="number" step="any" min="1" value={vendorPaymentForm.amount} set={setVendorPaymentForm} required />
                       <Input label="Payment Date" name="payment_date" type="date" value={vendorPaymentForm.payment_date} set={setVendorPaymentForm} required />
                       <label>
-                        <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>Payment Mode</small>
+                        <small style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Payment Mode</small>
                         <select
                           value={vendorPaymentForm.mode}
                           onChange={(e) => setVendorPaymentForm({ ...vendorPaymentForm, mode: e.target.value })}
@@ -4227,7 +6000,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                         <Input label="Transaction Reference / UPI ID" name="transaction_reference" value={vendorPaymentForm.transaction_reference || ''} set={setVendorPaymentForm} placeholder="e.g. UPI ID, UTR number, or bank transaction ID" />
                       )}
                       <label>
-                        <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>Payment Type</small>
+                        <small style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Payment Type</small>
                         <select
                           value={vendorPaymentForm.payment_type}
                           onChange={(e) => setVendorPaymentForm({ ...vendorPaymentForm, payment_type: e.target.value })}
@@ -4252,7 +6025,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                       onChange={(e) => setVPayFilterVendor(e.target.value)}
                       style={{ maxWidth: 200 }}
                     >
-                      <option value="">All Vendors</option>
+                      <option value="">All Service Providers</option>
                       {projectVendors.map((pv) => (
                         <option value={pv.id} key={pv.id}>{pv.vendor_name}</option>
                       ))}
@@ -4286,7 +6059,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                     <thead>
                       <tr>
                         <th>Date</th>
-                        <th>Vendor</th>
+                        <th>Service Provider</th>
                         <th>Type</th>
                         <th>Amount</th>
                         <th>Advance Payment</th>
@@ -4353,11 +6126,65 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                               {p.note || '—'}
                               {p.transaction_reference && <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Ref: {p.transaction_reference}</div>}
                             </td>
-                            <td className="actions" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
-                              {!isAgent && (
-                                <button className="danger" onClick={() => del('vendorPayment', p.id)}>
-                                  Delete
-                                </button>
+                            <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                              {isSameDayIST(p.created_at || p.payment_date) ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="muted"
+                                    style={{ padding: '4px 8px', fontSize: 12 }}
+                                    onClick={() => {
+                                      setEditingVendorPaymentId(p.id);
+                                      setVendorPaymentForm({
+                                        project_vendor_id: String(p.project_vendor_id || ''),
+                                        amount: p.amount,
+                                        payment_date: p.payment_date ? String(p.payment_date).slice(0, 10) : today(),
+                                        mode: p.mode || 'bank',
+                                        payment_type: p.payment_type || 'labour',
+                                        transaction_reference: p.transaction_reference || '',
+                                        note: p.note || '',
+                                      });
+                                      setModalReadOnly(false);
+                                      setModalError('');
+                                      setVendorPaymentModal(true);
+                                    }}
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                  {!isAgent && (
+                                    <button className="danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => del('vendorPayment', p.id)}>
+                                      Delete
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="muted"
+                                    style={{ padding: '4px 8px', fontSize: 12 }}
+                                    onClick={() => {
+                                      setEditingVendorPaymentId(p.id);
+                                      setVendorPaymentForm({
+                                        project_vendor_id: String(p.project_vendor_id || ''),
+                                        amount: p.amount,
+                                        payment_date: p.payment_date ? String(p.payment_date).slice(0, 10) : today(),
+                                        mode: p.mode || 'bank',
+                                        payment_type: p.payment_type || 'labour',
+                                        transaction_reference: p.transaction_reference || '',
+                                        note: p.note || '',
+                                      });
+                                      setModalReadOnly(true);
+                                      setModalError('');
+                                      setVendorPaymentModal(true);
+                                    }}
+                                  >
+                                    👁️ View
+                                  </button>
+                                  <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                    🔒 Locked
+                                  </span>
+                                </>
                               )}
                             </td>
                           </tr>
@@ -4366,7 +6193,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                       {vendorPaymentsList.length === 0 && (
                         <tr>
                           <td colSpan={9} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
-                            No vendor payments recorded yet.
+                            No service provider payments recorded yet.
                           </td>
                         </tr>
                       )}
@@ -4496,29 +6323,64 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                   {p.note || '—'}
                                   {p.transaction_reference && <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Ref: {p.transaction_reference}</div>}
                                 </td>
-                                <td className="actions" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    className="muted"
-                                    onClick={() => {
-                                      setLaborPaymentForm({
-                                        labor_id: p.labor_id,
-                                        amount: p.amount,
-                                        payment_date: p.payment_date ? String(p.payment_date).slice(0, 10) : today(),
-                                        mode: p.mode || 'cash',
-                                        payment_type: p.payment_type || 'wage',
-                                        note: p.note || '',
-                                        transaction_reference: p.transaction_reference || '',
-                                      });
-                                      setEditingLaborPaymentId(p.id);
-                                      setLaborPaymentModal(true);
-                                    }}
-                                  >
-                                    Edit
-                                  </button>
-                                  {!isAgent && (
-                                    <button className="danger" onClick={() => del('laborPayment', p.id)}>
-                                      Delete
-                                    </button>
+                                <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                                  {isSameDayIST(p.created_at || p.payment_date) ? (
+                                    <>
+                                      <button
+                                        className="muted"
+                                        style={{ padding: '4px 8px', fontSize: 12 }}
+                                        onClick={() => {
+                                          setLaborPaymentForm({
+                                            labor_id: p.labor_id,
+                                            amount: p.amount,
+                                            payment_date: p.payment_date ? String(p.payment_date).slice(0, 10) : today(),
+                                            mode: p.mode || 'cash',
+                                            payment_type: p.payment_type || 'wage',
+                                            note: p.note || '',
+                                            transaction_reference: p.transaction_reference || '',
+                                          });
+                                          setEditingLaborPaymentId(p.id);
+                                          setModalReadOnly(false);
+                                          setModalError('');
+                                          setLaborPaymentModal(true);
+                                        }}
+                                      >
+                                        ✏️ Edit
+                                      </button>
+                                      {!isAgent && (
+                                        <button className="danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => del('laborPayment', p.id)}>
+                                          Delete
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="muted"
+                                        style={{ padding: '4px 8px', fontSize: 12 }}
+                                        onClick={() => {
+                                          setLaborPaymentForm({
+                                            labor_id: p.labor_id,
+                                            amount: p.amount,
+                                            payment_date: p.payment_date ? String(p.payment_date).slice(0, 10) : today(),
+                                            mode: p.mode || 'cash',
+                                            payment_type: p.payment_type || 'wage',
+                                            note: p.note || '',
+                                            transaction_reference: p.transaction_reference || '',
+                                          });
+                                          setEditingLaborPaymentId(p.id);
+                                          setModalReadOnly(true);
+                                          setModalError('');
+                                          setLaborPaymentModal(true);
+                                        }}
+                                      >
+                                        👁️ View
+                                      </button>
+                                      <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                        🔒 Locked
+                                      </span>
+                                    </>
                                   )}
                                 </td>
                               </tr>
@@ -4585,11 +6447,61 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                             {p.note || '—'}
                             {p.transaction_reference && <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Ref: {p.transaction_reference}</div>}
                           </td>
-                          <td className="actions" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
-                            {!isAgent && (
-                              <button className="danger" onClick={() => del('partyPayment', p.id)}>
-                                Delete
-                              </button>
+                          <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                            {isSameDayIST(p.created_at || p.payment_date) ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="muted"
+                                  style={{ padding: '4px 8px', fontSize: 12 }}
+                                  onClick={() => {
+                                    setEditingPartyPaymentId(p.id);
+                                    setPartyPaymentForm({
+                                      amount: p.amount,
+                                      payment_date: p.payment_date ? String(p.payment_date).slice(0, 10) : today(),
+                                      mode: p.mode || 'bank',
+                                      transaction_reference: p.transaction_reference || '',
+                                      note: p.note || '',
+                                    });
+                                    setModalReadOnly(false);
+                                    setModalError('');
+                                    setPartyPaymentModal(true);
+                                  }}
+                                >
+                                  ✏️ Edit
+                                </button>
+                                {!isAgent && (
+                                  <button className="danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => del('partyPayment', p.id)}>
+                                    Delete
+                                  </button>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  className="muted"
+                                  style={{ padding: '4px 8px', fontSize: 12 }}
+                                  onClick={() => {
+                                    setEditingPartyPaymentId(p.id);
+                                    setPartyPaymentForm({
+                                      amount: p.amount,
+                                      payment_date: p.payment_date ? String(p.payment_date).slice(0, 10) : today(),
+                                      mode: p.mode || 'bank',
+                                      transaction_reference: p.transaction_reference || '',
+                                      note: p.note || '',
+                                    });
+                                    setModalReadOnly(true);
+                                    setModalError('');
+                                    setPartyPaymentModal(true);
+                                  }}
+                                >
+                                  👁️ View
+                                </button>
+                                <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                  🔒 Locked
+                                </span>
+                              </>
                             )}
                           </td>
                         </tr>
@@ -4622,10 +6534,10 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                           }}>
                             <div>
                               <div style={{ fontWeight: 600, color: '#0f172a', fontSize: 14 }}>
-                                ℹ️ Supplier Payment Details (View Only)
+                                ℹ️ Vendor Payment Details (View Only)
                               </div>
                               <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
-                                Payment add, edit ya delete sirf <b>Suppliers</b> tab me jaakar kiya ja sakta hai.
+                                Payment add, edit ya delete sirf <b>Vendors</b> tab me jaakar kiya ja sakta hai.
                               </div>
                             </div>
                             <button
@@ -4634,7 +6546,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                               onClick={() => setProjectTab('suppliers')}
                               style={{ fontSize: 12 }}
                             >
-                              Go to Suppliers Tab ➔
+                              Go to Vendors Tab ➔
                             </button>
                           </div>
 
@@ -4642,7 +6554,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                             <thead>
                               <tr>
                                 <th>Date</th>
-                                <th>Supplier Name</th>
+                                <th>Vendor Name</th>
                                 <th>Amount</th>
                                 <th>Payment Mode</th>
                                 <th>Reference / Cheque</th>
@@ -4653,7 +6565,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                             </thead>
                             <tbody>
                               {supplierPaymentsList.map((p) => {
-                                const supplierName = p.supplier_display || p.supplier_name || (projectSuppliers.find(s => s.supplier_id === p.supplier_id)?.supplier_name) || `Supplier #${p.supplier_id || ''}`;
+                                const supplierName = p.supplier_display || p.supplier_name || (projectSuppliers.find(s => s.supplier_id === p.supplier_id)?.supplier_name) || `Vendor #${p.supplier_id || ''}`;
                                 return (
                                   <tr key={p.id}>
                                     <td>{p.payment_date ? String(p.payment_date).slice(0, 10) : '—'}</td>
@@ -4687,9 +6599,9 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                             openSupplierLedger(matched);
                                           }
                                         }}
-                                        title="View ledger in Suppliers tab"
+                                        title="View ledger in Vendors tab"
                                       >
-                                        📒 View in Suppliers
+                                        📒 View in Vendors
                                       </button>
                                     </td>
                                   </tr>
@@ -4698,12 +6610,131 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                               {supplierPaymentsList.length === 0 && (
                                 <tr>
                                   <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
-                                    No supplier payments recorded yet. Payments can be recorded in the Suppliers tab.
+                                    No vendor payments recorded yet. Payments can be recorded in the Vendors tab.
                                   </td>
                                 </tr>
                               )}
                             </tbody>
                           </table>
+                        </div>
+                      )}
+
+                      {/* ── STAFF PAYMENTS IN PAYMENTS TAB ── */}
+                      {paymentsSubTab === 'staff' && (
+                        <div className="card">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                              <select
+                                value={staffPaymentFilterType}
+                                onChange={(e) => setStaffPaymentFilterType(e.target.value)}
+                                style={{ fontSize: 13, padding: '6px 10px' }}
+                              >
+                                <option value="">All Payment Types</option>
+                                <option value="salary">Salary</option>
+                                <option value="commission">Commission</option>
+                                <option value="advance">Advance</option>
+                                <option value="bonus">Bonus</option>
+                                <option value="reimbursement">Reimbursement</option>
+                              </select>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: '#16a34a' }}>
+                                Total Paid: {INR(staffPaymentsSummary.total_amount)}
+                              </span>
+                              <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                                (Salary: {INR(staffPaymentsSummary.salary_amount)} • Commission: {INR(staffPaymentsSummary.commission_amount)})
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStaffPaymentForm({
+                                  staff_id: projectStaff[0]?.id ? String(projectStaff[0].id) : '',
+                                  amount: '',
+                                  payment_date: today(),
+                                  payment_type: 'salary',
+                                  mode: 'bank',
+                                  transaction_reference: '',
+                                  note: '',
+                                });
+                                setEditingStaffPaymentId(null);
+                                setModalError('');
+                                setStaffPaymentModal(true);
+                              }}
+                            >
+                              + Record Staff Payment
+                            </button>
+                          </div>
+
+                          <div style={{ overflowX: 'auto' }}>
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>Date</th>
+                                  <th>Staff Member</th>
+                                  <th>Role</th>
+                                  <th>Payment Type</th>
+                                  <th>Amount</th>
+                                  <th>Mode</th>
+                                  <th>Reference No.</th>
+                                  <th>Note</th>
+                                  <th>Recorded By</th>
+                                  <th style={{ textAlign: 'right' }}>Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {staffPayments
+                                  .filter((p) => !staffPaymentFilterType || p.payment_type === staffPaymentFilterType)
+                                  .map((p) => (
+                                    <tr key={p.id}>
+                                      <td>{p.payment_date}</td>
+                                      <td style={{ fontWeight: 600 }}>{p.staff_name}</td>
+                                      <td>
+                                        <span className="badge" style={{ background: 'rgba(148,163,184,0.15)', color: '#94a3b8' }}>
+                                          {p.role}
+                                        </span>
+                                      </td>
+                                      <td>
+                                        <span
+                                          className="badge"
+                                          style={{
+                                            background: p.payment_type === 'commission' ? 'rgba(217,119,6,0.2)' : p.payment_type === 'advance' ? 'rgba(2,132,199,0.2)' : 'rgba(22,163,74,0.2)',
+                                            color: p.payment_type === 'commission' ? '#f59e0b' : p.payment_type === 'advance' ? '#38bdf8' : '#4ade80',
+                                            fontWeight: 600,
+                                            textTransform: 'capitalize'
+                                          }}
+                                        >
+                                          {p.payment_type}
+                                        </span>
+                                      </td>
+                                      <td style={{ fontWeight: 700, color: p.payment_type === 'commission' ? '#f59e0b' : '#22c55e' }}>
+                                        {INR(p.amount)}
+                                      </td>
+                                      <td style={{ textTransform: 'capitalize' }}>{p.mode || 'bank'}</td>
+                                      <td>{p.transaction_reference || '—'}</td>
+                                      <td>{p.note || '—'}</td>
+                                      <td style={{ fontSize: 11, color: '#94a3b8' }}>{p.created_by}</td>
+                                      <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }}>
+                                        <button
+                                          type="button"
+                                          className="danger"
+                                          style={{ padding: '4px 8px', fontSize: 12 }}
+                                          onClick={() => deleteStaffPayment(p.id)}
+                                          title="Delete payment entry"
+                                        >
+                                          Delete
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                {staffPayments.length === 0 && (
+                                  <tr>
+                                    <td colSpan={10} style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
+                                      No staff payment records found for this project.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -4717,16 +6748,35 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                         <div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                              <h4 style={{ margin: 0, fontSize: 16 }}>Project Suppliers ({projectSuppliers.length})</h4>
+                              <h4 style={{ margin: 0, fontSize: 16 }}>Project Vendors ({projectSuppliers.length})</h4>
                               <input
                                 type="text"
-                                placeholder="Search supplier by name or phone..."
+                                placeholder="Search vendor by name or phone..."
                                 value={supplierSearch}
                                 onChange={(e) => setSupplierSearch(e.target.value)}
                                 style={{ minWidth: 240, padding: '6px 12px', fontSize: 13 }}
                               />
                             </div>
                             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              {hasAgentConstruction && (
+                                <button
+                                  className="btn-secondary"
+                                  onClick={() => {
+                                    setLocalVendorForm({
+                                      name: '',
+                                      phone: '',
+                                      city: '',
+                                      material_type: '',
+                                      address: '',
+                                    });
+                                    setModalError('');
+                                    setLocalVendorModal(true);
+                                  }}
+                                  title="Add local / unregistered vendor to this project"
+                                >
+                                  + Add Local Vendor
+                                </button>
+                              )}
                               {hasAgentConstruction && (
                                 <button
                                   onClick={() => {
@@ -4760,7 +6810,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                     setSupplierPaymentModal(true);
                                   }}
                                 >
-                                  + Record Supplier Payment
+                                  + Record Vendor Payment
                                 </button>
                               )}
                             </div>
@@ -4769,7 +6819,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                           <table>
                             <thead>
                               <tr>
-                                <th>Supplier</th>
+                                <th>Vendor</th>
                                 <th>Total Supplied</th>
                                 <th>Total Returned</th>
                                 <th>Total Paid</th>
@@ -4794,14 +6844,21 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                     key={s.key}
                                     className="clickable-row"
                                     onClick={() => openSupplierLedger(s)}
-                                    title="Click to open supplier ledger"
+                                    title="Click to open vendor ledger"
                                   >
                                     <td>
                                       <b>{s.supplier_name}</b>
                                       {s.is_registered ? (
                                         <span className="badge badge-active" style={{ marginLeft: 6, fontSize: 10 }}>Registered</span>
                                       ) : (
-                                        <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: '#f1f5f9', color: '#64748b' }}>Unregistered</span>
+                                        <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: '#f1f5f9', color: '#475569' }}>
+                                          {s.is_local ? 'Local Vendor' : 'Unregistered'}
+                                        </span>
+                                      )}
+                                      {s.material_type && (
+                                        <span style={{ fontSize: 10, color: '#0369a1', background: '#e0f2fe', padding: '1px 6px', borderRadius: 4, marginLeft: 6 }}>
+                                          {s.material_type}
+                                        </span>
                                       )}
                                       {s.phone && (
                                         <span style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 2 }}>
@@ -4864,7 +6921,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                             setModalError('');
                                             setSupplierPaymentModal(true);
                                           }}
-                                          title="Record payment to this supplier"
+                                          title="Record payment to this vendor"
                                         >
                                           + Pay
                                         </button>
@@ -4875,8 +6932,8 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                               {projectSuppliers.length === 0 && (
                                 <tr>
                                   <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: '#64748b' }}>
-                                    No suppliers recorded for this project yet.<br />
-                                    Click <b>&ldquo;+ Record Material Delivered to Site&rdquo;</b> to record initial supplier deliveries.
+                                    No vendors recorded for this project yet.<br />
+                                    Click <b>&ldquo;+ Record Material Delivered to Site&rdquo;</b> to record initial vendor deliveries.
                                   </td>
                                 </tr>
                               )}
@@ -4893,7 +6950,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                 onClick={() => setSelectedSupplier(null)}
                                 style={{ display: 'flex', alignItems: 'center', gap: 4 }}
                               >
-                                ← Back to Suppliers
+                                ← Back to Vendors
                               </button>
                               <div>
                                 <h4 style={{ margin: 0, fontSize: 18 }}>
@@ -4912,6 +6969,25 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                               </div>
                             </div>
                             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              {hasAgentConstruction && (
+                                <button
+                                  className="btn-secondary"
+                                  onClick={() => {
+                                    setLocalVendorForm({
+                                      name: '',
+                                      phone: '',
+                                      city: '',
+                                      material_type: '',
+                                      address: '',
+                                    });
+                                    setModalError('');
+                                    setLocalVendorModal(true);
+                                  }}
+                                  title="Add local / unregistered vendor to this project"
+                                >
+                                  + Add Local Vendor
+                                </button>
+                              )}
                               {hasAgentConstruction && (
                                 <button
                                   onClick={() => {
@@ -5048,6 +7124,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                   {!isSupervisor && <th>Rate</th>}
                                   {!isSupervisor && <th>Amount</th>}
                                   <th>Challan No</th>
+                                  <th>Vehicle / Received By</th>
                                   <th>Bill</th>
                                   <th>Note</th>
                                   <th style={{ textAlign: 'right' }}>Actions</th>
@@ -5064,6 +7141,17 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                     {!isSupervisor && <td style={{ fontWeight: 600 }}>{INR(d.amount)}</td>}
                                     <td>{d.challan_no || '—'}</td>
                                     <td>
+                                      {d.vehicle_no ? (
+                                        <div>
+                                          <b style={{ color: '#0369a1', fontSize: 12 }}>🚛 {d.vehicle_no}</b>
+                                          {d.driver_name && <div style={{ fontSize: 11, color: '#475569' }}>Driver: {d.driver_name}</div>}
+                                          {d.received_by && <div style={{ fontSize: 11, color: '#166534' }}>Recvd: {d.received_by}</div>}
+                                        </div>
+                                      ) : (
+                                        d.received_by ? <span style={{ fontSize: 12, color: '#166534' }}>Recvd: {d.received_by}</span> : '—'
+                                      )}
+                                    </td>
+                                    <td>
                                       {d.bill_url ? (
                                         <a href={d.bill_url} target="_blank" rel="noreferrer" title={d.bill_filename || 'View Bill'} style={{ textDecoration: 'none', fontSize: 16 }}>
                                           📄
@@ -5071,11 +7159,76 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                       ) : '—'}
                                     </td>
                                     <td>{d.note || '—'}</td>
-                                    <td className="actions" style={{ justifyContent: 'flex-end' }}>
-                                      {!isAgent && (
-                                        <button className="danger" onClick={() => del('received', d.id)}>
-                                          Delete
-                                        </button>
+                                    <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }}>
+                                      {isSameDayIST(d.created_at || d.received_date) ? (
+                                        <>
+                                          <button
+                                            className="muted"
+                                            style={{ padding: '4px 8px', fontSize: 12 }}
+                                            onClick={() => {
+                                              setEditingReceivedId(d.id);
+                                              setReceivedForm({
+                                                material_id: String(d.material_id),
+                                                material_name: d.material_name || stockRows.find((m) => Number(m.id) === Number(d.material_id))?.name || '',
+                                                unit: d.material_unit || d.unit || 'bags',
+                                                quantity: d.quantity,
+                                                rate: d.rate,
+                                                received_date: formatDateIST(d.received_date),
+                                                supplier_name: d.supplier_name || selectedSupplier?.supplier_name || selectedSupplier?.raw_supplier_name || '',
+                                                challan_no: d.challan_no || '',
+                                                vehicle_no: d.vehicle_no || '',
+                                                driver_name: d.driver_name || '',
+                                                driver_phone: d.driver_phone || '',
+                                                received_by: d.received_by || '',
+                                                note: d.note || '',
+                                              });
+                                              setModalReadOnly(false);
+                                              setModalError('');
+                                              setReceivedModal(true);
+                                            }}
+                                          >
+                                            ✏️ Edit
+                                          </button>
+                                          {!isAgent && (
+                                            <button className="danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => del('received', d.id)}>
+                                              Delete
+                                            </button>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <>
+                                          <button
+                                            type="button"
+                                            className="muted"
+                                            style={{ padding: '4px 8px', fontSize: 12 }}
+                                            onClick={() => {
+                                              setEditingReceivedId(d.id);
+                                              setReceivedForm({
+                                                material_id: String(d.material_id),
+                                                material_name: d.material_name || stockRows.find((m) => Number(m.id) === Number(d.material_id))?.name || '',
+                                                unit: d.material_unit || d.unit || 'bags',
+                                                quantity: d.quantity,
+                                                rate: d.rate,
+                                                received_date: formatDateIST(d.received_date),
+                                                supplier_name: d.supplier_name || selectedSupplier?.supplier_name || selectedSupplier?.raw_supplier_name || '',
+                                                challan_no: d.challan_no || '',
+                                                vehicle_no: d.vehicle_no || '',
+                                                driver_name: d.driver_name || '',
+                                                driver_phone: d.driver_phone || '',
+                                                received_by: d.received_by || '',
+                                                note: d.note || '',
+                                              });
+                                              setModalReadOnly(true);
+                                              setModalError('');
+                                              setReceivedModal(true);
+                                            }}
+                                          >
+                                            👁️ View
+                                          </button>
+                                          <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                            🔒 Locked
+                                          </span>
+                                        </>
                                       )}
                                     </td>
                                   </tr>
@@ -5083,7 +7236,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                 {(supplierLedgerData.deliveries || []).length === 0 && (
                                   <tr>
                                     <td colSpan={10} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
-                                      No material deliveries recorded for this supplier.
+                                      No material deliveries recorded for this vendor.
                                     </td>
                                   </tr>
                                 )}
@@ -5123,11 +7276,74 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                       ) : '—'}
                                     </td>
                                     <td>{ret.note || ret.reason || '—'}</td>
-                                    <td className="actions" style={{ justifyContent: 'flex-end' }}>
-                                      {!isAgent && (
-                                        <button className="danger" onClick={() => del('adjustment', ret.id)}>
-                                          Delete
-                                        </button>
+                                    <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }}>
+                                      {isSameDayIST(ret.created_at || ret.adjustment_date) ? (
+                                        <>
+                                          <button
+                                            className="muted"
+                                            style={{ padding: '4px 8px', fontSize: 12 }}
+                                            onClick={() => {
+                                              setEditingAdjId(ret.id);
+                                              setAdjustmentForm({
+                                                material_id: String(ret.material_id),
+                                                material_name: ret.material_name || stockRows.find((m) => Number(m.id) === Number(ret.material_id))?.name || '',
+                                                unit: ret.material_unit || ret.unit || 'bags',
+                                                adjustment_type: ret.adjustment_type || 'return_to_supplier',
+                                                quantity: ret.quantity,
+                                                adjustment_date: formatDateIST(ret.adjustment_date),
+                                                to_project_id: ret.to_project_id ? String(ret.to_project_id) : '',
+                                                supplier_name: ret.supplier_name || selectedSupplier?.supplier_name || selectedSupplier?.raw_supplier_name || '',
+                                                amount: ret.amount || '',
+                                                note: ret.note || ret.reason || '',
+                                                bill_url: ret.bill_url || '',
+                                                bill_filename: ret.bill_filename || '',
+                                              });
+                                              setModalReadOnly(false);
+                                              setModalError('');
+                                              setAdjustmentModal(true);
+                                            }}
+                                          >
+                                            ✏️ Edit
+                                          </button>
+                                          {!isAgent && (
+                                            <button className="danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => del('adjustment', ret.id)}>
+                                              Delete
+                                            </button>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <>
+                                          <button
+                                            type="button"
+                                            className="muted"
+                                            style={{ padding: '4px 8px', fontSize: 12 }}
+                                            onClick={() => {
+                                              setEditingAdjId(ret.id);
+                                              setAdjustmentForm({
+                                                material_id: String(ret.material_id),
+                                                material_name: ret.material_name || stockRows.find((m) => Number(m.id) === Number(ret.material_id))?.name || '',
+                                                unit: ret.material_unit || ret.unit || 'bags',
+                                                adjustment_type: ret.adjustment_type || 'return_to_supplier',
+                                                quantity: ret.quantity,
+                                                adjustment_date: formatDateIST(ret.adjustment_date),
+                                                to_project_id: ret.to_project_id ? String(ret.to_project_id) : '',
+                                                supplier_name: ret.supplier_name || selectedSupplier?.supplier_name || selectedSupplier?.raw_supplier_name || '',
+                                                amount: ret.amount || '',
+                                                note: ret.note || ret.reason || '',
+                                                bill_url: ret.bill_url || '',
+                                                bill_filename: ret.bill_filename || '',
+                                              });
+                                              setModalReadOnly(true);
+                                              setModalError('');
+                                              setAdjustmentModal(true);
+                                            }}
+                                          >
+                                            👁️ View
+                                          </button>
+                                          <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                            🔒 Locked
+                                          </span>
+                                        </>
                                       )}
                                     </td>
                                   </tr>
@@ -5135,7 +7351,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                 {(supplierLedgerData.returns || []).length === 0 && (
                                   <tr>
                                     <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
-                                      No material returns recorded for this supplier.
+                                      No material returns recorded for this vendor.
                                     </td>
                                   </tr>
                                 )}
@@ -5163,11 +7379,65 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                     <td>{p.transaction_reference || '—'}</td>
                                     <td>{p.note || '—'}</td>
                                     <td style={{ fontSize: 12, color: '#64748b' }}>{p.created_by || '—'}</td>
-                                    <td className="actions" style={{ justifyContent: 'flex-end' }}>
-                                      {!isAgent && (
-                                        <button className="danger" onClick={() => del('supplierPayment', p.id)}>
-                                          Delete
-                                        </button>
+                                    <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }}>
+                                      {isSameDayIST(p.created_at || p.payment_date) ? (
+                                        <>
+                                          <button
+                                            type="button"
+                                            className="muted"
+                                            style={{ padding: '4px 8px', fontSize: 12 }}
+                                            onClick={() => {
+                                              setEditingSupplierPaymentId(p.id);
+                                              setSupplierPaymentForm({
+                                                supplier_id: p.supplier_id ? String(p.supplier_id) : '',
+                                                supplier_name: p.supplier_name || selectedSupplier?.supplier_name || selectedSupplier?.raw_supplier_name || '',
+                                                amount: p.amount,
+                                                payment_date: formatDateIST(p.payment_date),
+                                                mode: p.mode || 'bank',
+                                                transaction_reference: p.transaction_reference || '',
+                                                note: p.note || '',
+                                              });
+                                              setModalReadOnly(false);
+                                              setModalError('');
+                                              setSupplierPaymentModal(true);
+                                            }}
+                                          >
+                                            ✏️ Edit
+                                          </button>
+                                          {!isAgent && (
+                                            <button className="danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => del('supplierPayment', p.id)}>
+                                              Delete
+                                            </button>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <>
+                                          <button
+                                            type="button"
+                                            className="muted"
+                                            style={{ padding: '4px 8px', fontSize: 12 }}
+                                            onClick={() => {
+                                              setEditingSupplierPaymentId(p.id);
+                                              setSupplierPaymentForm({
+                                                supplier_id: p.supplier_id ? String(p.supplier_id) : '',
+                                                supplier_name: p.supplier_name || selectedSupplier?.supplier_name || selectedSupplier?.raw_supplier_name || '',
+                                                amount: p.amount,
+                                                payment_date: formatDateIST(p.payment_date),
+                                                mode: p.mode || 'bank',
+                                                transaction_reference: p.transaction_reference || '',
+                                                note: p.note || '',
+                                              });
+                                              setModalReadOnly(true);
+                                              setModalError('');
+                                              setSupplierPaymentModal(true);
+                                            }}
+                                          >
+                                            👁️ View
+                                          </button>
+                                          <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                            🔒 Locked
+                                          </span>
+                                        </>
                                       )}
                                     </td>
                                   </tr>
@@ -5175,7 +7445,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                 {(supplierLedgerData.payments || []).length === 0 && (
                                   <tr>
                                     <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
-                                      No payments recorded for this supplier.
+                                      No payments recorded for this vendor.
                                     </td>
                                   </tr>
                                 )}
@@ -5192,6 +7462,12 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <button
+                            className={constructionSubTab === 'used' ? 'active-btn' : 'muted'}
+                            onClick={() => handleConstructionSubChange('used')}
+                          >
+                            🧱 Daily Material Used ({usedRows.length})
+                          </button>
                           <button
                             className={constructionSubTab === 'adjustments' ? 'active-btn' : 'muted'}
                             onClick={() => handleConstructionSubChange('adjustments')}
@@ -5219,6 +7495,19 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                         </div>
 
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {constructionSubTab === 'used' && (
+                            <button
+                              onClick={() => {
+                                setUsedForm({ ...usedBlank, used_date: today() });
+                                setEditingUsedId(null);
+                                setModalReadOnly(false);
+                                setModalError('');
+                                setUsedModal(true);
+                              }}
+                            >
+                              🧱 + Record Daily Consumption
+                            </button>
+                          )}
                           {constructionSubTab === 'adjustments' && (
                             <button
                               onClick={() => {
@@ -5379,11 +7668,12 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                           <tr>
                             <th>Date</th>
                             <th>Material</th>
-                            <th>Supplier / Source</th>
+                            <th>Vendor / Source</th>
                             <th>Quantity</th>
                             {!isSupervisor && <th>Rate</th>}
                             {!isSupervisor && <th>Total Amount</th>}
                             <th>Challan No</th>
+                            <th>Vehicle / Received By</th>
                             <th>Bill</th>
                             <th>Note</th>
                             <th style={{ textAlign: 'right' }}>Actions</th>
@@ -5414,6 +7704,17 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                 {!isSupervisor && <td>{INR(r.rate)}</td>}
                                 {!isSupervisor && <td style={{ fontWeight: 600 }}>{INR(r.amount)}</td>}
                                 <td>{r.challan_no || '—'}</td>
+                                <td>
+                                  {r.vehicle_no ? (
+                                    <div>
+                                      <b style={{ color: '#0369a1', fontSize: 12 }}>🚛 {r.vehicle_no}</b>
+                                      {r.driver_name && <div style={{ fontSize: 11, color: '#475569' }}>Driver: {r.driver_name}</div>}
+                                      {r.received_by && <div style={{ fontSize: 11, color: '#166534' }}>Recvd: {r.received_by}</div>}
+                                    </div>
+                                  ) : (
+                                    r.received_by ? <span style={{ fontSize: 12, color: '#166534' }}>Recvd: {r.received_by}</span> : '—'
+                                  )}
+                                </td>
                                 <td onClick={(e) => e.stopPropagation()}>
                                   {r.bill_url ? (
                                     <a href={r.bill_url} target="_blank" rel="noreferrer" title={r.bill_filename} style={{ textDecoration: 'none' }}>
@@ -5422,31 +7723,76 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                   ) : '—'}
                                 </td>
                                 <td>{r.note || '—'}</td>
-                                <td className="actions" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    className="muted"
-                                    onClick={() => {
-                                      setEditingReceivedId(r.id);
-                                      setReceivedForm({
-                                        material_id: String(r.material_id),
-                                        material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
-                                        unit: r.material_unit || r.unit || 'bags',
-                                        quantity: r.quantity,
-                                        rate: r.rate,
-                                        received_date: r.received_date,
-                                        supplier_name: r.supplier_name || '',
-                                        challan_no: r.challan_no || '',
-                                        note: r.note || '',
-                                      });
-                                      setReceivedModal(true);
-                                    }}
-                                  >
-                                    Edit
-                                  </button>
-                                  {!isAgent && (
-                                    <button className="danger" onClick={() => del('received', r.id)}>
-                                      Delete
-                                    </button>
+                                <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                                  {isSameDayIST(r.created_at || r.received_date) ? (
+                                    <>
+                                      <button
+                                        className="muted"
+                                        style={{ padding: '4px 8px', fontSize: 12 }}
+                                        onClick={() => {
+                                          setEditingReceivedId(r.id);
+                                          setReceivedForm({
+                                            material_id: String(r.material_id),
+                                            material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
+                                            unit: r.material_unit || r.unit || 'bags',
+                                            quantity: r.quantity,
+                                            rate: r.rate,
+                                            received_date: r.received_date,
+                                            supplier_name: r.supplier_name || '',
+                                            challan_no: r.challan_no || '',
+                                            vehicle_no: r.vehicle_no || '',
+                                            driver_name: r.driver_name || '',
+                                            driver_phone: r.driver_phone || '',
+                                            received_by: r.received_by || '',
+                                            note: r.note || '',
+                                          });
+                                          setModalReadOnly(false);
+                                          setModalError('');
+                                          setReceivedModal(true);
+                                        }}
+                                      >
+                                        ✏️ Edit
+                                      </button>
+                                      {!isAgent && (
+                                        <button className="danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => del('received', r.id)}>
+                                          Delete
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="muted"
+                                        style={{ padding: '4px 8px', fontSize: 12 }}
+                                        onClick={() => {
+                                          setEditingReceivedId(r.id);
+                                          setReceivedForm({
+                                            material_id: String(r.material_id),
+                                            material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
+                                            unit: r.material_unit || r.unit || 'bags',
+                                            quantity: r.quantity,
+                                            rate: r.rate,
+                                            received_date: r.received_date,
+                                            supplier_name: r.supplier_name || '',
+                                            challan_no: r.challan_no || '',
+                                            vehicle_no: r.vehicle_no || '',
+                                            driver_name: r.driver_name || '',
+                                            driver_phone: r.driver_phone || '',
+                                            received_by: r.received_by || '',
+                                            note: r.note || '',
+                                          });
+                                          setModalReadOnly(true);
+                                          setModalError('');
+                                          setReceivedModal(true);
+                                        }}
+                                      >
+                                        👁️ View
+                                      </button>
+                                      <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                        🔒 Locked
+                                      </span>
+                                    </>
                                   )}
                                 </td>
                               </tr>
@@ -5525,37 +7871,87 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                 <td>
                                   {r.over_used && <span className="badge badge-overused">Over-used</span>}
                                 </td>
-                                <td className="actions" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    className="muted"
-                                    onClick={() => {
-                                      setEditingUsedId(r.id);
-                                      setUsedForm({
-                                        material_id: String(r.material_id),
-                                        material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
-                                        unit: r.material_unit || r.unit || 'bags',
-                                        quantity: r.quantity,
-                                        used_date: r.used_date,
-                                        used_for: r.used_for || '',
-                                        note: r.note || '',
-                                      });
-                                      setUsedModal(true);
-                                    }}
-                                  >
-                                    Edit
-                                  </button>
-                                  {!isAgent && (
-                                    <button className="danger" onClick={() => del('used', r.id)}>
-                                      Delete
-                                    </button>
+                                <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                                  {isSameDayIST(r.created_at || r.used_date) ? (
+                                    <>
+                                      <button
+                                        className="muted"
+                                        style={{ padding: '4px 8px', fontSize: 12 }}
+                                        onClick={() => {
+                                          setEditingUsedId(r.id);
+                                          setUsedForm({
+                                            material_id: String(r.material_id),
+                                            material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
+                                            unit: r.material_unit || r.unit || 'bags',
+                                            quantity: r.quantity,
+                                            used_date: r.used_date,
+                                            used_for: r.used_for || '',
+                                            note: r.note || '',
+                                          });
+                                          setModalReadOnly(false);
+                                          setModalError('');
+                                          setUsedModal(true);
+                                        }}
+                                      >
+                                        ✏️ Edit
+                                      </button>
+                                      {!isAgent && (
+                                        <button className="danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => del('used', r.id)}>
+                                          Delete
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="muted"
+                                        style={{ padding: '4px 8px', fontSize: 12 }}
+                                        onClick={() => {
+                                          setEditingUsedId(r.id);
+                                          setUsedForm({
+                                            material_id: String(r.material_id),
+                                            material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
+                                            unit: r.material_unit || r.unit || 'bags',
+                                            quantity: r.quantity,
+                                            used_date: r.used_date,
+                                            used_for: r.used_for || '',
+                                            note: r.note || '',
+                                          });
+                                          setModalReadOnly(true);
+                                          setModalError('');
+                                          setUsedModal(true);
+                                        }}
+                                      >
+                                        👁️ View
+                                      </button>
+                                      <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                        🔒 Locked
+                                      </span>
+                                    </>
                                   )}
                                 </td>
                               </tr>
                             ))}
                           {usedRows.length === 0 && (
                             <tr>
-                              <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
-                                No material usage entries yet.
+                              <td colSpan={7} style={{ textAlign: 'center', padding: '2.5rem', color: '#64748b' }}>
+                                <div style={{ fontSize: 24, marginBottom: 8 }}>🧱</div>
+                                <div style={{ fontWeight: 600, color: '#0f172a', marginBottom: 4 }}>No daily material usage entries yet</div>
+                                <div style={{ fontSize: 13, marginBottom: 14 }}>Record daily site material consumption (cement, sand, bricks, sariya) to track usage in reports.</div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setUsedForm({ ...usedBlank, used_date: today() });
+                                    setEditingUsedId(null);
+                                    setModalReadOnly(false);
+                                    setModalError('');
+                                    setUsedModal(true);
+                                  }}
+                                  style={{ padding: '6px 14px', fontSize: 12 }}
+                                >
+                                  🧱 + Record Daily Consumption
+                                </button>
                               </td>
                             </tr>
                           )}
@@ -5610,34 +8006,74 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                             </td>
                             <td>{r.note || '—'}</td>
                             <td>{r.over_used && <span className="badge badge-overused">Over-used</span>}</td>
-                            <td className="actions" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
-                              <button
-                                className="muted"
-                                onClick={() => {
-                                  setEditingAdjId(r.id);
-                                  setAdjustmentForm({
-                                    material_id: String(r.material_id),
-                                    material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
-                                    unit: r.material_unit || r.unit || 'bags',
-                                    adjustment_type: r.adjustment_type,
-                                    quantity: r.quantity,
-                                    adjustment_date: r.adjustment_date ? String(r.adjustment_date).slice(0, 10) : today(),
-                                    to_project_id: r.to_project_id ? String(r.to_project_id) : '',
-                                    supplier_name: r.supplier_name || '',
-                                    amount: r.amount || '',
-                                    note: r.note || '',
-                                    bill_url: r.bill_url || '',
-                                    bill_filename: r.bill_filename || '',
-                                  });
-                                  setAdjustmentModal(true);
-                                }}
-                              >
-                                Edit
-                              </button>
-                              {!isAgent && (
-                                <button className="danger" onClick={() => del('adjustment', r.id)}>
-                                  Delete
-                                </button>
+                            <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                              {isSameDayIST(r.created_at || r.adjustment_date) ? (
+                                <>
+                                  <button
+                                    className="muted"
+                                    style={{ padding: '4px 8px', fontSize: 12 }}
+                                    onClick={() => {
+                                      setEditingAdjId(r.id);
+                                      setAdjustmentForm({
+                                        material_id: String(r.material_id),
+                                        material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
+                                        unit: r.material_unit || r.unit || 'bags',
+                                        adjustment_type: r.adjustment_type,
+                                        quantity: r.quantity,
+                                        adjustment_date: r.adjustment_date ? String(r.adjustment_date).slice(0, 10) : today(),
+                                        to_project_id: r.to_project_id ? String(r.to_project_id) : '',
+                                        supplier_name: r.supplier_name || '',
+                                        amount: r.amount || '',
+                                        note: r.note || '',
+                                        bill_url: r.bill_url || '',
+                                        bill_filename: r.bill_filename || '',
+                                      });
+                                      setModalReadOnly(false);
+                                      setModalError('');
+                                      setAdjustmentModal(true);
+                                    }}
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                  {!isAgent && (
+                                    <button className="danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => del('adjustment', r.id)}>
+                                      Delete
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="muted"
+                                    style={{ padding: '4px 8px', fontSize: 12 }}
+                                    onClick={() => {
+                                      setEditingAdjId(r.id);
+                                      setAdjustmentForm({
+                                        material_id: String(r.material_id),
+                                        material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
+                                        unit: r.material_unit || r.unit || 'bags',
+                                        adjustment_type: r.adjustment_type,
+                                        quantity: r.quantity,
+                                        adjustment_date: r.adjustment_date ? String(r.adjustment_date).slice(0, 10) : today(),
+                                        to_project_id: r.to_project_id ? String(r.to_project_id) : '',
+                                        supplier_name: r.supplier_name || '',
+                                        amount: r.amount || '',
+                                        note: r.note || '',
+                                        bill_url: r.bill_url || '',
+                                        bill_filename: r.bill_filename || '',
+                                      });
+                                      setModalReadOnly(true);
+                                      setModalError('');
+                                      setAdjustmentModal(true);
+                                    }}
+                                  >
+                                    👁️ View
+                                  </button>
+                                  <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                    🔒 Locked
+                                  </span>
+                                </>
                               )}
                             </td>
                           </tr>
@@ -5661,7 +8097,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                           <th>Material</th>
                           <th>Type</th>
                           <th>Quantity</th>
-                          <th>Returned To / Supplier</th>
+                          <th>Returned To / Vendor</th>
                           <th>Refund / Credit Amount</th>
                           <th>Challan / Bill</th>
                           <th>Note</th>
@@ -5683,7 +8119,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                             <td><b>{r.material_name}</b></td>
                             <td>
                               <span className="badge badge-active" style={{ background: '#e0f2fe', color: '#0369a1', fontWeight: 600, textTransform: 'capitalize' }}>
-                                {r.adjustment_type === 'return_to_supplier' ? 'Return to Supplier' : 'Return Material'}
+                                {r.adjustment_type === 'return_to_supplier' ? 'Return to Vendor' : 'Return Material'}
                               </span>
                             </td>
                             <td style={{ fontWeight: 600 }}>{Number(r.quantity).toFixed(2)} {r.material_unit}</td>
@@ -5699,35 +8135,76 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                               ) : '—'}
                             </td>
                             <td>{r.note || '—'}</td>
-                            <td className="actions" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
-                              <button
-                                className="muted"
-                                onClick={() => {
-                                  setEditingAdjId(r.id);
-                                  setAdjustmentForm({
-                                    material_id: String(r.material_id),
-                                    material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
-                                    unit: r.material_unit || r.unit || 'bags',
-                                    adjustment_type: r.adjustment_type,
-                                    quantity: r.quantity,
-                                    adjustment_date: r.adjustment_date ? String(r.adjustment_date).slice(0, 10) : today(),
-                                    to_project_id: r.to_project_id ? String(r.to_project_id) : '',
-                                    supplier_id: r.supplier_id ? String(r.supplier_id) : '',
-                                    supplier_name: r.supplier_name || '',
-                                    amount: r.amount || '',
-                                    note: r.note || '',
-                                    bill_url: r.bill_url || '',
-                                    bill_filename: r.bill_filename || '',
-                                  });
-                                  setAdjustmentModal(true);
-                                }}
-                              >
-                                Edit
-                              </button>
-                              {!isAgent && (
-                                <button className="danger" onClick={() => del('adjustment', r.id)}>
-                                  Delete
-                                </button>
+                            <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                              {isSameDayIST(r.created_at || r.adjustment_date) ? (
+                                <>
+                                  <button
+                                    className="muted"
+                                    style={{ padding: '4px 8px', fontSize: 12 }}
+                                    onClick={() => {
+                                      setEditingAdjId(r.id);
+                                      setAdjustmentForm({
+                                        material_id: String(r.material_id),
+                                        material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
+                                        unit: r.material_unit || r.unit || 'bags',
+                                        adjustment_type: r.adjustment_type,
+                                        quantity: r.quantity,
+                                        adjustment_date: r.adjustment_date ? String(r.adjustment_date).slice(0, 10) : today(),
+                                        to_project_id: r.to_project_id ? String(r.to_project_id) : '',
+                                        supplier_id: r.supplier_id ? String(r.supplier_id) : '',
+                                        supplier_name: r.supplier_name || '',
+                                        amount: r.amount || '',
+                                        note: r.note || '',
+                                        bill_url: r.bill_url || '',
+                                        bill_filename: r.bill_filename || '',
+                                      });
+                                      setModalReadOnly(false);
+                                      setModalError('');
+                                      setAdjustmentModal(true);
+                                    }}
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                  {!isAgent && (
+                                    <button className="danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => del('adjustment', r.id)}>
+                                      Delete
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="muted"
+                                    style={{ padding: '4px 8px', fontSize: 12 }}
+                                    onClick={() => {
+                                      setEditingAdjId(r.id);
+                                      setAdjustmentForm({
+                                        material_id: String(r.material_id),
+                                        material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
+                                        unit: r.material_unit || r.unit || 'bags',
+                                        adjustment_type: r.adjustment_type,
+                                        quantity: r.quantity,
+                                        adjustment_date: r.adjustment_date ? String(r.adjustment_date).slice(0, 10) : today(),
+                                        to_project_id: r.to_project_id ? String(r.to_project_id) : '',
+                                        supplier_id: r.supplier_id ? String(r.supplier_id) : '',
+                                        supplier_name: r.supplier_name || '',
+                                        amount: r.amount || '',
+                                        note: r.note || '',
+                                        bill_url: r.bill_url || '',
+                                        bill_filename: r.bill_filename || '',
+                                      });
+                                      setModalReadOnly(true);
+                                      setModalError('');
+                                      setAdjustmentModal(true);
+                                    }}
+                                  >
+                                    👁️ View
+                                  </button>
+                                  <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                    🔒 Locked
+                                  </span>
+                                </>
                               )}
                             </td>
                           </tr>
@@ -5789,34 +8266,74 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                               ) : '—'}
                             </td>
                             <td>{r.note || '—'}</td>
-                            <td className="actions" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
-                              <button
-                                className="muted"
-                                onClick={() => {
-                                  setEditingAdjId(r.id);
-                                  setAdjustmentForm({
-                                    material_id: String(r.material_id),
-                                    material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
-                                    unit: r.material_unit || r.unit || 'bags',
-                                    adjustment_type: r.adjustment_type,
-                                    quantity: r.quantity,
-                                    adjustment_date: r.adjustment_date ? String(r.adjustment_date).slice(0, 10) : today(),
-                                    to_project_id: r.to_project_id ? String(r.to_project_id) : '',
-                                    supplier_name: r.supplier_name || '',
-                                    amount: r.amount || '',
-                                    note: r.note || '',
-                                    bill_url: r.bill_url || '',
-                                    bill_filename: r.bill_filename || '',
-                                  });
-                                  setAdjustmentModal(true);
-                                }}
-                              >
-                                Edit
-                              </button>
-                              {!isAgent && (
-                                <button className="danger" onClick={() => del('adjustment', r.id)}>
-                                  Delete
-                                </button>
+                            <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                              {isSameDayIST(r.created_at || r.adjustment_date) ? (
+                                <>
+                                  <button
+                                    className="muted"
+                                    style={{ padding: '4px 8px', fontSize: 12 }}
+                                    onClick={() => {
+                                      setEditingAdjId(r.id);
+                                      setAdjustmentForm({
+                                        material_id: String(r.material_id),
+                                        material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
+                                        unit: r.material_unit || r.unit || 'bags',
+                                        adjustment_type: r.adjustment_type,
+                                        quantity: r.quantity,
+                                        adjustment_date: r.adjustment_date ? String(r.adjustment_date).slice(0, 10) : today(),
+                                        to_project_id: r.to_project_id ? String(r.to_project_id) : '',
+                                        supplier_name: r.supplier_name || '',
+                                        amount: r.amount || '',
+                                        note: r.note || '',
+                                        bill_url: r.bill_url || '',
+                                        bill_filename: r.bill_filename || '',
+                                      });
+                                      setModalReadOnly(false);
+                                      setModalError('');
+                                      setAdjustmentModal(true);
+                                    }}
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                  {!isAgent && (
+                                    <button className="danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => del('adjustment', r.id)}>
+                                      Delete
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="muted"
+                                    style={{ padding: '4px 8px', fontSize: 12 }}
+                                    onClick={() => {
+                                      setEditingAdjId(r.id);
+                                      setAdjustmentForm({
+                                        material_id: String(r.material_id),
+                                        material_name: r.material_name || stockRows.find((m) => Number(m.id) === Number(r.material_id))?.name || '',
+                                        unit: r.material_unit || r.unit || 'bags',
+                                        adjustment_type: r.adjustment_type,
+                                        quantity: r.quantity,
+                                        adjustment_date: r.adjustment_date ? String(r.adjustment_date).slice(0, 10) : today(),
+                                        to_project_id: r.to_project_id ? String(r.to_project_id) : '',
+                                        supplier_name: r.supplier_name || '',
+                                        amount: r.amount || '',
+                                        note: r.note || '',
+                                        bill_url: r.bill_url || '',
+                                        bill_filename: r.bill_filename || '',
+                                      });
+                                      setModalReadOnly(true);
+                                      setModalError('');
+                                      setAdjustmentModal(true);
+                                    }}
+                                  >
+                                    👁️ View
+                                  </button>
+                                  <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                    🔒 Locked
+                                  </span>
+                                </>
                               )}
                             </td>
                           </tr>
@@ -5922,29 +8439,62 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                               <td style={{ fontWeight: 700, color: '#b45309' }}>{INR(r.amount)}</td>
                               <td>{parsed.note || '—'}</td>
                               <td style={{ fontSize: 11, color: '#64748b' }}>{r.created_by}</td>
-                              <td className="actions" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
-                                <button
-                                  className="muted"
-                                  onClick={() => {
-                                    setEditingExpenseId(r.id);
-                                    const parsedItem = parseExpenseItem(r);
-                                    setExpenseForm({
-                                      category: parsedItem.category || r.category,
-                                      item_name: parsedItem.item_name,
-                                      amount: r.amount,
-                                      expense_date: r.expense_date,
-                                      note: parsedItem.note,
-                                    });
-                                    setModalError('');
-                                    setExpenseModal(true);
-                                  }}
-                                >
-                                  Edit
-                                </button>
-                                {!isAgent && (
-                                  <button className="danger" onClick={() => del('expense', r.id)}>
-                                    Delete
-                                  </button>
+                              <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                                {isSameDayIST(r.created_at || r.expense_date) ? (
+                                  <>
+                                    <button
+                                      className="muted"
+                                      style={{ padding: '4px 8px', fontSize: 12 }}
+                                      onClick={() => {
+                                        setEditingExpenseId(r.id);
+                                        const parsedItem = parseExpenseItem(r);
+                                        setExpenseForm({
+                                          category: parsedItem.category || r.category,
+                                          item_name: parsedItem.item_name,
+                                          amount: r.amount,
+                                          expense_date: r.expense_date,
+                                          note: parsedItem.note,
+                                        });
+                                        setModalReadOnly(false);
+                                        setModalError('');
+                                        setExpenseModal(true);
+                                      }}
+                                    >
+                                      ✏️ Edit
+                                    </button>
+                                    {!isAgent && (
+                                      <button className="danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => del('expense', r.id)}>
+                                        Delete
+                                      </button>
+                                    )}
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="muted"
+                                      style={{ padding: '4px 8px', fontSize: 12 }}
+                                      onClick={() => {
+                                        setEditingExpenseId(r.id);
+                                        const parsedItem = parseExpenseItem(r);
+                                        setExpenseForm({
+                                          category: parsedItem.category || r.category,
+                                          item_name: parsedItem.item_name,
+                                          amount: r.amount,
+                                          expense_date: r.expense_date,
+                                          note: parsedItem.note,
+                                        });
+                                        setModalReadOnly(true);
+                                        setModalError('');
+                                        setExpenseModal(true);
+                                      }}
+                                    >
+                                      👁️ View
+                                    </button>
+                                    <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                      🔒 Locked
+                                    </span>
+                                  </>
                                 )}
                               </td>
                             </tr>
@@ -6039,27 +8589,58 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                                 <td style={{ fontWeight: 700, color: '#b45309' }}>{INR(r.amount)}</td>
                                 <td>{r.note || '—'}</td>
                                 <td style={{ fontSize: 11, color: '#64748b' }}>{r.created_by}</td>
-                                <td className="actions" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    className="muted"
-                                    onClick={() => {
-                                      setEditingCommissionId(r.id);
-                                      setCommissionForm({
-                                        person_name: r.person_name,
-                                        amount: r.amount,
-                                        commission_date: r.commission_date,
-                                        note: r.note || '',
-                                      });
-                                      setModalError('');
-                                      setCommissionModal(true);
-                                    }}
-                                  >
-                                    Edit
-                                  </button>
-                                  {!isAgent && (
-                                    <button className="danger" onClick={() => del('commission', r.id)}>
-                                      Delete
-                                    </button>
+                                <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                                  {isSameDayIST(r.created_at || r.commission_date) ? (
+                                    <>
+                                      <button
+                                        className="muted"
+                                        style={{ padding: '4px 8px', fontSize: 12 }}
+                                        onClick={() => {
+                                          setEditingCommissionId(r.id);
+                                          setCommissionForm({
+                                            person_name: r.person_name,
+                                            amount: r.amount,
+                                            commission_date: r.commission_date,
+                                            note: r.note || '',
+                                          });
+                                          setModalReadOnly(false);
+                                          setModalError('');
+                                          setCommissionModal(true);
+                                        }}
+                                      >
+                                        ✏️ Edit
+                                      </button>
+                                      {!isAgent && (
+                                        <button className="danger" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => del('commission', r.id)}>
+                                          Delete
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="muted"
+                                        style={{ padding: '4px 8px', fontSize: 12 }}
+                                        onClick={() => {
+                                          setEditingCommissionId(r.id);
+                                          setCommissionForm({
+                                            person_name: r.person_name,
+                                            amount: r.amount,
+                                            commission_date: r.commission_date,
+                                            note: r.note || '',
+                                          });
+                                          setModalReadOnly(true);
+                                          setModalError('');
+                                          setCommissionModal(true);
+                                        }}
+                                      >
+                                        👁️ View
+                                      </button>
+                                      <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                        🔒 Locked
+                                      </span>
+                                    </>
                                   )}
                                 </td>
                               </tr>
@@ -6084,6 +8665,234 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                       </table>
                     </div>
                   )}
+
+                  {/* ── 8. STAFF TAB ─────────────────────────────────────────── */}
+                  {projectTab === 'staff' && (
+                    <div>
+                      {/* Top Staff KPI Stats */}
+                      <div className="stats" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginBottom: 16 }}>
+                        <div className="stat">
+                          <small>Total Staff Assigned</small>
+                          <b style={{ fontSize: 20, display: 'block', marginTop: 4 }}>
+                            {staffSummary.total_staff || projectStaff.length} Member{(staffSummary.total_staff || projectStaff.length) === 1 ? '' : 's'}
+                          </b>
+                        </div>
+                        <div className="stat">
+                          <small>Total Payments &amp; Due</small>
+                          <b style={{ fontSize: 20, display: 'block', marginTop: 4, color: '#16a34a' }}>
+                            {INR(staffSummary.total_paid || 0)}
+                            {(() => {
+                              const totalDue = projectStaff.reduce((sum, s) => sum + (Number(s.balance_due) || 0), 0);
+                              return totalDue > 0 ? (
+                                <span style={{ fontSize: 12, fontWeight: 600, color: '#dc2626', marginLeft: 6 }}>
+                                  (Due: {INR(totalDue)})
+                                </span>
+                              ) : null;
+                            })()}
+                          </b>
+                        </div>
+                      </div>
+
+                      {/* Staff Section Header */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+                        <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+                          👥 Project Staff Directory ({projectStaff.length})
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setStaffForm(staffBlank);
+                            setEditingStaffId(null);
+                            setModalError('');
+                            setStaffModal(true);
+                          }}
+                        >
+                          + Assign Staff Member
+                        </button>
+                      </div>
+
+                      {/* Staff Directory & Earnings Table */}
+                      <div className="card">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                              <input
+                                type="text"
+                                placeholder="Search staff by name, phone, role..."
+                                value={staffSearch}
+                                onChange={(e) => setStaffSearch(e.target.value)}
+                                style={{ minWidth: 260, fontSize: 13 }}
+                              />
+                              <select
+                                value={staffRoleFilter}
+                                onChange={(e) => setStaffRoleFilter(e.target.value)}
+                                style={{ fontSize: 13, padding: '6px 10px' }}
+                              >
+                                <option value="">All Roles</option>
+                                {staffRolesList.map((r) => (
+                                  <option key={r} value={r}>{r}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <span style={{ fontSize: 12, color: '#64748b' }}>
+                              Showing {projectStaff.filter((st) => {
+                                if (staffRoleFilter && st.role !== staffRoleFilter) return false;
+                                if (staffSearch.trim()) {
+                                  const q = staffSearch.toLowerCase();
+                                  return st.name.toLowerCase().includes(q) || (st.phone && st.phone.includes(q)) || st.role.toLowerCase().includes(q);
+                                }
+                                return true;
+                              }).length} Staff Members
+                            </span>
+                          </div>
+
+                          <div style={{ overflowX: 'auto' }}>
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>Staff Name</th>
+                                  <th>Role / Designation</th>
+                                  <th>Contact</th>
+                                  <th>Pay Structure</th>
+                                  <th>Attendance</th>
+                                  <th>Earned Salary</th>
+                                  <th>Commission</th>
+                                  <th>Total Paid</th>
+                                  <th>Balance Due</th>
+                                  <th>Status</th>
+                                  <th style={{ textAlign: 'right' }}>Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {projectStaff
+                                  .filter((st) => {
+                                    if (staffRoleFilter && st.role !== staffRoleFilter) return false;
+                                    if (staffSearch.trim()) {
+                                      const q = staffSearch.toLowerCase();
+                                      return st.name.toLowerCase().includes(q) || (st.phone && st.phone.includes(q)) || st.role.toLowerCase().includes(q);
+                                    }
+                                    return true;
+                                  })
+                                  .map((st) => (
+                                    <tr key={st.id}>
+                                      <td style={{ fontWeight: 600 }}>
+                                        {st.name}
+                                      </td>
+                                      <td>
+                                        <span className="badge" style={{ background: 'rgba(2,132,199,0.15)', color: '#38bdf8', fontWeight: 600 }}>
+                                          {st.role}
+                                        </span>
+                                      </td>
+                                      <td>{st.phone || '—'}</td>
+                                      <td>
+                                        <div style={{ fontSize: 12, fontWeight: 600 }}>
+                                          {INR(st.salary_rate)}
+                                          <span style={{ fontWeight: 400, color: '#64748b', marginLeft: 4 }}>
+                                            / {st.pay_type === 'per_day' ? 'day' : st.pay_type === 'monthly' ? 'month' : 'project'}
+                                          </span>
+                                        </div>
+                                      </td>
+                                      <td>
+                                        <div style={{ fontSize: 12 }}>
+                                          <b style={{ color: '#0284c7' }}>{st.days_present}P</b>
+                                          {st.days_half_day > 0 && <span style={{ color: '#f59e0b', marginLeft: 4 }}>• {st.days_half_day}HD</span>}
+                                        </div>
+                                      </td>
+                                      <td style={{ fontWeight: 600 }}>
+                                        {INR(st.total_salary_earned)}
+                                      </td>
+                                      <td>
+                                        <div style={{ fontSize: 12 }}>
+                                          <span style={{ fontWeight: 600, color: '#d97706' }}>{INR(st.total_commission_earned)}</span>
+                                          {st.commission_paid > 0 && (
+                                            <div style={{ fontSize: 11, color: '#16a34a' }}>
+                                              (Paid: {INR(st.commission_paid)})
+                                            </div>
+                                          )}
+                                        </div>
+                                      </td>
+                                      <td style={{ fontWeight: 600, color: '#22c55e' }}>
+                                        {INR(st.total_paid)}
+                                      </td>
+                                      <td>
+                                        <b style={{ color: Number(st.balance_due) > 0 ? '#dc2626' : '#16a34a' }}>
+                                          {INR(st.balance_due)}
+                                        </b>
+                                      </td>
+                                      <td>
+                                        <span className={`badge ${st.is_active ? 'badge-active' : 'badge-inactive'}`}>
+                                          {st.is_active ? 'Active' : 'Inactive'}
+                                        </span>
+                                      </td>
+                                      <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }}>
+                                        <button
+                                          type="button"
+                                          className="muted"
+                                          style={{ padding: '4px 8px', fontSize: 12 }}
+                                          title="Record payment for this staff"
+                                          onClick={() => {
+                                            setStaffPaymentForm({
+                                              staff_id: String(st.id),
+                                              amount: String(st.balance_due > 0 ? st.balance_due : ''),
+                                              payment_date: today(),
+                                              payment_type: 'salary',
+                                              mode: 'bank',
+                                              transaction_reference: '',
+                                              note: '',
+                                            });
+                                            setEditingStaffPaymentId(null);
+                                            setModalError('');
+                                            setStaffPaymentModal(true);
+                                          }}
+                                        >
+                                          💳 Pay
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="muted"
+                                          style={{ padding: '4px 8px', fontSize: 12 }}
+                                          onClick={() => {
+                                            setEditingStaffId(st.id);
+                                            setStaffForm({
+                                              name: st.name,
+                                              phone: st.phone || '',
+                                              role: st.role,
+                                              pay_type: st.pay_type,
+                                              salary_rate: String(st.salary_rate || ''),
+                                              commission_rate: String(st.commission_rate || ''),
+                                              commission_notes: st.commission_notes || '',
+                                              is_active: Boolean(st.is_active),
+                                            });
+                                            setModalError('');
+                                            setStaffModal(true);
+                                          }}
+                                        >
+                                          ✏️ Edit
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="danger"
+                                          style={{ padding: '4px 8px', fontSize: 12 }}
+                                          onClick={() => deleteStaffMember(st.id)}
+                                          title="Remove or deactivate staff"
+                                        >
+                                          ✕
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                {projectStaff.length === 0 && (
+                                  <tr>
+                                    <td colSpan={11} style={{ textAlign: 'center', padding: '2.5rem', color: '#64748b' }}>
+                                      No staff members assigned to this project yet. Click &quot;+ Assign Staff Member&quot; to add supervisors, engineers, or managers.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
             </>
           ) : selectedVendor ? (
@@ -6595,14 +9404,69 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                               {p.note || '—'}
                               {p.transaction_reference && <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Ref: {p.transaction_reference}</div>}
                             </td>
-                            <td className="actions" style={{ justifyContent: 'flex-end' }}>
-                              {!isAgent && (
-                                <button
-                                  className="danger"
-                                  onClick={() => del('laborPayment', p.id)}
-                                >
-                                  Delete
-                                </button>
+                            <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }}>
+                              {isSameDayIST(p.created_at || p.payment_date) ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="muted"
+                                    style={{ padding: '4px 8px', fontSize: 12 }}
+                                    onClick={() => {
+                                      setLaborPaymentForm({
+                                        labor_id: p.labor_id,
+                                        amount: p.amount,
+                                        payment_date: p.payment_date ? String(p.payment_date).slice(0, 10) : today(),
+                                        mode: p.mode || 'cash',
+                                        payment_type: p.payment_type || 'wage',
+                                        note: p.note || '',
+                                        transaction_reference: p.transaction_reference || '',
+                                      });
+                                      setEditingLaborPaymentId(p.id);
+                                      setModalReadOnly(false);
+                                      setModalError('');
+                                      setLaborPaymentModal(true);
+                                    }}
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                  {!isAgent && (
+                                    <button
+                                      className="danger"
+                                      style={{ padding: '4px 8px', fontSize: 12 }}
+                                      onClick={() => del('laborPayment', p.id)}
+                                    >
+                                      Delete
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="muted"
+                                    style={{ padding: '4px 8px', fontSize: 12 }}
+                                    onClick={() => {
+                                      setLaborPaymentForm({
+                                        labor_id: p.labor_id,
+                                        amount: p.amount,
+                                        payment_date: p.payment_date ? String(p.payment_date).slice(0, 10) : today(),
+                                        mode: p.mode || 'cash',
+                                        payment_type: p.payment_type || 'wage',
+                                        note: p.note || '',
+                                        transaction_reference: p.transaction_reference || '',
+                                      });
+                                      setEditingLaborPaymentId(p.id);
+                                      setModalReadOnly(true);
+                                      setModalError('');
+                                      setLaborPaymentModal(true);
+                                    }}
+                                  >
+                                    👁️ View
+                                  </button>
+                                  <span title="Locked: Can only be edited or deleted within 48 hours" style={{ fontSize: 11, color: '#94a3b8' }}>
+                                    🔒 Locked
+                                  </span>
+                                </>
                               )}
                             </td>
                           </tr>
@@ -6657,7 +9521,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                     <tr>
                       <th>Date</th>
                       <th>Type</th>
-                      <th>Details / Supplier / Destination</th>
+                      <th>Details / Vendor / Destination</th>
                       <th>Quantity</th>
                       <th>Running Stock</th>
                       {!isSupervisor && <th>Rate / Amount</th>}
@@ -6819,8 +9683,16 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
             <div className="modal-overlay">
               <form onSubmit={(e) => submitAction.submit('laborPayment', () => saveLaborPayment(e), { successMessage: 'Labor payment recorded successfully', onError: setModalError })} className="modal-card">
                 <h3 style={{ margin: '0 0 12px', fontSize: 17, color: '#0f172a' }}>
-                  {editingLaborPaymentId ? 'Edit Labor Payment' : 'Record Labor Payment'}
+                  {Boolean(modalReadOnly && editingLaborPaymentId) ? '👁️ View Labor Payment' : (editingLaborPaymentId ? '✏️ Edit Labor Payment' : 'Record Labor Payment')}
                 </h3>
+                {Boolean(modalReadOnly && editingLaborPaymentId) && (
+                  <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: '#92400e', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>🔒</span>
+                    <div><strong>Read Only (Locked):</strong> This record was created more than 48 hours ago and cannot be modified.</div>
+                  </div>
+                )}
+                {modalError && <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>{modalError}</div>}
+                <fieldset disabled={Boolean(modalReadOnly && editingLaborPaymentId)} style={{ border: 'none', padding: 0, margin: 0, opacity: (modalReadOnly && editingLaborPaymentId) ? 0.9 : 1 }}>
 
                 <div style={{ marginBottom: 12 }}>
                   <label>
@@ -6955,21 +9827,42 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                     placeholder="e.g. Weekly wage, advance"
                   />
                 </div>
+                </fieldset>
 
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-                  <button
-                    type="button"
-                    className="muted"
-                    onClick={() => {
-                      setLaborPaymentModal(false);
-                      setEditingLaborPaymentId(null);
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button type="submit" disabled={submitAction.isSubmitting('laborPayment')}>
-                    {submitAction.isSubmitting('laborPayment') ? 'Saving…' : (editingLaborPaymentId ? 'Update Payment' : 'Save Payment')}
-                  </button>
+                  {Boolean(modalReadOnly && editingLaborPaymentId) ? (
+                    <button
+                      type="button"
+                      className="muted"
+                      onClick={() => {
+                        setLaborPaymentModal(false);
+                        setEditingLaborPaymentId(null);
+                        setModalReadOnly(false);
+                        setModalError('');
+                      }}
+                      style={{ padding: '8px 20px', borderRadius: 6 }}
+                    >
+                      Close
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="muted"
+                        onClick={() => {
+                          setLaborPaymentModal(false);
+                          setEditingLaborPaymentId(null);
+                          setModalReadOnly(false);
+                          setModalError('');
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button type="submit" disabled={submitAction.isSubmitting('laborPayment')}>
+                        {submitAction.isSubmitting('laborPayment') ? 'Saving…' : (editingLaborPaymentId ? 'Update Payment' : 'Save Payment')}
+                      </button>
+                    </>
+                  )}
                 </div>
               </form>
             </div>
@@ -7034,7 +9927,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
 
                     <label>
                       <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>
-                        Select Registered Contractor <span style={{ color: '#ef4444' }}>*</span>
+                        Select Registered Contractor <RequiredAsterisk />
                       </small>
                       {contractorsLoading ? (
                         <div style={{ padding: '10px', fontSize: 12, color: '#64748b' }}>
@@ -7081,7 +9974,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
                   <label>
-                    <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>Pay Type</small>
+                    <small style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Pay Type</small>
                     <select
                       value={assignForm.pay_type}
                       onChange={(e) => setAssignForm({ ...assignForm, pay_type: e.target.value })}
@@ -7111,8 +10004,8 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
           {/* ── MODAL: RECORD VENDOR MATERIAL SUPPLY ────────────────────────── */}
           {supplyModal && selectedVendor && (
             <div className="modal-overlay">
-              <form onSubmit={(e) => submitAction.submit('supply', () => saveMaterialSupply(e), { successMessage: 'Supplier delivery saved successfully', onError: setModalError })} className="modal-card">
-                <h3 style={{ margin: '0 0 14px', fontSize: 17, color: '#0f172a' }}>
+              <form onSubmit={(e) => submitAction.submit('supply', () => saveMaterialSupply(e), { successMessage: 'Vendor delivery saved successfully', onError: setModalError })} className="modal-card">
+                <h3 style={{ margin: '0 0 14px', fontSize: 17 }}>
                   Record Vendor Material Supply
                 </h3>
                 <p style={{ margin: '0 0 12px', fontSize: 12, color: '#64748b' }}>
@@ -7177,7 +10070,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
           {addMaterialModal && (
             <div className="modal-overlay">
               <form onSubmit={(e) => submitAction.submit('material', () => saveMaterialMaster(e), { successMessage: 'Material created successfully', onError: setModalError })} className="modal-card">
-                <h3 style={{ margin: '0 0 14px', fontSize: 17, color: '#0f172a' }}>
+                <h3 style={{ margin: '0 0 14px', fontSize: 17 }}>
                   Add Master Material
                 </h3>
                 <div className="grid">
@@ -7209,20 +10102,20 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
             </div>
           )}
 
-          {/* ── MODAL: RECORD SUPPLIER PAYMENT ─────────────────────────────── */}
-          {supplierPaymentModal && (
+          {/* ── MODAL: ADD LOCAL VENDOR ────────────────────────────────────── */}
+          {localVendorModal && (
             <div className="modal-overlay">
               <form
                 onSubmit={(e) =>
-                  submitAction.submit('supplierPayment', () => saveSupplierPayment(e), {
-                    successMessage: 'Supplier payment recorded successfully',
+                  submitAction.submit('localVendor', () => saveLocalVendor(e), {
+                    successMessage: 'Local vendor added successfully',
                     onError: setModalError,
                   })
                 }
                 className="modal-card"
               >
-                <h3 style={{ margin: '0 0 14px', fontSize: 17, color: '#0f172a' }}>
-                  Record Payment to Supplier
+                <h3 style={{ margin: '0 0 14px', fontSize: 17 }}>
+                  Add Local / Site Vendor
                 </h3>
                 {modalError && (
                   <div
@@ -7242,9 +10135,106 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                 )}
 
                 <div className="grid">
+                  <Input
+                    label="Vendor / Shop Name *"
+                    name="name"
+                    value={localVendorForm.name}
+                    set={setLocalVendorForm}
+                    required
+                    placeholder="e.g. Gupta Reti & Rodi Supplier"
+                  />
+                  <Input
+                    label="Mobile / Phone Number"
+                    name="phone"
+                    value={localVendorForm.phone}
+                    set={setLocalVendorForm}
+                    placeholder="e.g. 9876543210"
+                  />
+                  <Input
+                    label="City / Area"
+                    name="city"
+                    value={localVendorForm.city}
+                    set={setLocalVendorForm}
+                    placeholder="e.g. Moradabad Local"
+                  />
+                  <Input
+                    label="Material Category / Supply Item"
+                    name="material_type"
+                    value={localVendorForm.material_type}
+                    set={setLocalVendorForm}
+                    placeholder="e.g. Sand / Rodi / Bricks / Hardware"
+                  />
+                  <Input
+                    label="Address / Landmark"
+                    name="address"
+                    value={localVendorForm.address}
+                    set={setLocalVendorForm}
+                    placeholder="e.g. Near Bypass Chowk"
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+                  <button
+                    type="button"
+                    className="muted"
+                    disabled={submitAction.isSubmitting('localVendor')}
+                    onClick={() => {
+                      setLocalVendorModal(false);
+                      setModalError('');
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={submitAction.isSubmitting('localVendor')}>
+                    {submitAction.isSubmitting('localVendor') ? 'Saving…' : 'Save Local Vendor'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* ── MODAL: RECORD SUPPLIER PAYMENT ─────────────────────────────── */}
+          {supplierPaymentModal && (
+            <div className="modal-overlay">
+              <form
+                onSubmit={(e) =>
+                  submitAction.submit('supplierPayment', () => saveSupplierPayment(e), {
+                    successMessage: 'Vendor payment recorded successfully',
+                    onError: setModalError,
+                  })
+                }
+                className="modal-card"
+              >
+                <h3 style={{ margin: '0 0 14px', fontSize: 17 }}>
+                  {Boolean(modalReadOnly && editingSupplierPaymentId) ? '👁️ View Vendor Payment' : (editingSupplierPaymentId ? '✏️ Edit Vendor Payment' : 'Record Payment to Vendor')}
+                </h3>
+                {Boolean(modalReadOnly && editingSupplierPaymentId) && (
+                  <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: '#92400e', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>🔒</span>
+                    <div><strong>Read Only (Locked):</strong> This record was created more than 48 hours ago and cannot be modified.</div>
+                  </div>
+                )}
+                {modalError && (
+                  <div
+                    role="alert"
+                    style={{
+                      background: '#fef2f2',
+                      border: '1px solid #fecaca',
+                      color: '#b91c1c',
+                      padding: '8px 12px',
+                      borderRadius: 6,
+                      marginBottom: 12,
+                      fontSize: 13,
+                    }}
+                  >
+                    {modalError}
+                  </div>
+                )}
+                <fieldset disabled={Boolean(modalReadOnly && editingSupplierPaymentId)} style={{ border: 'none', padding: 0, margin: 0, opacity: (modalReadOnly && editingSupplierPaymentId) ? 0.9 : 1 }}>
+                  <div className="grid">
                   <label>
                     <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>
-                      Supplier *
+                      Vendor *
                     </small>
                     <select
                       required
@@ -7275,9 +10265,9 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                         }
                       }}
                     >
-                      <option value="">Select Supplier</option>
+                      <option value="">Select Vendor</option>
                       {projectSuppliers.length > 0 && (
-                        <optgroup label="Suppliers Used in Project">
+                        <optgroup label="Vendors Used in Project">
                           {projectSuppliers.map((s) => (
                             <option key={s.key} value={s.key}>
                               {s.supplier_name} • Balance: {s.balance > 0 ? `Due ${INR(s.balance)}` : s.balance < 0 ? `Advance ${INR(Math.abs(s.balance))}` : '₹0'}
@@ -7285,10 +10275,10 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                           ))}
                         </optgroup>
                       )}
-                      <optgroup label="All Registered Suppliers">
+                      <optgroup label="All Registered Vendors">
                         {suppliersMaster.filter((m) => m.is_registered).map((s) => (
                           <option key={`reg_${s.id}`} value={`reg_${s.id}`}>
-                            {s.shop_name || s.business_name || `Supplier #${s.id}`} {s.phone ? `(${s.phone})` : ''} {s.city ? `• ${s.city}` : ''}
+                            {s.shop_name || s.business_name || `Vendor #${s.id}`} {s.phone ? `(${s.phone})` : ''} {s.city ? `• ${s.city}` : ''}
                           </option>
                         ))}
                       </optgroup>
@@ -7297,7 +10287,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
 
                   {!supplierPaymentForm.supplier_id && (
                     <Input
-                      label="Supplier Name (if not registered)"
+                      label="Vendor Name (if not registered)"
                       name="supplier_name"
                       value={supplierPaymentForm.supplier_name}
                       set={setSupplierPaymentForm}
@@ -7386,7 +10376,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                           ⚠️ <b>Notice: Advance Payment</b>
                           <div style={{ marginTop: 2 }}>
                             Payment of <b>{INR(enteredAmt)}</b> exceeds the current balance due ({INR(Math.max(0, curBalance))}).
-                            The excess <b>{INR(excess)}</b> will be recorded as an <b>Advance Payment</b> to this supplier.
+                            The excess <b>{INR(excess)}</b> will be recorded as an <b>Advance Payment</b> to this vendor.
                           </div>
                         </div>
                       );
@@ -7394,22 +10384,43 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                   }
                   return null;
                 })()}
+                </fieldset>
 
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-                  <button
-                    type="button"
-                    className="muted"
-                    disabled={submitAction.isSubmitting('supplierPayment')}
-                    onClick={() => {
-                      setSupplierPaymentModal(false);
-                      setModalError('');
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button type="submit" disabled={submitAction.isSubmitting('supplierPayment')}>
-                    {submitAction.isSubmitting('supplierPayment') ? 'Saving…' : 'Record Payment'}
-                  </button>
+                  {Boolean(modalReadOnly && editingSupplierPaymentId) ? (
+                    <button
+                      type="button"
+                      className="muted"
+                      onClick={() => {
+                        setSupplierPaymentModal(false);
+                        setEditingSupplierPaymentId(null);
+                        setModalReadOnly(false);
+                        setModalError('');
+                      }}
+                      style={{ padding: '8px 20px', borderRadius: 6 }}
+                    >
+                      Close
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="muted"
+                        disabled={submitAction.isSubmitting('supplierPayment')}
+                        onClick={() => {
+                          setSupplierPaymentModal(false);
+                          setEditingSupplierPaymentId(null);
+                          setModalReadOnly(false);
+                          setModalError('');
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button type="submit" disabled={submitAction.isSubmitting('supplierPayment')}>
+                        {submitAction.isSubmitting('supplierPayment') ? 'Saving…' : (editingSupplierPaymentId ? 'Update Payment' : 'Record Payment')}
+                      </button>
+                    </>
+                  )}
                 </div>
               </form>
             </div>
@@ -7418,12 +10429,19 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
           {/* ── MODAL: MATERIAL RECEIVED ────────────────────────────────────── */}
           {receivedModal && (
             <div className="modal-overlay">
-              <form onSubmit={(e) => submitAction.submit('delivery', () => saveReceivedEntry(e), { successMessage: 'Supplier delivery saved successfully', onError: setModalError })} className="modal-card">
-                <h3 style={{ margin: '0 0 14px', fontSize: 17, color: '#0f172a' }}>
-                  {editingReceivedId ? 'Edit' : 'Record'} Supplier Material Delivery
+              <form onSubmit={(e) => submitAction.submit('delivery', () => saveReceivedEntry(e), { successMessage: 'Vendor delivery saved successfully', onError: setModalError })} className="modal-card">
+                <h3 style={{ margin: '0 0 14px', fontSize: 17 }}>
+                  {modalReadOnly ? '👁️ View Vendor Material Delivery' : (editingReceivedId ? '✏️ Edit Vendor Material Delivery' : 'Record Vendor Material Delivery')}
                 </h3>
+                {modalReadOnly && (
+                  <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: '#92400e', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>🔒</span>
+                    <div><strong>Read Only (Locked):</strong> This record was created on a previous date and cannot be modified.</div>
+                  </div>
+                )}
                 {modalError && <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>{modalError}</div>}
-                <div className="grid">
+                <fieldset disabled={modalReadOnly} style={{ border: 'none', padding: 0, margin: 0, opacity: modalReadOnly ? 0.9 : 1 }}>
+                  <div className="grid">
                   <Input
                     label="Material Name"
                     name="material_name"
@@ -7463,29 +10481,73 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                   )}
                   <Input label="Received Date" name="received_date" type="date" value={receivedForm.received_date} set={setReceivedForm} required />
                   <label>
-                    <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>Supplier</small>
+                    <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>Vendor</small>
                     <select
-                      value={receivedForm.supplier_id || ''}
+                      value={receivedForm.supplier_id ? `reg_${receivedForm.supplier_id}` : (receivedForm.supplier_name ? `local_${receivedForm.supplier_name}` : '')}
                       onChange={(e) => {
-                        const sId = e.target.value;
-                        const supplier = suppliersMaster.find((item) => String(item.id) === String(sId));
-                        setReceivedForm({
-                          ...receivedForm,
-                          supplier_id: sId,
-                          supplier_name: supplier ? (supplier.shop_name || supplier.business_name || '') : receivedForm.supplier_name,
-                        });
+                        const val = e.target.value;
+                        if (val.startsWith('reg_')) {
+                          const sId = Number(val.replace('reg_', ''));
+                          const supplier = suppliersMaster.find((item) => Number(item.id) === sId);
+                          setReceivedForm({
+                            ...receivedForm,
+                            supplier_id: sId,
+                            supplier_name: supplier ? (supplier.shop_name || supplier.business_name || '') : receivedForm.supplier_name,
+                          });
+                        } else if (val.startsWith('local_')) {
+                          const localName = val.replace('local_', '');
+                          setReceivedForm({
+                            ...receivedForm,
+                            supplier_id: '',
+                            supplier_name: localName,
+                          });
+                        } else {
+                          setReceivedForm({
+                            ...receivedForm,
+                            supplier_id: '',
+                            supplier_name: '',
+                          });
+                        }
                       }}
                     >
-                      <option value="">Select registered supplier (or type name below)</option>
-                      {suppliersMaster.filter((s) => s.is_registered).map((supplier) => (
-                        <option key={supplier.id} value={supplier.id}>
-                          {supplier.shop_name || supplier.business_name || `Supplier #${supplier.id}`} {supplier.phone ? `(${supplier.phone})` : ''} {supplier.city ? `• ${supplier.city}` : ''}
-                        </option>
-                      ))}
+                      <option value="">Select Vendor (or type name below)</option>
+                      {suppliersMaster.filter((s) => s.is_local || (!s.is_registered && s.shop_name)).length > 0 && (
+                        <optgroup label="📍 Project Local Vendors">
+                          {suppliersMaster.filter((s) => s.is_local || (!s.is_registered && s.shop_name)).map((local) => (
+                            <option key={`local_${local.shop_name}`} value={`local_${local.shop_name}`}>
+                              {local.shop_name} {local.phone ? `(${local.phone})` : ''} {local.city ? `• ${local.city}` : ''}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      <optgroup label="🏢 Registered System Vendors">
+                        {suppliersMaster.filter((s) => s.is_registered).map((supplier) => (
+                          <option key={`reg_${supplier.id}`} value={`reg_${supplier.id}`}>
+                            {supplier.shop_name || supplier.business_name || `Vendor #${supplier.id}`} {supplier.phone ? `(${supplier.phone})` : ''} {supplier.city ? `• ${supplier.city}` : ''}
+                          </option>
+                        ))}
+                      </optgroup>
                     </select>
                   </label>
-                  <Input label="Supplier Name (if not registered)" name="supplier_name" value={receivedForm.supplier_name} set={setReceivedForm} placeholder="e.g. Ultratech Distributor" />
+                  <Input label="Vendor Name (if typing new local vendor)" name="supplier_name" value={receivedForm.supplier_name} set={setReceivedForm} placeholder="e.g. Local Bhatta / Hardware" />
                   <Input label="Challan / Invoice No." name="challan_no" value={receivedForm.challan_no} set={setReceivedForm} />
+                  <Input label="Vehicle / Gaadi No." name="vehicle_no" value={receivedForm.vehicle_no || ''} set={setReceivedForm} placeholder="e.g. UP 21 BT 4589" />
+                  <Input label="Driver / Delivered By (Kon Leke Aaya)" name="driver_name" value={receivedForm.driver_name || ''} set={setReceivedForm} placeholder="Driver name & mobile" />
+                  <label>
+                    <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>Received By (Site Pe Kisne Receive Kiya)</small>
+                    <input
+                      list="site-staff-list"
+                      name="received_by"
+                      value={receivedForm.received_by || ''}
+                      onChange={(e) => setReceivedForm({ ...receivedForm, received_by: e.target.value })}
+                      placeholder="Select or enter receiver name"
+                    />
+                    <datalist id="site-staff-list">
+                      {projectStaff.map((st) => (
+                        <option key={st.id} value={`${st.name} (${st.role})`} />
+                      ))}
+                    </datalist>
+                  </label>
                   <Input label="Note" name="note" value={receivedForm.note} set={setReceivedForm} />
                   <label>
                     <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>Upload Bill (optional)</small>
@@ -7497,11 +10559,20 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                     Total Amount: {INR(Number(receivedForm.quantity || 0) * Number(receivedForm.rate || 0))}
                   </div>
                 )}
+                </fieldset>
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-                  <button type="button" className="muted" disabled={submitAction.isSubmitting('delivery')} onClick={() => setReceivedModal(false)}>
-                    Cancel
-                  </button>
-                  <button type="submit" disabled={submitAction.isSubmitting('delivery')}>{submitAction.isSubmitting('delivery') ? 'Saving…' : 'Save Supplier Delivery'}</button>
+                  {modalReadOnly ? (
+                    <button type="button" className="muted" onClick={() => setReceivedModal(false)} style={{ padding: '8px 20px', borderRadius: 6 }}>
+                      Close
+                    </button>
+                  ) : (
+                    <>
+                      <button type="button" className="muted" disabled={submitAction.isSubmitting('delivery')} onClick={() => setReceivedModal(false)}>
+                        Cancel
+                      </button>
+                      <button type="submit" disabled={submitAction.isSubmitting('delivery')}>{submitAction.isSubmitting('delivery') ? 'Saving…' : (editingReceivedId ? 'Update Vendor Delivery' : 'Save Vendor Delivery')}</button>
+                    </>
+                  )}
                 </div>
               </form>
             </div>
@@ -7511,10 +10582,57 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
           {usedModal && (
             <div className="modal-overlay">
               <form onSubmit={(e) => submitAction.submit('usage', () => saveUsedEntry(e), { successMessage: 'Material usage saved successfully', onError: setModalError })} className="modal-card">
-                <h3 style={{ margin: '0 0 14px', fontSize: 17, color: '#0f172a' }}>
-                  {editingUsedId ? 'Edit' : 'Record'} Material Usage
+                <h3 style={{ margin: '0 0 14px', fontSize: 17 }}>
+                  {modalReadOnly ? '👁️ View Daily Material Usage' : (editingUsedId ? '✏️ Edit Daily Material Usage' : '🧱 Record Daily Material Consumption')}
                 </h3>
-                <div className="grid">
+                {modalReadOnly && (
+                  <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: '#92400e', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>🔒</span>
+                    <div><strong>Read Only (Locked):</strong> This record was created on a previous date and cannot be modified.</div>
+                  </div>
+                )}
+                {modalError && <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>{modalError}</div>}
+                <fieldset disabled={modalReadOnly} style={{ border: 'none', padding: 0, margin: 0, opacity: modalReadOnly ? 0.9 : 1 }}>
+                  {stockRows.length > 0 && !modalReadOnly && !editingUsedId && (
+                    <div style={{ marginBottom: 14, background: '#f8fafc', padding: '10px 12px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: 11, color: '#475569', fontWeight: 600, marginBottom: 6 }}>
+                        Quick Select Material from Site Stock:
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {stockRows.map((s) => {
+                          const isSel = usedForm.material_name?.toLowerCase() === s.name?.toLowerCase();
+                          return (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => {
+                                setUsedForm((prev) => ({
+                                  ...prev,
+                                  material_id: String(s.id),
+                                  material_name: s.name,
+                                  unit: s.unit || prev.unit,
+                                }));
+                              }}
+                              style={{
+                                fontSize: 11,
+                                padding: '4px 10px',
+                                borderRadius: 6,
+                                background: isSel ? '#dbeafe' : '#ffffff',
+                                color: isSel ? '#1d4ed8' : '#334155',
+                                border: isSel ? '1.5px solid #3b82f6' : '1px solid #cbd5e1',
+                                cursor: 'pointer',
+                                fontWeight: isSel ? 700 : 500,
+                              }}
+                            >
+                              {s.name} ({Number(s.stock ?? s.current_stock ?? 0).toFixed(1)} {s.unit})
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid">
                   <Input
                     label="Material Name"
                     name="material_name"
@@ -7542,13 +10660,22 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                   />
                   <Input label="Usage Date" name="used_date" type="date" value={usedForm.used_date} set={setUsedForm} required />
                   <Input label="Used For (e.g. Foundation, Slab, Plaster)" name="used_for" value={usedForm.used_for} set={setUsedForm} placeholder="e.g. 1st Floor Slab casting" />
-                  <Input label="Note" name="note" value={usedForm.note} set={setUsedForm} />
+                  <Input label="Note / Remarks" name="note" value={usedForm.note} set={setUsedForm} placeholder="Optional site remarks" />
                 </div>
+                </fieldset>
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-                  <button type="button" className="muted" disabled={submitAction.isSubmitting('usage')} onClick={() => setUsedModal(false)}>
-                    Cancel
-                  </button>
-                  <button type="submit" disabled={submitAction.isSubmitting('usage')}>{submitAction.isSubmitting('usage') ? 'Saving…' : 'Record Usage'}</button>
+                  {modalReadOnly ? (
+                    <button type="button" className="muted" onClick={() => setUsedModal(false)} style={{ padding: '8px 20px', borderRadius: 6 }}>
+                      Close
+                    </button>
+                  ) : (
+                    <>
+                      <button type="button" className="muted" disabled={submitAction.isSubmitting('usage')} onClick={() => setUsedModal(false)}>
+                        Cancel
+                      </button>
+                      <button type="submit" disabled={submitAction.isSubmitting('usage')}>{submitAction.isSubmitting('usage') ? 'Saving…' : (editingUsedId ? 'Update Usage' : 'Record Usage')}</button>
+                    </>
+                  )}
                 </div>
               </form>
             </div>
@@ -7558,8 +10685,8 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
           {adjustmentModal && (
             <div className="modal-overlay">
               <form onSubmit={(e) => submitAction.submit('adjustment', () => saveAdjustmentEntry(e), { successMessage: 'Entry saved successfully', onError: setModalError })} className="modal-card">
-                <h3 style={{ margin: '0 0 14px', fontSize: 17, color: '#0f172a' }}>
-                  {editingAdjId ? 'Edit' : 'Record'} {
+                <h3 style={{ margin: '0 0 14px', fontSize: 17 }}>
+                  {modalReadOnly ? '👁️ View' : (editingAdjId ? '✏️ Edit' : 'Record')} {
                     ['return_material', 'return_to_supplier'].includes(adjustmentForm.adjustment_type)
                       ? 'Return Material'
                       : ['scrap_material', 'scrap'].includes(adjustmentForm.adjustment_type)
@@ -7567,7 +10694,15 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                       : 'Material Adjustment / Wastage'
                   }
                 </h3>
-                <div className="grid">
+                {modalReadOnly && (
+                  <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: '#92400e', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>🔒</span>
+                    <div><strong>Read Only (Locked):</strong> This record was created on a previous date and cannot be modified.</div>
+                  </div>
+                )}
+                {modalError && <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>{modalError}</div>}
+                <fieldset disabled={modalReadOnly} style={{ border: 'none', padding: 0, margin: 0, opacity: modalReadOnly ? 0.9 : 1 }}>
+                  <div className="grid">
                   <Input
                     label="Material Name"
                     name="material_name"
@@ -7586,7 +10721,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
 
                   <label>
                     <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>
-                      Adjustment Type <span style={{ color: '#ef4444' }}>*</span>
+                      Adjustment Type <RequiredAsterisk />
                     </small>
                     <select
                       value={adjustmentForm.adjustment_type}
@@ -7594,7 +10729,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                     >
                       <option value="wastage">Wastage</option>
                       <option value="damage">Damage</option>
-                      <option value="return_material">Return Material (Return to Supplier / Site)</option>
+                      <option value="return_material">Return Material (Return to Vendor / Site)</option>
                       <option value="scrap_material">Scrap Material</option>
                       <option value="transfer_out">Transfer to Another Project</option>
                     </select>
@@ -7616,12 +10751,12 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                     <>
                       <label>
                         <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>
-                          Returned To / Supplier Name (Optional)
+                          Returned To / Vendor Name (Optional)
                         </small>
                         <input
                           type="text"
                           list="project-suppliers-list"
-                          placeholder="Select or enter supplier name"
+                          placeholder="Select or enter vendor name"
                           value={adjustmentForm.supplier_name || ''}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -7681,7 +10816,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                   {adjustmentForm.adjustment_type === 'transfer_out' && (
                     <label>
                       <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>
-                        Destination Project <span style={{ color: '#ef4444' }}>*</span>
+                        Destination Project <RequiredAsterisk />
                       </small>
                       <select
                         required
@@ -7707,14 +10842,23 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                     <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(e) => setBillFile(e.target.files[0] || null)} />
                   </label>
                 </div>
+                </fieldset>
 
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-                  <button type="button" className="muted" disabled={submitAction.isSubmitting('adjustment')} onClick={() => setAdjustmentModal(false)}>
-                    Cancel
-                  </button>
-                  <button type="submit" disabled={submitAction.isSubmitting('adjustment')}>
-                    {submitAction.isSubmitting('adjustment') ? 'Saving…' : 'Save Entry'}
-                  </button>
+                  {modalReadOnly ? (
+                    <button type="button" className="muted" onClick={() => setAdjustmentModal(false)} style={{ padding: '8px 20px', borderRadius: 6 }}>
+                      Close
+                    </button>
+                  ) : (
+                    <>
+                      <button type="button" className="muted" disabled={submitAction.isSubmitting('adjustment')} onClick={() => setAdjustmentModal(false)}>
+                        Cancel
+                      </button>
+                      <button type="submit" disabled={submitAction.isSubmitting('adjustment')}>
+                        {submitAction.isSubmitting('adjustment') ? 'Saving…' : (editingAdjId ? 'Update Entry' : 'Save Entry')}
+                      </button>
+                    </>
+                  )}
                 </div>
               </form>
             </div>
@@ -7724,14 +10868,21 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
           {expenseModal && (
             <div className="modal-overlay">
               <form onSubmit={(e) => submitAction.submit('expense', () => saveExpenseEntry(e), { successMessage: 'Expense saved successfully', onError: setModalError })} className="modal-card">
-                <h3 style={{ margin: '0 0 14px', fontSize: 17, color: '#0f172a' }}>
-                  {editingExpenseId ? 'Edit' : 'Record'} Other Expense
+                <h3 style={{ margin: '0 0 14px', fontSize: 17 }}>
+                  {modalReadOnly ? '👁️ View Other Expense' : (editingExpenseId ? '✏️ Edit Other Expense' : 'Record Other Expense')}
                 </h3>
+                {modalReadOnly && (
+                  <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: '#92400e', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>🔒</span>
+                    <div><strong>Read Only (Locked):</strong> This record was created on a previous date and cannot be modified.</div>
+                  </div>
+                )}
                 {modalError && <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>{modalError}</div>}
-                <div className="grid">
+                <fieldset disabled={modalReadOnly} style={{ border: 'none', padding: 0, margin: 0, opacity: modalReadOnly ? 0.9 : 1 }}>
+                  <div className="grid">
                   <label>
                     <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>
-                      Category <span style={{ color: '#ef4444' }}>*</span>
+                      Category <RequiredAsterisk />
                     </small>
                     <select
                       value={expenseForm.category}
@@ -7765,11 +10916,20 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                   <Input label="Expense Date" name="expense_date" type="date" value={expenseForm.expense_date} set={setExpenseForm} required />
                   <Input label="Note / Details" name="note" value={expenseForm.note} set={setExpenseForm} placeholder="e.g. Generator diesel 50L" />
                 </div>
+                </fieldset>
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-                  <button type="button" className="muted" disabled={submitAction.isSubmitting('expense')} onClick={() => setExpenseModal(false)}>
-                    Cancel
-                  </button>
-                  <button type="submit" disabled={submitAction.isSubmitting('expense')}>{submitAction.isSubmitting('expense') ? 'Saving…' : 'Save Expense'}</button>
+                  {modalReadOnly ? (
+                    <button type="button" className="muted" onClick={() => setExpenseModal(false)} style={{ padding: '8px 20px', borderRadius: 6 }}>
+                      Close
+                    </button>
+                  ) : (
+                    <>
+                      <button type="button" className="muted" disabled={submitAction.isSubmitting('expense')} onClick={() => setExpenseModal(false)}>
+                        Cancel
+                      </button>
+                      <button type="submit" disabled={submitAction.isSubmitting('expense')}>{submitAction.isSubmitting('expense') ? 'Saving…' : (editingExpenseId ? 'Update Expense' : 'Save Expense')}</button>
+                    </>
+                  )}
                 </div>
               </form>
             </div>
@@ -7787,9 +10947,15 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                 }
                 className="modal-card"
               >
-                <h3 style={{ margin: '0 0 14px', fontSize: 17, color: '#0f172a' }}>
-                  {editingCommissionId ? 'Edit' : 'Record'} Commission
+                <h3 style={{ margin: '0 0 14px', fontSize: 17 }}>
+                  {modalReadOnly ? '👁️ View Commission' : (editingCommissionId ? '✏️ Edit Commission' : 'Record Commission')}
                 </h3>
+                {modalReadOnly && (
+                  <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: '#92400e', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>🔒</span>
+                    <div><strong>Read Only (Locked):</strong> This record was created on a previous date and cannot be modified.</div>
+                  </div>
+                )}
                 {modalError && (
                   <div
                     role="alert"
@@ -7806,7 +10972,8 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                     {modalError}
                   </div>
                 )}
-                <div className="grid">
+                <fieldset disabled={modalReadOnly} style={{ border: 'none', padding: 0, margin: 0, opacity: modalReadOnly ? 0.9 : 1 }}>
+                  <div className="grid">
                   <Input
                     label="Date"
                     name="commission_date"
@@ -7843,18 +11010,400 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                     placeholder="e.g. Client reference commission"
                   />
                 </div>
+                </fieldset>
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-                  <button
-                    type="button"
-                    className="muted"
-                    disabled={submitAction.isSubmitting('commission')}
-                    onClick={() => setCommissionModal(false)}
-                  >
+                  {modalReadOnly ? (
+                    <button
+                      type="button"
+                      className="muted"
+                      onClick={() => setCommissionModal(false)}
+                      style={{ padding: '8px 20px', borderRadius: 6 }}
+                    >
+                      Close
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="muted"
+                        disabled={submitAction.isSubmitting('commission')}
+                        onClick={() => setCommissionModal(false)}
+                      >
+                        Cancel
+                      </button>
+                      <button type="submit" disabled={submitAction.isSubmitting('commission')}>
+                        {submitAction.isSubmitting('commission') ? 'Saving…' : (editingCommissionId ? 'Update Commission' : 'Save Commission')}
+                      </button>
+                    </>
+                  )}
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* ── MODAL: ASSIGN / EDIT STAFF MEMBER ─────────────────────────── */}
+          {staffModal && (
+            <div className="modal-overlay">
+              <form onSubmit={(e) => submitAction.submit('staff', () => saveStaffMember(e), { successMessage: editingStaffId ? 'Staff member updated successfully' : 'Staff member assigned to project' })} className="modal-card">
+                <h3 style={{ margin: '0 0 14px', fontSize: 17 }}>
+                  {editingStaffId ? '✏️ Edit Staff Member' : '👔 Assign Staff Member to Project'}
+                </h3>
+                {modalError && (
+                  <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
+                    {modalError}
+                  </div>
+                )}
+                <div className="grid">
+                  <Input
+                    label="Staff Member Name"
+                    name="name"
+                    value={staffForm.name}
+                    set={setStaffForm}
+                    required
+                    placeholder="e.g. Rahul Sharma"
+                  />
+                  <Input
+                    label="Phone / Mobile Number"
+                    name="phone"
+                    value={staffForm.phone}
+                    set={setStaffForm}
+                    placeholder="e.g. 9876543210"
+                  />
+                  <label>
+                    <small style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Role / Designation</small>
+                    <select
+                      value={staffForm.role}
+                      onChange={(e) => setStaffForm({ ...staffForm, role: e.target.value })}
+                      required
+                    >
+                      {staffRolesList.map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <small style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Pay Type</small>
+                    <select
+                      value={staffForm.pay_type}
+                      onChange={(e) => setStaffForm({ ...staffForm, pay_type: e.target.value })}
+                      required
+                    >
+                      <option value="monthly">Monthly Salary</option>
+                      <option value="per_day">Daily Wage (Per-Day)</option>
+                      <option value="fixed_fee">Fixed Project Fee</option>
+                    </select>
+                  </label>
+                  <Input
+                    label={`Salary / Base Rate (₹ ${staffForm.pay_type === 'per_day' ? 'per day' : staffForm.pay_type === 'monthly' ? 'per month' : 'total'})`}
+                    name="salary_rate"
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={staffForm.salary_rate}
+                    set={setStaffForm}
+                    required
+                  />
+                  <Input
+                    label="Commission Rate / Amount (₹)"
+                    name="commission_rate"
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={staffForm.commission_rate}
+                    set={setStaffForm}
+                    placeholder="e.g. 15000 (if eligible for commission)"
+                  />
+                  <Input
+                    label="Commission Notes / Milestones"
+                    name="commission_notes"
+                    value={staffForm.commission_notes}
+                    set={setStaffForm}
+                    placeholder="e.g. Payable on 100% completion on time"
+                  />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                    <input
+                      type="checkbox"
+                      checked={staffForm.is_active}
+                      onChange={(e) => setStaffForm({ ...staffForm, is_active: e.target.checked })}
+                    />
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>Staff Member is currently active on this project</span>
+                  </label>
+                </div>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+                  <button type="button" className="muted" onClick={() => setStaffModal(false)}>
                     Cancel
                   </button>
-                  <button type="submit" disabled={submitAction.isSubmitting('commission')}>
-                    {submitAction.isSubmitting('commission') ? 'Saving…' : 'Save Commission'}
+                  <button type="submit" disabled={submitAction.isSubmitting('staff')}>
+                    {submitAction.isSubmitting('staff') ? 'Saving…' : (editingStaffId ? 'Update Staff Member' : 'Assign to Project')}
                   </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* ── MODAL: RECORD STAFF PAYMENT ───────────────────────────────── */}
+          {staffPaymentModal && (
+            <div className="modal-overlay">
+              <form onSubmit={(e) => submitAction.submit('staffPayment', () => saveStaffPayment(e), { successMessage: 'Staff payment recorded successfully' })} className="modal-card">
+                <h3 style={{ margin: '0 0 14px', fontSize: 17 }}>
+                  {editingStaffPaymentId ? '✏️ Edit Staff Payment' : '💳 Record Staff Payment / Commission'}
+                </h3>
+                {modalError && (
+                  <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
+                    {modalError}
+                  </div>
+                )}
+                <div className="grid">
+                  <label>
+                    <small style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Select Staff Member</small>
+                    <select
+                      value={staffPaymentForm.staff_id}
+                      onChange={(e) => setStaffPaymentForm({ ...staffPaymentForm, staff_id: e.target.value })}
+                      required
+                    >
+                      <option value="">-- Choose Staff Member --</option>
+                      {projectStaff.map((st) => (
+                        <option key={st.id} value={st.id}>
+                          {st.name} ({st.role}) {st.balance_due > 0 ? `• Due: ${INR(st.balance_due)}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <small style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Payment Type</small>
+                    <select
+                      value={staffPaymentForm.payment_type}
+                      onChange={(e) => setStaffPaymentForm({ ...staffPaymentForm, payment_type: e.target.value })}
+                      required
+                    >
+                      <option value="salary">Salary Payment</option>
+                      <option value="commission">Commission Payout</option>
+                      <option value="advance">Advance / Petty Cash</option>
+                      <option value="bonus">Bonus / Incentive</option>
+                      <option value="reimbursement">Site Expense Reimbursement</option>
+                    </select>
+                  </label>
+                  <Input
+                    label="Amount (₹)"
+                    name="amount"
+                    type="number"
+                    step="any"
+                    min="1"
+                    value={staffPaymentForm.amount}
+                    set={setStaffPaymentForm}
+                    required
+                  />
+                  <Input
+                    label="Payment Date"
+                    name="payment_date"
+                    type="date"
+                    value={staffPaymentForm.payment_date}
+                    set={setStaffPaymentForm}
+                    required
+                  />
+                  <label>
+                    <small style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Payment Mode</small>
+                    <select
+                      value={staffPaymentForm.mode}
+                      onChange={(e) => setStaffPaymentForm({ ...staffPaymentForm, mode: e.target.value })}
+                    >
+                      <option value="bank">Bank Transfer (NEFT/RTGS/IMPS)</option>
+                      <option value="upi">UPI / Online</option>
+                      <option value="cheque">Cheque</option>
+                      <option value="cash">Cash</option>
+                    </select>
+                  </label>
+                  <Input
+                    label="Transaction Ref / Cheque No."
+                    name="transaction_reference"
+                    value={staffPaymentForm.transaction_reference}
+                    set={setStaffPaymentForm}
+                    placeholder="e.g. UTR / URN / Cheque #123456"
+                  />
+                  <Input
+                    label="Note / Remarks"
+                    name="note"
+                    value={staffPaymentForm.note}
+                    set={setStaffPaymentForm}
+                    placeholder="e.g. Advance for site travel / October Salary"
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+                  <button type="button" className="muted" onClick={() => setStaffPaymentModal(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={submitAction.isSubmitting('staffPayment')}>
+                    {submitAction.isSubmitting('staffPayment') ? 'Recording…' : (editingStaffPaymentId ? 'Update Staff Payment' : 'Save Staff Payment')}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* ── MODAL: PARTY PAYMENT ────────────────────────────────────────── */}
+          {partyPaymentModal && (
+            <div className="modal-overlay">
+              <form onSubmit={savePartyPayment} className="modal-card">
+                <h3 style={{ margin: '0 0 14px', fontSize: 17 }}>
+                  {Boolean(modalReadOnly && editingPartyPaymentId) ? '👁️ View Party Payment' : (editingPartyPaymentId ? '✏️ Edit Party Payment' : 'Record Party Payment')}
+                </h3>
+                {Boolean(modalReadOnly && editingPartyPaymentId) && (
+                  <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: '#92400e', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>🔒</span>
+                    <div><strong>Read Only (Locked):</strong> This record was created more than 48 hours ago and cannot be modified.</div>
+                  </div>
+                )}
+                {modalError && <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>{modalError}</div>}
+                <fieldset disabled={Boolean(modalReadOnly && editingPartyPaymentId)} style={{ border: 'none', padding: 0, margin: 0, opacity: (modalReadOnly && editingPartyPaymentId) ? 0.9 : 1 }}>
+                  <div className="grid">
+                    <Input label="Amount (₹)" name="amount" type="number" step="any" min="1" value={partyPaymentForm.amount} set={setPartyPaymentForm} required />
+                    <Input label="Date" name="payment_date" type="date" value={partyPaymentForm.payment_date} set={setPartyPaymentForm} required />
+                    <label>
+                      <small style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Payment Mode</small>
+                      <select value={partyPaymentForm.mode} onChange={(e) => setPartyPaymentForm((f) => ({ ...f, mode: e.target.value }))}>
+                        <option value="bank">Bank Transfer</option>
+                        <option value="cash">Cash</option>
+                        <option value="cheque">Cheque</option>
+                        <option value="upi">UPI / Online</option>
+                      </select>
+                    </label>
+                    {(partyPaymentForm.mode === 'upi' || partyPaymentForm.mode === 'bank') && (
+                      <Input label="Transaction Reference / UPI ID" name="transaction_reference" value={partyPaymentForm.transaction_reference || ''} set={setPartyPaymentForm} placeholder="e.g. UPI ID, UTR number, or bank transaction ID" />
+                    )}
+                    <Input label="Note / Reference" name="note" value={partyPaymentForm.note} set={setPartyPaymentForm} />
+                  </div>
+                </fieldset>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+                  {Boolean(modalReadOnly && editingPartyPaymentId) ? (
+                    <button
+                      type="button"
+                      className="muted"
+                      onClick={() => {
+                        setPartyPaymentModal(false);
+                        setEditingPartyPaymentId(null);
+                        setModalReadOnly(false);
+                        setModalError('');
+                      }}
+                      style={{ padding: '8px 20px', borderRadius: 6 }}
+                    >
+                      Close
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="muted"
+                        onClick={() => {
+                          setPartyPaymentModal(false);
+                          setEditingPartyPaymentId(null);
+                          setModalReadOnly(false);
+                          setModalError('');
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button type="submit">{editingPartyPaymentId ? 'Update Payment' : 'Save Payment'}</button>
+                    </>
+                  )}
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* ── MODAL: SERVICE PROVIDER / VENDOR PAYMENT ───────────────────────── */}
+          {vendorPaymentModal && (
+            <div className="modal-overlay">
+              <form onSubmit={saveVendorPayment} className="modal-card">
+                <h3 style={{ margin: '0 0 14px', fontSize: 17 }}>
+                  {Boolean(modalReadOnly && editingVendorPaymentId) ? '👁️ View Service Provider Payment' : (editingVendorPaymentId ? '✏️ Edit Service Provider Payment' : 'Record Service Provider Payment')}
+                </h3>
+                {Boolean(modalReadOnly && editingVendorPaymentId) && (
+                  <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: '#92400e', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>🔒</span>
+                    <div><strong>Read Only (Locked):</strong> This record was created more than 48 hours ago and cannot be modified.</div>
+                  </div>
+                )}
+                {modalError && <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>{modalError}</div>}
+                <fieldset disabled={Boolean(modalReadOnly && editingVendorPaymentId)} style={{ border: 'none', padding: 0, margin: 0, opacity: (modalReadOnly && editingVendorPaymentId) ? 0.9 : 1 }}>
+                  <div className="grid">
+                    <label>
+                      <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>Service Provider</small>
+                      <select
+                        required
+                        value={vendorPaymentForm.project_vendor_id}
+                        disabled={Boolean(modalReadOnly && editingVendorPaymentId) || Boolean(editingVendorPaymentId)}
+                        onChange={(e) => {
+                          const pvid = e.target.value;
+                          const pv = projectVendors.find((v) => String(v.id) === String(pvid));
+                          const defType = pv?.category === 'contractor' ? 'labour' : pv?.category === 'supplier' ? 'material' : 'both';
+                          setVendorPaymentForm({ ...vendorPaymentForm, project_vendor_id: pvid, payment_type: defType });
+                        }}
+                      >
+                        <option value="">-- Choose Service Provider --</option>
+                        {projectVendors.map((pv) => (
+                          <option key={pv.id} value={pv.id}>
+                            {pv.vendor_name} ({pv.trade || pv.category})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <Input label="Amount (₹)" name="amount" type="number" step="any" min="1" value={vendorPaymentForm.amount} set={setVendorPaymentForm} required />
+                    <Input label="Payment Date" name="payment_date" type="date" value={vendorPaymentForm.payment_date} set={setVendorPaymentForm} required />
+                    <label>
+                      <small style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Payment Mode</small>
+                      <select value={vendorPaymentForm.mode} onChange={(e) => setVendorPaymentForm({ ...vendorPaymentForm, mode: e.target.value })}>
+                        <option value="bank">Bank Transfer</option>
+                        <option value="cash">Cash</option>
+                        <option value="cheque">Cheque</option>
+                        <option value="upi">UPI / Online</option>
+                      </select>
+                    </label>
+                    {(vendorPaymentForm.mode === 'upi' || vendorPaymentForm.mode === 'bank') && (
+                      <Input label="Transaction Reference / UPI ID" name="transaction_reference" value={vendorPaymentForm.transaction_reference || ''} set={setVendorPaymentForm} placeholder="e.g. UPI ID, UTR number, or bank transaction ID" />
+                    )}
+                    <label>
+                      <small style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: '#475569' }}>Payment For</small>
+                      <select value={vendorPaymentForm.payment_type} onChange={(e) => setVendorPaymentForm({ ...vendorPaymentForm, payment_type: e.target.value })}>
+                        <option value="labour">Labour / Service</option>
+                        <option value="material">Material</option>
+                        <option value="both">Both</option>
+                      </select>
+                    </label>
+                    <Input label="Note / Transaction Ref" name="note" value={vendorPaymentForm.note} set={setVendorPaymentForm} />
+                  </div>
+                </fieldset>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+                  {Boolean(modalReadOnly && editingVendorPaymentId) ? (
+                    <button
+                      type="button"
+                      className="muted"
+                      onClick={() => {
+                        setVendorPaymentModal(false);
+                        setEditingVendorPaymentId(null);
+                        setModalReadOnly(false);
+                        setModalError('');
+                      }}
+                      style={{ padding: '8px 20px', borderRadius: 6 }}
+                    >
+                      Close
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="muted"
+                        onClick={() => {
+                          setVendorPaymentModal(false);
+                          setEditingVendorPaymentId(null);
+                          setModalReadOnly(false);
+                          setModalError('');
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button type="submit">{editingVendorPaymentId ? 'Update Payment' : 'Save Payment'}</button>
+                    </>
+                  )}
                 </div>
               </form>
             </div>
@@ -7872,12 +11421,12 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
               <div>
                 <h3 style={{ margin: 0, fontSize: 18 }}>Project Management &bull; Reports &amp; Analytics</h3>
                 <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: 12 }}>
-                  Material consumption, site stock across running projects, cost summaries, and vendor balances with CSV export.
+                  Cross-project entity tracking, material consumption by period, site stock, cost summaries, and vendor balances with CSV export.
                 </p>
               </div>
 
               <a
-                href={`/api/admin/project-management/reports?type=${reportType}${reportProjectFilter ? `&projectId=${reportProjectFilter}` : ''}&format=csv`}
+                href={reportCsvUrl}
                 download
                 className="active-btn"
                 style={{
@@ -7897,7 +11446,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
             </div>
 
             {/* Report Type Selector Tabs */}
-            <div className="subtabs" style={{ marginTop: 14 }}>
+            <div className="subtabs" style={{ marginTop: 14, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {[
                 { id: 'cost_summary', label: '1. Project Cost Summary' },
                 { id: 'material_consumption', label: '2. Material Consumption' },
@@ -7905,32 +11454,343 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
                 { id: 'vendor_balance', label: '4. Vendor Balance Summary' },
                 { id: 'labor_summary', label: '5. Labor & Worker Summary' },
                 { id: 'party_summary', label: '6. Party-wise Contract & Payment' },
+                { id: 'cross_project_entity', label: '7. Cross-Project Entity Ledger (Universal Search)' },
               ].map((tab) => (
                 <button
                   type="button"
                   key={tab.id}
                   className={reportType === tab.id ? 'active' : ''}
                   onClick={() => setReportType(tab.id)}
+                  style={{ fontSize: 12 }}
                 >
                   {tab.label}
                 </button>
               ))}
             </div>
 
-            {/* Optional Project Filter for consumption and labor report */}
-            {(reportType === 'material_consumption' || reportType === 'labor_summary') && (
-              <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 600 }}>Filter Project:</span>
-                <select
-                  value={reportProjectFilter}
-                  onChange={(e) => setReportProjectFilter(e.target.value)}
-                  style={{ maxWidth: 260 }}
-                >
-                  <option value="">All Projects</option>
-                  {allProjectsList.map((p) => (
-                    <option value={p.id} key={p.id}>{p.name}</option>
-                  ))}
-                </select>
+            {/* ── Comprehensive Universal Filter Toolbar ── */}
+            <div
+              style={{
+                marginTop: 16,
+                padding: '12px 14px',
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  🔍 Filter &amp; Search Reports
+                </span>
+                {(reportSearch || reportProjectFilter || reportMaterialFilter || reportProjectStatus !== 'all' || reportEntityType !== 'all' || reportFrequency !== 'all' || reportStartDate || reportEndDate) && (
+                  <button
+                    type="button"
+                    className="muted"
+                    onClick={() => {
+                      setReportSearch('');
+                      setReportProjectFilter('');
+                      setReportMaterialFilter('');
+                      setReportProjectStatus('all');
+                      setReportEntityType('all');
+                      setReportFrequency('all');
+                      setReportStartDate('');
+                      setReportEndDate('');
+                    }}
+                    style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, cursor: 'pointer' }}
+                  >
+                    ✕ Reset Filters
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+                {/* 1. Name or Phone Number Universal Search */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 3 }}>
+                    Search Name or Phone
+                  </label>
+                  <input
+                    type="text"
+                    value={reportSearch}
+                    onChange={(e) => setReportSearch(e.target.value)}
+                    placeholder="e.g. Ramesh, 9876..., Mason"
+                    style={{ width: '100%', padding: '6px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                  />
+                </div>
+
+                {/* 2. Entity Type (All, Labor, Contractor, Vendor, Service Provider, Party) */}
+                {(reportType === 'cross_project_entity' || reportType === 'vendor_balance' || reportType === 'labor_summary') && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 3 }}>
+                      Entity Type
+                    </label>
+                    <select
+                      value={reportEntityType}
+                      onChange={(e) => setReportEntityType(e.target.value)}
+                      style={{ width: '100%', padding: '6px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                    >
+                      <option value="all">All Entity Types</option>
+                      <option value="labor">Labor / Worker</option>
+                      <option value="contractor">Contractor</option>
+                      <option value="vendor">Vendor / Supplier</option>
+                      <option value="service_provider">Service Provider</option>
+                      <option value="party">Client / Party</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* 3. Project Status (All, Running, Completed / Finished, On Hold) */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 3 }}>
+                    Project Status
+                  </label>
+                  <select
+                    value={reportProjectStatus}
+                    onChange={(e) => setReportProjectStatus(e.target.value)}
+                    style={{ width: '100%', padding: '6px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                  >
+                    <option value="all">All Statuses (Running + Finished)</option>
+                    <option value="running">Running Projects Only</option>
+                    <option value="completed">Finished / Completed Only</option>
+                    <option value="on_hold">On Hold Only</option>
+                  </select>
+                </div>
+
+                {/* 4. Project Filter */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 3 }}>
+                    Project
+                  </label>
+                  <select
+                    value={reportProjectFilter}
+                    onChange={(e) => setReportProjectFilter(e.target.value)}
+                    style={{ width: '100%', padding: '6px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                  >
+                    <option value="">All Projects</option>
+                    {availableReportProjects.map((p) => (
+                      <option value={p.id} key={p.id}>
+                        {p.name} {p.status ? `(${p.status})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 5. Material Filter (For Material Consumption & Stock tabs) */}
+                {(reportType === 'material_consumption' || reportType === 'stock_running') && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 3 }}>
+                      Material
+                    </label>
+                    <select
+                      value={reportMaterialFilter}
+                      onChange={(e) => setReportMaterialFilter(e.target.value)}
+                      style={{ width: '100%', padding: '6px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                    >
+                      <option value="">All Materials</option>
+                      {availableReportMaterials.map((m) => (
+                        <option value={m.id} key={m.id}>
+                          {m.name} {m.unit ? `(${m.unit})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* 6. Frequency Breakdown (Daily, Weekly, Monthly, Yearly) for Material Consumption */}
+                {reportType === 'material_consumption' && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 3 }}>
+                      Time Frequency
+                    </label>
+                    <select
+                      value={reportFrequency}
+                      onChange={(e) => setReportFrequency(e.target.value)}
+                      style={{ width: '100%', padding: '6px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                    >
+                      <option value="all">Summary Total (All-Time)</option>
+                      <option value="daily">Per Day (Daily Breakdown)</option>
+                      <option value="weekly">Per Week (Weekly Breakdown)</option>
+                      <option value="monthly">Per Month (Monthly Breakdown)</option>
+                      <option value="yearly">Per Year (Yearly Breakdown)</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* 7. Date Range: Start Date & End Date */}
+                {reportType !== 'stock_running' && (
+                  <>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 3 }}>
+                        From Date
+                      </label>
+                      <input
+                        type="date"
+                        value={reportStartDate}
+                        onChange={(e) => setReportStartDate(e.target.value)}
+                        style={{ width: '100%', padding: '6px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 3 }}>
+                        To Date
+                      </label>
+                      <input
+                        type="date"
+                        value={reportEndDate}
+                        onChange={(e) => setReportEndDate(e.target.value)}
+                        style={{ width: '100%', padding: '6px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* ── Summary KPI Metric Cards ── */}
+            {reportData.summary && (
+              <div
+                style={{
+                  marginTop: 16,
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                  gap: 12,
+                }}
+              >
+                {reportType === 'cross_project_entity' && (
+                  <>
+                    <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#166534', fontWeight: 600 }}>Total Billed / Earned</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#15803d', marginTop: 2 }}>
+                        {INR(reportData.summary.total_billed)}
+                      </div>
+                    </div>
+                    <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#1e40af', fontWeight: 600 }}>Total Paid</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#2563eb', marginTop: 2 }}>
+                        {INR(reportData.summary.total_paid)}
+                      </div>
+                    </div>
+                    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#991b1b', fontWeight: 600 }}>Balance Due</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#dc2626', marginTop: 2 }}>
+                        {INR(reportData.summary.total_balance)}
+                      </div>
+                    </div>
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#475569', fontWeight: 600 }}>Projects Involved</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>
+                        {reportData.summary.projects_count}
+                      </div>
+                    </div>
+                    <div style={{ background: '#fdf4ff', border: '1px solid #f5d0fe', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#86198f', fontWeight: 600 }}>Entities Found</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#a21caf', marginTop: 2 }}>
+                        {reportData.summary.entities_count}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {reportType === 'cost_summary' && (
+                  <>
+                    <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#1e40af', fontWeight: 600 }}>Total Contract Value</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#2563eb', marginTop: 2 }}>
+                        {INR(reportData.summary.total_contract_value)}
+                      </div>
+                    </div>
+                    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#991b1b', fontWeight: 600 }}>Total Expenses</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#dc2626', marginTop: 2 }}>
+                        {INR(reportData.summary.total_expense)}
+                      </div>
+                    </div>
+                    <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#166534', fontWeight: 600 }}>Total Received</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#15803d', marginTop: 2 }}>
+                        {INR(reportData.summary.total_received)}
+                      </div>
+                    </div>
+                    <div style={{ background: reportData.summary.total_profit_or_loss >= 0 ? '#f0fdf4' : '#fef2f2', border: '1px solid #cbd5e1', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#475569', fontWeight: 600 }}>Net Profit / Loss</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: reportData.summary.total_profit_or_loss >= 0 ? '#15803d' : '#dc2626', marginTop: 2 }}>
+                        {INR(reportData.summary.total_profit_or_loss)}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {reportType === 'material_consumption' && (
+                  <>
+                    <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#92400e', fontWeight: 600 }}>Consumed Material Cost</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#b45309', marginTop: 2 }}>
+                        {INR(reportData.summary.total_consumed_cost)}
+                      </div>
+                    </div>
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#475569', fontWeight: 600 }}>Total Quantity Used</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>
+                        {Number(reportData.summary.total_used_qty).toLocaleString()}
+                      </div>
+                    </div>
+                    <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#1e40af', fontWeight: 600 }}>Distinct Materials</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#2563eb', marginTop: 2 }}>
+                        {reportData.summary.materials_count}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {(reportType === 'vendor_balance' || reportType === 'labor_summary') && (
+                  <>
+                    <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#1e40af', fontWeight: 600 }}>Total Earned</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#2563eb', marginTop: 2 }}>
+                        {INR(reportData.summary.total_earned)}
+                      </div>
+                    </div>
+                    <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#166534', fontWeight: 600 }}>Total Paid</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#15803d', marginTop: 2 }}>
+                        {INR(reportData.summary.total_paid)}
+                      </div>
+                    </div>
+                    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#991b1b', fontWeight: 600 }}>Total Balance Due</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#dc2626', marginTop: 2 }}>
+                        {INR(reportData.summary.total_balance_due)}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {reportType === 'party_summary' && (
+                  <>
+                    <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#1e40af', fontWeight: 600 }}>Contract Value</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#2563eb', marginTop: 2 }}>
+                        {INR(reportData.summary.total_contract_value)}
+                      </div>
+                    </div>
+                    <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#166534', fontWeight: 600 }}>Received</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#15803d', marginTop: 2 }}>
+                        {INR(reportData.summary.total_received)}
+                      </div>
+                    </div>
+                    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#991b1b', fontWeight: 600 }}>Pending</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#dc2626', marginTop: 2 }}>
+                        {INR(reportData.summary.total_pending)}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -7939,38 +11799,691 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
           {loadingReport ? (
             <p style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>Loading report data...</p>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  {reportData.headers?.map((h) => (
-                    <th key={h.key}>{h.label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {reportData.data?.map((row, rIdx) => (
-                  <tr key={rIdx}>
-                    {reportData.headers?.map((h) => {
-                      const val = row[h.key];
-                      const isMoney = String(h.label).includes('(₹)');
-                      return (
-                        <td key={h.key} style={isMoney ? { fontWeight: 600 } : {}}>
-                          {isMoney ? INR(val) : val ?? '—'}
+            <div style={{ overflowX: 'auto', background: '#fff', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+              <table>
+                <thead>
+                  <tr>
+                    {reportData.headers?.map((h) => (
+                      <th key={h.key}>{h.label}</th>
+                    ))}
+                    {(reportType === 'cross_project_entity' || reportType === 'labor_summary') && (
+                      <th style={{ textAlign: 'center', minWidth: 150 }}>Quick Actions</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportData.data?.map((row, rIdx) => (
+                    <tr key={rIdx}>
+                      {reportData.headers?.map((h) => {
+                        const val = row[h.key];
+                        const isMoney = String(h.label).includes('(₹)');
+                        const isStatus = h.key === 'project_status' || h.key === 'status';
+                        const isType = h.key === 'entity_type';
+
+                        return (
+                          <td key={h.key} style={isMoney ? { fontWeight: 600 } : {}}>
+                            {isType ? (
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  padding: '2px 8px',
+                                  borderRadius: 4,
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  background:
+                                    val === 'Labor / Worker'
+                                      ? '#eff6ff'
+                                      : val === 'Contractor'
+                                      ? '#fef3c7'
+                                      : val === 'Service Provider'
+                                      ? '#f3e8ff'
+                                      : val === 'Client / Party'
+                                      ? '#ecfdf5'
+                                      : '#f1f5f9',
+                                  color:
+                                    val === 'Labor / Worker'
+                                      ? '#1d4ed8'
+                                      : val === 'Contractor'
+                                      ? '#b45309'
+                                      : val === 'Service Provider'
+                                      ? '#7e22ce'
+                                      : val === 'Client / Party'
+                                      ? '#047857'
+                                      : '#475569',
+                                }}
+                              >
+                                {val}
+                              </span>
+                            ) : isStatus ? (
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  background:
+                                    val === 'running' || val === 'Active' || val === 'ADEQUATE'
+                                      ? '#dcfce7'
+                                      : val === 'completed'
+                                      ? '#e0e7ff'
+                                      : val === 'LOW_STOCK'
+                                      ? '#fef9c3'
+                                      : val === 'OVER_USED'
+                                      ? '#fee2e2'
+                                      : '#f1f5f9',
+                                  color:
+                                    val === 'running' || val === 'Active' || val === 'ADEQUATE'
+                                      ? '#15803d'
+                                      : val === 'completed'
+                                      ? '#4338ca'
+                                      : val === 'LOW_STOCK'
+                                      ? '#a16207'
+                                      : val === 'OVER_USED'
+                                      ? '#b91c1c'
+                                      : '#475569',
+                                }}
+                              >
+                                {val}
+                              </span>
+                            ) : isMoney ? (
+                              INR(val)
+                            ) : (
+                              val ?? '—'
+                            )}
+                          </td>
+                        );
+                      })}
+                      {(reportType === 'cross_project_entity' || reportType === 'labor_summary') && (
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ display: 'inline-flex', gap: 6 }}>
+                            {(row.entity_type === 'Labor / Worker' || reportType === 'labor_summary') && (
+                              <button
+                                type="button"
+                                onClick={() => openQuickAttendance({
+                                  labor_id: row.entity_record_id || row.labor_id,
+                                  name: row.entity_name || row.labor_name,
+                                  daily_rate: row.daily_rate,
+                                  projects: [{
+                                    labor_id: row.entity_record_id || row.labor_id,
+                                    project_id: row.project_id,
+                                    project_name: row.project_name,
+                                    daily_rate: row.daily_rate,
+                                  }],
+                                })}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  fontSize: 11,
+                                  padding: '5px 10px',
+                                  borderRadius: 6,
+                                  background: '#f0f9ff',
+                                  color: '#0284c7',
+                                  border: '1px solid #bae6fd',
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                  whiteSpace: 'nowrap',
+                                  lineHeight: 1.2,
+                                }}
+                              >
+                                <span>📅</span>
+                                <span>Attendance</span>
+                              </button>
+                            )}
+                            {(row.entity_type === 'Labor / Worker' || reportType === 'labor_summary') && (
+                              <button
+                                type="button"
+                                onClick={() => openQuickPayment({
+                                  labor_id: row.entity_record_id || row.labor_id,
+                                  name: row.entity_name || row.labor_name,
+                                  balance_due: row.balance_due,
+                                  projects: [{
+                                    labor_id: row.entity_record_id || row.labor_id,
+                                    project_id: row.project_id,
+                                    project_name: row.project_name,
+                                    balance: row.balance_due,
+                                  }],
+                                }, 'labor')}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  fontSize: 11,
+                                  padding: '5px 10px',
+                                  borderRadius: 6,
+                                  background: '#f0fdf4',
+                                  color: '#16a34a',
+                                  border: '1px solid #bbf7d0',
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                  whiteSpace: 'nowrap',
+                                  lineHeight: 1.2,
+                                }}
+                              >
+                                <span>💳</span>
+                                <span>Pay</span>
+                              </button>
+                            )}
+                            {(row.entity_type === 'Contractor' || row.entity_type === 'Service Provider') && (
+                              <button
+                                type="button"
+                                onClick={() => openQuickPayment({
+                                  project_vendor_id: row.entity_record_id,
+                                  name: row.entity_name,
+                                  balance_due: row.balance_due,
+                                  projects: [{
+                                    project_vendor_id: row.entity_record_id,
+                                    project_id: row.project_id,
+                                    project_name: row.project_name,
+                                    balance: row.balance_due,
+                                  }],
+                                }, 'contractor')}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  fontSize: 11,
+                                  padding: '5px 10px',
+                                  borderRadius: 6,
+                                  background: '#fef3c7',
+                                  color: '#b45309',
+                                  border: '1px solid #fde68a',
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                  whiteSpace: 'nowrap',
+                                  lineHeight: 1.2,
+                                }}
+                              >
+                                <span>💳</span>
+                                <span>Pay Contractor</span>
+                              </button>
+                            )}
+                            {(row.entity_type === 'Vendor / Supplier' || row.entity_type === 'Vendor') && (
+                              <button
+                                type="button"
+                                onClick={() => openQuickPayment({
+                                  supplier_name: row.entity_name,
+                                  name: row.entity_name,
+                                  balance_due: row.balance_due,
+                                  entity_kind: 'supplier',
+                                  projects: [{
+                                    supplier_name: row.entity_name,
+                                    project_id: row.project_id,
+                                    project_name: row.project_name,
+                                    balance: row.balance_due,
+                                  }],
+                                }, 'supplier')}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  fontSize: 11,
+                                  padding: '5px 10px',
+                                  borderRadius: 6,
+                                  background: '#f0fdf4',
+                                  color: '#16a34a',
+                                  border: '1px solid #bbf7d0',
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                  whiteSpace: 'nowrap',
+                                  lineHeight: 1.2,
+                                }}
+                              >
+                                <span>💳</span>
+                                <span>Pay Vendor</span>
+                              </button>
+                            )}
+                          </div>
                         </td>
+                      )}
+                    </tr>
+                  ))}
+                  {(!reportData.data || reportData.data.length === 0) && (
+                    <tr>
+                      <td colSpan={(reportData.headers?.length || 5) + ((reportType === 'cross_project_entity' || reportType === 'labor_summary') ? 1 : 0)} style={{ textAlign: 'center', padding: '2.5rem', color: '#64748b' }}>
+                        No records match the selected filters. Try broadening your search or resetting filters.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── ATTENDANCE DETAIL & EDIT MODAL ─────────────────────────────── */}
+      {attendanceDetailModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            zIndex: 2500,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+          onClick={() => {
+            if (!savingAttendanceDetail) setAttendanceDetailModal(null);
+          }}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: 14,
+              padding: '24px',
+              width: '100%',
+              maxWidth: 500,
+              boxShadow: '0 20px 45px rgba(0, 0, 0, 0.2)',
+              border: attendanceDetailModal.isToday ? '1px solid #93c5fd' : '1px solid #e2e8f0',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, color: '#0f172a', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {attendanceDetailModal.isToday ? '✏️ Edit Attendance' : '👁️ View Attendance'}
+                </h3>
+                <div style={{ color: '#64748b', fontSize: 13, marginTop: 4 }}>
+                  Date: <strong style={{ color: '#0f172a' }}>{attendanceDetailModal.attendance_date}</strong>
+                  {attendanceDetailModal.marked_by && (
+                    <span style={{ marginLeft: 10 }}>• Marked by: {attendanceDetailModal.marked_by}</span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAttendanceDetailModal(null)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  fontSize: 20,
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: 4,
+                  lineHeight: 1,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Target Worker/Vendor Info */}
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '12px 14px', marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>
+                {attendanceDetailModal.type === 'vendor' ? attendanceDetailModal.vendor_name : attendanceDetailModal.labor_name}
+              </div>
+              <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+                Trade / Role: <strong>{attendanceDetailModal.trade || 'Worker'}</strong>
+                {attendanceDetailModal.type === 'labor' && attendanceDetailModal.daily_rate > 0 && (
+                  <span style={{ marginLeft: 10 }}>• Daily Rate: {INR(attendanceDetailModal.daily_rate)}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Past Date Banner if not editable */}
+            {!attendanceDetailModal.isToday && (
+              <div
+                style={{
+                  background: '#fef3c7',
+                  border: '1px solid #fcd34d',
+                  borderRadius: 8,
+                  padding: '10px 14px',
+                  marginBottom: 16,
+                  color: '#92400e',
+                  fontSize: 12,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                <span style={{ fontSize: 16 }}>🔒</span>
+                <div>
+                  <strong>Read Only (Locked):</strong> Attendance records older than 48 hours cannot be modified. They can only be edited within 48 hours of creation.
+                </div>
+              </div>
+            )}
+
+            {/* Editable Form or Read-only Display */}
+            {attendanceDetailModal.isToday ? (
+              <form onSubmit={saveAttendanceDetailModal} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {/* Status Selection */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>
+                    Status
+                  </label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {['present', 'half_day', 'absent'].map((st) => {
+                      const isActive = attendanceDetailModal.status === st;
+                      const activeBg = st === 'present' ? '#16a34a' : st === 'half_day' ? '#f59e0b' : '#ef4444';
+                      return (
+                        <button
+                          key={st}
+                          type="button"
+                          onClick={() => {
+                            let newWage = 0;
+                            if (attendanceDetailModal.type === 'labor') {
+                              newWage = computeLaborWage(
+                                attendanceDetailModal.daily_rate,
+                                st,
+                                attendanceDetailModal.shift_type || 'day',
+                                attendanceDetailModal.overtime_hours || 0
+                              );
+                            } else {
+                              newWage = computeVendorWage(
+                                attendanceDetailModal.workers_count || 1,
+                                attendanceDetailModal.rate_per_worker || 0,
+                                st,
+                                attendanceDetailModal.shift_type || 'day',
+                                attendanceDetailModal.overtime_hours || 0
+                              );
+                            }
+                            setAttendanceDetailModal((prev) => ({
+                              ...prev,
+                              status: st,
+                              wage_amount: newWage,
+                            }));
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: '8px 12px',
+                            fontSize: 13,
+                            fontWeight: 600,
+                            borderRadius: 6,
+                            border: isActive ? `2px solid ${activeBg}` : '1px solid #cbd5e1',
+                            background: isActive ? activeBg : '#f8fafc',
+                            color: isActive ? '#ffffff' : '#475569',
+                            cursor: 'pointer',
+                            textTransform: 'capitalize',
+                          }}
+                        >
+                          {st === 'half_day' ? 'Half Day' : st}
+                        </button>
                       );
                     })}
-                  </tr>
-                ))}
-                {(!reportData.data || reportData.data.length === 0) && (
-                  <tr>
-                    <td colSpan={reportData.headers?.length || 5} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
-                      No data available for this report.
-                    </td>
-                  </tr>
+                  </div>
+                </div>
+
+                {/* Shift and Overtime */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>
+                      Shift
+                    </label>
+                    <select
+                      value={attendanceDetailModal.shift_type || 'day'}
+                      disabled={attendanceDetailModal.status === 'absent'}
+                      onChange={(e) => {
+                        const nextShift = e.target.value;
+                        let newWage = 0;
+                        if (attendanceDetailModal.type === 'labor') {
+                          newWage = computeLaborWage(
+                            attendanceDetailModal.daily_rate,
+                            attendanceDetailModal.status,
+                            nextShift,
+                            attendanceDetailModal.overtime_hours || 0
+                          );
+                        } else {
+                          newWage = computeVendorWage(
+                            attendanceDetailModal.workers_count || 1,
+                            attendanceDetailModal.rate_per_worker || 0,
+                            attendanceDetailModal.status,
+                            nextShift,
+                            attendanceDetailModal.overtime_hours || 0
+                          );
+                        }
+                        setAttendanceDetailModal((prev) => ({
+                          ...prev,
+                          shift_type: nextShift,
+                          wage_amount: newWage,
+                        }));
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        fontSize: 13,
+                        borderRadius: 6,
+                        border: '1px solid #cbd5e1',
+                        background: '#ffffff',
+                      }}
+                    >
+                      <option value="day">☀️ Day (1x)</option>
+                      <option value="night">🌙 Night (1x)</option>
+                      <option value="double">⚡ Double (2x)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>
+                      Overtime (Hours)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="16"
+                      step="0.5"
+                      disabled={attendanceDetailModal.status === 'absent'}
+                      value={attendanceDetailModal.overtime_hours ?? 0}
+                      onChange={(e) => {
+                        const otVal = Math.max(0, Number(e.target.value || 0));
+                        let newWage = 0;
+                        if (attendanceDetailModal.type === 'labor') {
+                          newWage = computeLaborWage(
+                            attendanceDetailModal.daily_rate,
+                            attendanceDetailModal.status,
+                            attendanceDetailModal.shift_type || 'day',
+                            otVal
+                          );
+                        } else {
+                          newWage = computeVendorWage(
+                            attendanceDetailModal.workers_count || 1,
+                            attendanceDetailModal.rate_per_worker || 0,
+                            attendanceDetailModal.status,
+                            attendanceDetailModal.shift_type || 'day',
+                            otVal
+                          );
+                        }
+                        setAttendanceDetailModal((prev) => ({
+                          ...prev,
+                          overtime_hours: otVal,
+                          wage_amount: newWage,
+                        }));
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        fontSize: 13,
+                        borderRadius: 6,
+                        border: '1px solid #cbd5e1',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* If vendor: Workers Count & Rate per worker */}
+                {attendanceDetailModal.type === 'vendor' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>
+                        Workers Count
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={attendanceDetailModal.workers_count ?? 1}
+                        onChange={(e) => {
+                          const count = Math.max(1, Number(e.target.value || 1));
+                          const newWage = computeVendorWage(
+                            count,
+                            attendanceDetailModal.rate_per_worker || 0,
+                            attendanceDetailModal.status,
+                            attendanceDetailModal.shift_type || 'day',
+                            attendanceDetailModal.overtime_hours || 0
+                          );
+                          setAttendanceDetailModal((prev) => ({
+                            ...prev,
+                            workers_count: count,
+                            wage_amount: newWage,
+                          }));
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '8px 10px',
+                          fontSize: 13,
+                          borderRadius: 6,
+                          border: '1px solid #cbd5e1',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>
+                        Rate / Worker (₹)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={attendanceDetailModal.rate_per_worker ?? 0}
+                        onChange={(e) => {
+                          const rate = Math.max(0, Number(e.target.value || 0));
+                          const newWage = computeVendorWage(
+                            attendanceDetailModal.workers_count || 1,
+                            rate,
+                            attendanceDetailModal.status,
+                            attendanceDetailModal.shift_type || 'day',
+                            attendanceDetailModal.overtime_hours || 0
+                          );
+                          setAttendanceDetailModal((prev) => ({
+                            ...prev,
+                            rate_per_worker: rate,
+                            wage_amount: newWage,
+                          }));
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '8px 10px',
+                          fontSize: 13,
+                          borderRadius: 6,
+                          border: '1px solid #cbd5e1',
+                        }}
+                      />
+                    </div>
+                  </div>
                 )}
-              </tbody>
-            </table>
-          )}
+
+                {/* Total Calculated Wage */}
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#166534' }}>Total Wage for this Day:</span>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: '#15803d' }}>
+                    {INR(attendanceDetailModal.wage_amount || 0)}
+                  </span>
+                </div>
+
+                {/* Note */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>
+                    Note / Remark
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Optional note..."
+                    value={attendanceDetailModal.note || ''}
+                    onChange={(e) => setAttendanceDetailModal((prev) => ({ ...prev, note: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      fontSize: 13,
+                      borderRadius: 6,
+                      border: '1px solid #cbd5e1',
+                    }}
+                  />
+                </div>
+
+                {/* Modal Footer Buttons */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className="muted"
+                    disabled={savingAttendanceDetail}
+                    onClick={() => setAttendanceDetailModal(null)}
+                    style={{ padding: '8px 16px', borderRadius: 6 }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="active-btn"
+                    disabled={savingAttendanceDetail}
+                    style={{
+                      padding: '8px 18px',
+                      borderRadius: 6,
+                      background: '#2563eb',
+                      color: '#ffffff',
+                      fontWeight: 600,
+                      cursor: savingAttendanceDetail ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {savingAttendanceDetail ? 'Saving...' : '💾 Save Changes'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* Read Only View Details */
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+                  <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: 6, border: '1px solid #f1f5f9' }}>
+                    <div style={{ fontSize: 11, color: '#64748b' }}>Status</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, textTransform: 'capitalize', color: attendanceDetailModal.status === 'present' ? '#16a34a' : attendanceDetailModal.status === 'half_day' ? '#f59e0b' : '#ef4444' }}>
+                      {attendanceDetailModal.status === 'half_day' ? 'Half Day' : (attendanceDetailModal.status || 'Present')}
+                    </div>
+                  </div>
+                  <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: 6, border: '1px solid #f1f5f9' }}>
+                    <div style={{ fontSize: 11, color: '#64748b' }}>Shift</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>
+                      {attendanceDetailModal.shift_type === 'double' ? 'Double (2x)' : (attendanceDetailModal.shift_type === 'night' ? 'Night (1x)' : 'Day (1x)')}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+                  <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: 6, border: '1px solid #f1f5f9' }}>
+                    <div style={{ fontSize: 11, color: '#64748b' }}>Overtime (OT)</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>
+                      {attendanceDetailModal.overtime_hours > 0 ? `${attendanceDetailModal.overtime_hours} hrs` : 'None'}
+                    </div>
+                  </div>
+                  <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: 6, border: '1px solid #f1f5f9' }}>
+                    <div style={{ fontSize: 11, color: '#64748b' }}>Total Wage</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: '#16a34a' }}>
+                      {INR(attendanceDetailModal.wage_amount || 0)}
+                    </div>
+                  </div>
+                </div>
+
+                {attendanceDetailModal.note && (
+                  <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: 6, border: '1px solid #f1f5f9', marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>Note</div>
+                    <div style={{ fontSize: 13, color: '#334155' }}>{attendanceDetailModal.note}</div>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+                  <button
+                    type="button"
+                    className="muted"
+                    onClick={() => setAttendanceDetailModal(null)}
+                    style={{ padding: '8px 20px', borderRadius: 6 }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -8097,6 +12610,1211 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
         </div>
       )}
 
+      {/* ── 7. OMNI-SEARCH RESULTS MODAL / DRAWER ────────────────────────── */}
+      {omniSearchOpen && omniSearchResults && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            zIndex: 2200,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={() => setOmniSearchOpen(false)}
+        >
+          <div
+            style={{
+              background: effectiveDark ? '#18181c' : '#ffffff',
+              borderRadius: 14,
+              maxWidth: 960,
+              width: '100%',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              border: effectiveDark ? '1px solid #2a2a30' : '1px solid #cbd5e1',
+              color: effectiveDark ? '#f0f0f5' : '#0f172a',
+              overflow: 'hidden',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '16px 22px',
+                borderBottom: '1px solid #e2e8f0',
+                background: '#f8fafc',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 18, color: '#0284c7' }}>🔍</span>
+                  <h3 style={{ margin: 0, fontSize: 18, color: '#0f172a', fontWeight: 700 }}>
+                    Omni-Search Results
+                  </h3>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      background: '#e0f2fe',
+                      color: '#0369a1',
+                      padding: '3px 10px',
+                      borderRadius: 12,
+                      fontWeight: 600,
+                      border: '1px solid #bae6fd',
+                    }}
+                  >
+                    {omniSearchResults.query}
+                  </span>
+                </div>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
+                  Found {((omniSearchResults.counts?.labor || 0) + (omniSearchResults.counts?.projects || 0) + (omniSearchResults.counts?.contractors || 0) + (omniSearchResults.counts?.vendors || 0) + (omniSearchResults.counts?.materials || 0) + (omniSearchResults.counts?.parties || 0) + (omniSearchResults.counts?.agents || 0))} match(es) across all project records
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setOmniSearchOpen(false)}
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  border: '1px solid #e2e8f0',
+                  background: '#ffffff',
+                  color: '#64748b',
+                  fontSize: 14,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                  transition: 'all 0.15s ease',
+                }}
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Category Navigation Pills */}
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                padding: '10px 20px',
+                background: '#ffffff',
+                borderBottom: '1px solid #f1f5f9',
+                overflowX: 'auto',
+                alignItems: 'center',
+              }}
+            >
+              {[
+                { id: 'all', label: 'All Matches', count: (omniSearchResults.counts?.labor || 0) + (omniSearchResults.counts?.projects || 0) + (omniSearchResults.counts?.contractors || 0) + (omniSearchResults.counts?.vendors || 0) + (omniSearchResults.counts?.materials || 0) + (omniSearchResults.counts?.parties || 0) + (omniSearchResults.counts?.agents || 0) },
+                { id: 'labor', label: 'Workers', count: omniSearchResults.counts?.labor || 0, icon: '👷' },
+                { id: 'projects', label: 'Projects', count: omniSearchResults.counts?.projects || 0, icon: '🏗️' },
+                { id: 'contractors', label: 'Service Providers & Contractors', count: omniSearchResults.counts?.contractors || 0, icon: '🛠️' },
+                { id: 'vendors', label: 'Vendors', count: omniSearchResults.counts?.vendors || 0, icon: '🚚' },
+                { id: 'materials', label: 'Materials', count: omniSearchResults.counts?.materials || 0, icon: '🧱' },
+                { id: 'parties', label: 'Clients', count: omniSearchResults.counts?.parties || 0, icon: '👥' },
+                { id: 'agents', label: 'Agents', count: omniSearchResults.counts?.agents || 0, icon: '🛡️' },
+              ].map((tab) => {
+                const isActive = omniActiveTab === tab.id;
+                const isZero = tab.count === 0 && tab.id !== 'all';
+
+                return (
+                  <button
+                    type="button"
+                    key={tab.id}
+                    onClick={() => setOmniActiveTab(tab.id)}
+                    style={{
+                      border: isActive ? '1px solid #0284c7' : '1px solid #e2e8f0',
+                      background: isActive ? '#0284c7' : '#ffffff',
+                      color: isActive ? '#ffffff' : isZero ? '#94a3b8' : '#334155',
+                      padding: '6px 12px',
+                      borderRadius: 20,
+                      fontSize: 12,
+                      fontWeight: isActive ? 600 : 500,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      whiteSpace: 'nowrap',
+                      boxShadow: isActive ? '0 2px 6px rgba(2, 132, 199, 0.25)' : 'none',
+                      transition: 'all 0.15s ease',
+                      opacity: isZero && !isActive ? 0.65 : 1,
+                    }}
+                  >
+                    {tab.icon && <span>{tab.icon}</span>}
+                    <span>{tab.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        padding: '1px 6px',
+                        borderRadius: 10,
+                        fontWeight: 700,
+                        background: isActive ? 'rgba(255, 255, 255, 0.25)' : '#f1f5f9',
+                        color: isActive ? '#ffffff' : isZero ? '#94a3b8' : '#64748b',
+                      }}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Scrollable Results Body */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: 20, background: '#f8fafc' }}>
+              {/* 1. Labor / Workers Section */}
+              {(omniActiveTab === 'all' || omniActiveTab === 'labor') && (omniSearchResults.results?.labor?.length > 0) && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <span style={{ fontSize: 16 }}>👷</span>
+                    <h4 style={{ margin: 0, fontSize: 13, color: '#0f172a', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Labor &amp; Workers ({omniSearchResults.results.labor.length})
+                    </h4>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {omniSearchResults.results.labor.map((w, wIdx) => (
+                      <div
+                        key={wIdx}
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          padding: 16,
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                        }}
+                      >
+                        {/* Worker Header */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ fontSize: 16, fontWeight: 700, color: '#0f172a' }}>{w.name}</span>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                background: '#f0f9ff',
+                                color: '#0284c7',
+                                padding: '2px 8px',
+                                borderRadius: 6,
+                                fontWeight: 600,
+                                border: '1px solid #bae6fd',
+                              }}
+                            >
+                              {w.trade}
+                            </span>
+                            <span style={{ fontSize: 12, color: '#64748b', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              📞 {w.phone}
+                            </span>
+                          </div>
+
+                          <div
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              background: '#f8fafc',
+                              color: '#475569',
+                              padding: '3px 10px',
+                              borderRadius: 12,
+                              border: '1px solid #e2e8f0',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                            }}
+                          >
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#16a34a' }}></span>
+                            Active across {w.projects.length} project(s)
+                          </div>
+                        </div>
+
+                        {/* Modern KPI Cards Strip */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, margin: '14px 0' }}>
+                          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 12px' }}>
+                            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Days Present</div>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>{w.total_days_present} Days</div>
+                          </div>
+                          <div style={{ background: '#eff6ff', border: '1px solid #dbeafe', borderRadius: 8, padding: '8px 12px' }}>
+                            <div style={{ fontSize: 10, color: '#1e40af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Total Earned</div>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: '#2563eb', marginTop: 2 }}>{INR(w.total_earned)}</div>
+                          </div>
+                          <div style={{ background: '#f0fdf4', border: '1px solid #dcfce7', borderRadius: 8, padding: '8px 12px' }}>
+                            <div style={{ fontSize: 10, color: '#166534', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Total Paid</div>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: '#16a34a', marginTop: 2 }}>{INR(w.total_paid)}</div>
+                          </div>
+                          <div style={{ background: w.total_balance > 0 ? '#fff1f2' : '#f0fdf4', border: w.total_balance > 0 ? '1px solid #ffe4e6' : '1px solid #dcfce7', borderRadius: 8, padding: '8px 12px' }}>
+                            <div style={{ fontSize: 10, color: w.total_balance > 0 ? '#991b1b' : '#166534', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Balance Due</div>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: w.total_balance > 0 ? '#e11d48' : '#16a34a', marginTop: 2 }}>
+                              {INR(w.total_balance)}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Projects Breakdown Table */}
+                        <div style={{ overflowX: 'auto', background: '#ffffff', borderRadius: 8, border: '1px solid #f1f5f9' }}>
+                          <table style={{ margin: 0, width: '100%', fontSize: 12 }}>
+                            <thead>
+                              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>PROJECT</th>
+                                <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>STATUS</th>
+                                <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>DAILY RATE</th>
+                                <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>DAYS PRESENT</th>
+                                <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>EARNED</th>
+                                <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>PAID</th>
+                                <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>BALANCE</th>
+                                <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b', textAlign: 'center' }}>QUICK ACTIONS</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {w.projects.map((p, pIdx) => (
+                                <tr key={pIdx} style={{ borderBottom: '1px solid #f8fafc' }}>
+                                  <td style={{ padding: '10px 12px', fontWeight: 600, color: '#0f172a' }}>{p.project_name}</td>
+                                  <td style={{ padding: '10px 12px' }}>
+                                    <span
+                                      style={{
+                                        fontSize: 10,
+                                        padding: '2px 7px',
+                                        borderRadius: 4,
+                                        fontWeight: 600,
+                                        textTransform: 'uppercase',
+                                        background: p.project_status === 'running' ? '#dcfce7' : '#e0e7ff',
+                                        color: p.project_status === 'running' ? '#15803d' : '#4338ca',
+                                      }}
+                                    >
+                                      {p.project_status}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '10px 12px' }}>{INR(p.daily_rate)}</td>
+                                  <td style={{ padding: '10px 12px', fontWeight: 600 }}>{p.days_present}</td>
+                                  <td style={{ padding: '10px 12px' }}>{INR(p.earned)}</td>
+                                  <td style={{ padding: '10px 12px' }}>{INR(p.paid)}</td>
+                                  <td style={{ padding: '10px 12px', fontWeight: 700, color: p.balance > 0 ? '#e11d48' : '#16a34a' }}>
+                                    {INR(p.balance)}
+                                  </td>
+                                  <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => openQuickAttendance(w, p)}
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: 4,
+                                          fontSize: 11,
+                                          padding: '5px 10px',
+                                          borderRadius: 6,
+                                          background: '#f0f9ff',
+                                          color: '#0284c7',
+                                          border: '1px solid #bae6fd',
+                                          cursor: 'pointer',
+                                          fontWeight: 600,
+                                          whiteSpace: 'nowrap',
+                                          lineHeight: 1.2,
+                                        }}
+                                      >
+                                        <span>📅</span>
+                                        <span>Attendance</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => openQuickPayment(w, 'labor', p)}
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: 4,
+                                          fontSize: 11,
+                                          padding: '5px 10px',
+                                          borderRadius: 6,
+                                          background: '#f0fdf4',
+                                          color: '#16a34a',
+                                          border: '1px solid #bbf7d0',
+                                          cursor: 'pointer',
+                                          fontWeight: 600,
+                                          whiteSpace: 'nowrap',
+                                          lineHeight: 1.2,
+                                        }}
+                                      >
+                                        <span>💳</span>
+                                        <span>Pay</span>
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 2. Projects Section */}
+              {(omniActiveTab === 'all' || omniActiveTab === 'projects') && (omniSearchResults.results?.projects?.length > 0) && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <span style={{ fontSize: 16 }}>🏗️</span>
+                    <h4 style={{ margin: 0, fontSize: 13, color: '#0f172a', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Projects ({omniSearchResults.results.projects.length})
+                    </h4>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 12 }}>
+                    {omniSearchResults.results.projects.map((proj) => (
+                      <div
+                        key={proj.id}
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          padding: 16,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                        }}
+                      >
+                        <div>
+                          {/* Top Row: Name and Status */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                            <span style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>{proj.name}</span>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                padding: '2px 7px',
+                                borderRadius: 4,
+                                fontWeight: 700,
+                                textTransform: 'uppercase',
+                                background: proj.status === 'running' ? '#dcfce7' : '#e0e7ff',
+                                color: proj.status === 'running' ? '#15803d' : '#4338ca',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {proj.status}
+                            </span>
+                          </div>
+
+                          <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+                            Client: <strong style={{ color: '#334155' }}>{proj.party_name}</strong> {proj.party_phone !== '—' && <span style={{ color: '#94a3b8' }}>({proj.party_phone})</span>}
+                          </div>
+
+                          {/* Financial Mini Pills */}
+                          <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '4px 8px', fontSize: 11 }}>
+                              <span style={{ color: '#64748b' }}>Contract: </span>
+                              <strong style={{ color: '#0f172a' }}>{INR(proj.contract_value)}</strong>
+                            </div>
+                            <div style={{ background: '#f0fdf4', border: '1px solid #dcfce7', borderRadius: 6, padding: '4px 8px', fontSize: 11 }}>
+                              <span style={{ color: '#166534' }}>Received: </span>
+                              <strong style={{ color: '#16a34a' }}>{INR(proj.received)}</strong>
+                            </div>
+                          </div>
+
+                          <div style={{ fontSize: 11, color: '#64748b', marginTop: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <span>👷 <strong>{proj.workers_count}</strong> Active Worker(s)</span>
+                            <span>🏢 <strong>{proj.vendors_count}</strong> Vendor(s)</span>
+                          </div>
+                        </div>
+
+                        {/* Action Link Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOmniSearchOpen(false);
+                            showProject(proj.id);
+                          }}
+                          style={{
+                            marginTop: 14,
+                            padding: '8px 14px',
+                            fontSize: 12,
+                            borderRadius: 6,
+                            background: '#f0f9ff',
+                            color: '#0284c7',
+                            border: '1px solid #bae6fd',
+                            fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 6,
+                            cursor: 'pointer',
+                            width: '100%',
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          <span>Open Workspace</span>
+                          <span>&rarr;</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 3. Service Providers & Contractors Section */}
+              {(omniActiveTab === 'all' || omniActiveTab === 'contractors') && (omniSearchResults.results?.contractors?.length > 0) && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <span style={{ fontSize: 16 }}>🛠️</span>
+                    <h4 style={{ margin: 0, fontSize: 13, color: '#0f172a', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Service Providers &amp; Contractors ({omniSearchResults.results.contractors.length})
+                    </h4>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {omniSearchResults.results.contractors.map((c) => (
+                      <div
+                        key={c.vendor_id}
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          padding: 16,
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>{c.name}</span>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                background: '#fef3c7',
+                                color: '#b45309',
+                                padding: '2px 8px',
+                                borderRadius: 6,
+                                fontWeight: 600,
+                                border: '1px solid #fde68a',
+                              }}
+                            >
+                              {c.trade}
+                            </span>
+                            <span style={{ fontSize: 12, color: '#64748b' }}>📞 {c.phone}</span>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: 10, fontSize: 12 }}>
+                            <div style={{ background: '#f8fafc', padding: '4px 8px', borderRadius: 6 }}>Earned: <strong>{INR(c.total_earned)}</strong></div>
+                            <div style={{ background: '#f0fdf4', padding: '4px 8px', borderRadius: 6 }}>Paid: <strong style={{ color: '#16a34a' }}>{INR(c.total_paid)}</strong></div>
+                            <div style={{ background: c.total_balance > 0 ? '#fff1f2' : '#f0fdf4', padding: '4px 8px', borderRadius: 6 }}>
+                              Due: <strong style={{ color: c.total_balance > 0 ? '#e11d48' : '#16a34a' }}>{INR(c.total_balance)}</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        {c.projects?.length > 0 && (
+                          <div style={{ overflowX: 'auto', background: '#ffffff', borderRadius: 8, border: '1px solid #f1f5f9', marginTop: 12 }}>
+                            <table style={{ margin: 0, width: '100%', fontSize: 12 }}>
+                              <thead>
+                                <tr style={{ background: '#f8fafc' }}>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>PROJECT</th>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>SCOPE</th>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>TYPE</th>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>EARNED</th>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>PAID</th>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>BALANCE</th>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b', textAlign: 'center' }}>ACTION</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {c.projects.map((cp, cpIdx) => (
+                                  <tr key={cpIdx} style={{ borderBottom: '1px solid #f8fafc' }}>
+                                    <td style={{ padding: '9px 12px', fontWeight: 600, color: '#0f172a' }}>{cp.project_name}</td>
+                                    <td style={{ padding: '9px 12px', color: '#475569' }}>{cp.work_description || '—'}</td>
+                                    <td style={{ padding: '9px 12px' }}>
+                                      <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#f1f5f9', color: '#475569', fontWeight: 600 }}>
+                                        {cp.pay_type}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: '9px 12px' }}>{INR(cp.earned)}</td>
+                                    <td style={{ padding: '9px 12px' }}>{INR(cp.paid)}</td>
+                                    <td style={{ padding: '9px 12px', fontWeight: 700, color: cp.balance > 0 ? '#e11d48' : '#16a34a' }}>
+                                      {INR(cp.balance)}
+                                    </td>
+                                    <td style={{ padding: '9px 12px', textAlign: 'center' }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => openQuickPayment(c, 'contractor', cp)}
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: 4,
+                                          fontSize: 11,
+                                          padding: '5px 10px',
+                                          borderRadius: 6,
+                                          background: '#fef3c7',
+                                          color: '#b45309',
+                                          border: '1px solid #fde68a',
+                                          cursor: 'pointer',
+                                          fontWeight: 600,
+                                          whiteSpace: 'nowrap',
+                                          lineHeight: 1.2,
+                                        }}
+                                      >
+                                        <span>💳</span>
+                                        <span>Pay Contractor</span>
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 4. Vendors (Material Suppliers) Section */}
+              {(omniActiveTab === 'all' || omniActiveTab === 'vendors') && (omniSearchResults.results?.vendors?.length > 0) && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <span style={{ fontSize: 16 }}>🚚</span>
+                    <h4 style={{ margin: 0, fontSize: 13, color: '#0f172a', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Vendors ({omniSearchResults.results.vendors.length})
+                    </h4>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {omniSearchResults.results.vendors.map((v) => (
+                      <div
+                        key={v.vendor_id}
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          padding: 16,
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>{v.name}</span>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                background: '#f0fdf4',
+                                color: '#15803d',
+                                padding: '2px 8px',
+                                borderRadius: 6,
+                                fontWeight: 600,
+                                border: '1px solid #bbf7d0',
+                              }}
+                            >
+                              {v.trade || 'Material Vendor'}
+                            </span>
+                            <span style={{ fontSize: 12, color: '#64748b' }}>📞 {v.phone}</span>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: 10, fontSize: 12 }}>
+                            <div style={{ background: '#f8fafc', padding: '4px 8px', borderRadius: 6 }}>Earned: <strong>{INR(v.total_earned)}</strong></div>
+                            <div style={{ background: '#f0fdf4', padding: '4px 8px', borderRadius: 6 }}>Paid: <strong style={{ color: '#16a34a' }}>{INR(v.total_paid)}</strong></div>
+                            <div style={{ background: v.total_balance > 0 ? '#fff1f2' : '#f0fdf4', padding: '4px 8px', borderRadius: 6 }}>
+                              Due: <strong style={{ color: v.total_balance > 0 ? '#e11d48' : '#16a34a' }}>{INR(v.total_balance)}</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        {v.projects?.length > 0 && (
+                          <div style={{ overflowX: 'auto', background: '#ffffff', borderRadius: 8, border: '1px solid #f1f5f9', marginTop: 12 }}>
+                            <table style={{ margin: 0, width: '100%', fontSize: 12 }}>
+                              <thead>
+                                <tr style={{ background: '#f8fafc' }}>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>PROJECT</th>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>SCOPE / SUPPLIED ITEMS</th>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>TYPE</th>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>EARNED</th>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>PAID</th>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b' }}>BALANCE</th>
+                                  <th style={{ padding: '8px 12px', fontSize: 11, color: '#64748b', textAlign: 'center' }}>ACTION</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {v.projects.map((vp, vpIdx) => (
+                                  <tr key={vpIdx} style={{ borderBottom: '1px solid #f8fafc' }}>
+                                    <td style={{ padding: '9px 12px', fontWeight: 600, color: '#0f172a' }}>{vp.project_name}</td>
+                                    <td style={{ padding: '9px 12px', color: '#475569' }}>{vp.work_description || '—'}</td>
+                                    <td style={{ padding: '9px 12px' }}>
+                                      <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#f1f5f9', color: '#475569', fontWeight: 600 }}>
+                                        {vp.pay_type}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: '9px 12px' }}>{INR(vp.earned)}</td>
+                                    <td style={{ padding: '9px 12px' }}>{INR(vp.paid)}</td>
+                                    <td style={{ padding: '9px 12px', fontWeight: 700, color: vp.balance > 0 ? '#e11d48' : '#16a34a' }}>
+                                      {INR(vp.balance)}
+                                    </td>
+                                    <td style={{ padding: '9px 12px', textAlign: 'center' }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => openQuickPayment(v, 'supplier', vp)}
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: 4,
+                                          fontSize: 11,
+                                          padding: '5px 10px',
+                                          borderRadius: 6,
+                                          background: '#f0fdf4',
+                                          color: '#16a34a',
+                                          border: '1px solid #bbf7d0',
+                                          cursor: 'pointer',
+                                          fontWeight: 600,
+                                          whiteSpace: 'nowrap',
+                                          lineHeight: 1.2,
+                                        }}
+                                      >
+                                        <span>💳</span>
+                                        <span>Pay Vendor</span>
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 4. Materials Section */}
+              {(omniActiveTab === 'all' || omniActiveTab === 'materials') && (omniSearchResults.results?.materials?.length > 0) && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <span style={{ fontSize: 16 }}>🧱</span>
+                    <h4 style={{ margin: 0, fontSize: 13, color: '#0f172a', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Materials ({omniSearchResults.results.materials.length})
+                    </h4>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+                    {omniSearchResults.results.materials.map((m) => (
+                      <div
+                        key={m.id}
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          padding: 16,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>{m.name}</span>
+                            <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#f1f5f9', color: '#64748b', fontWeight: 600 }}>
+                              Unit: {m.unit || '—'}
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, margin: '12px 0' }}>
+                            <div style={{ background: '#f8fafc', padding: '6px 8px', borderRadius: 6, textAlign: 'center' }}>
+                              <div style={{ fontSize: 10, color: '#64748b' }}>Stock</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: m.current_stock < 0 ? '#e11d48' : '#16a34a', marginTop: 2 }}>
+                                {m.current_stock}
+                              </div>
+                            </div>
+                            <div style={{ background: '#f8fafc', padding: '6px 8px', borderRadius: 6, textAlign: 'center' }}>
+                              <div style={{ fontSize: 10, color: '#64748b' }}>Used</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>{m.total_used}</div>
+                            </div>
+                            <div style={{ background: '#f8fafc', padding: '6px 8px', borderRadius: 6, textAlign: 'center' }}>
+                              <div style={{ fontSize: 10, color: '#64748b' }}>Avg Rate</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>{INR(m.avg_rate)}</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReportType('material_consumption');
+                            setReportMaterialFilter(m.id);
+                            setOmniSearchOpen(false);
+                            openReportsScreen();
+                          }}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: 11,
+                            borderRadius: 6,
+                            background: '#f8fafc',
+                            color: '#475569',
+                            border: '1px solid #cbd5e1',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 6,
+                            width: '100%',
+                          }}
+                        >
+                          <span>📊 View Consumption Report</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 5. Clients / Parties Section */}
+              {(omniActiveTab === 'all' || omniActiveTab === 'parties') && (omniSearchResults.results?.parties?.length > 0) && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <span style={{ fontSize: 16 }}>👥</span>
+                    <h4 style={{ margin: 0, fontSize: 13, color: '#0f172a', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Clients / Parties ({omniSearchResults.results.parties.length})
+                    </h4>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+                    {omniSearchResults.results.parties.map((pa) => (
+                      <div
+                        key={pa.id}
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          padding: 16,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>{pa.name}</div>
+                          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+                            📞 {pa.phone} {pa.address && <span>&bull; {pa.address}</span>}
+                          </div>
+
+                          <div style={{ display: 'flex', gap: 8, margin: '10px 0', flexWrap: 'wrap' }}>
+                            <div style={{ background: '#f8fafc', padding: '4px 8px', borderRadius: 6, fontSize: 11 }}>
+                              Projects: <strong>{pa.projects_count}</strong>
+                            </div>
+                            <div style={{ background: '#eff6ff', padding: '4px 8px', borderRadius: 6, fontSize: 11, color: '#1e40af' }}>
+                              Contract: <strong>{INR(pa.total_contract_value)}</strong>
+                            </div>
+                            <div style={{ background: '#f0fdf4', padding: '4px 8px', borderRadius: 6, fontSize: 11, color: '#166534' }}>
+                              Received: <strong>{INR(pa.total_received)}</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOmniSearchOpen(false);
+                            showParty(pa.id);
+                          }}
+                          style={{
+                            marginTop: 10,
+                            padding: '6px 12px',
+                            fontSize: 11,
+                            borderRadius: 6,
+                            background: '#f8fafc',
+                            color: '#475569',
+                            border: '1px solid #cbd5e1',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            width: '100%',
+                          }}
+                        >
+                          📂 Open Client Projects
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Empty state */}
+              {(!omniSearchResults.results || Object.values(omniSearchResults.results).every((arr) => !arr || arr.length === 0)) && (
+                <div style={{ textAlign: 'center', padding: '3.5rem 1rem', color: '#64748b' }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+                  <p style={{ fontSize: 16, margin: 0, fontWeight: 700, color: '#1e293b' }}>
+                    No records matched {omniSearchResults.query}
+                  </p>
+                  <p style={{ fontSize: 13, margin: '6px 0 0', color: '#64748b' }}>
+                    Try searching by worker name, phone number, project title, or contractor trade.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 8. QUICK ATTENDANCE MODAL ─────────────────────────────────────── */}
+      {quickAttendanceModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            zIndex: 2600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={() => { if (!savingQuickAttendance) setQuickAttendanceModal(false); }}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: 12,
+              padding: 24,
+              maxWidth: 480,
+              width: '100%',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)',
+              border: '1px solid #cbd5e1',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 17, color: '#0f172a' }}>
+                  📅 Mark Attendance
+                </h3>
+                <p style={{ margin: '3px 0 0', fontSize: 13, color: '#64748b' }}>
+                  Worker: <strong style={{ color: '#0f172a' }}>{quickAttendanceForm.labor_name}</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                className="muted"
+                onClick={() => setQuickAttendanceModal(false)}
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 16, fontWeight: 'bold' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveQuickAttendance}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {/* Select Project */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                    Select Project *
+                  </label>
+                  <select
+                    value={quickAttendanceForm.project_id}
+                    onChange={(e) => {
+                      const pid = Number(e.target.value);
+                      const matched = quickAttendanceForm.available_projects?.find((p) => p.project_id === pid);
+                      setQuickAttendanceForm((prev) => ({
+                        ...prev,
+                        project_id: pid,
+                        project_name: matched?.project_name || prev.project_name,
+                        labor_id: matched?.labor_id || prev.labor_id,
+                        daily_rate: matched?.daily_rate ?? prev.daily_rate,
+                      }));
+                    }}
+                    required
+                    style={{ width: '100%', padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                  >
+                    {quickAttendanceForm.available_projects?.map((p, idx) => (
+                      <option key={idx} value={p.project_id}>
+                        {p.project_name} (Rate: ₹{p.daily_rate || 0})
+                      </option>
+                    ))}
+                    {(!quickAttendanceForm.available_projects || quickAttendanceForm.available_projects.length === 0) && (
+                      <option value="">No projects assigned</option>
+                    )}
+                  </select>
+                </div>
+
+                {/* Attendance Date */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                    Attendance Date *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={quickAttendanceForm.attendance_date}
+                    onChange={(e) => setQuickAttendanceForm((prev) => ({ ...prev, attendance_date: e.target.value }))}
+                    style={{ width: '100%', padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                  />
+                </div>
+
+                {/* Status */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                      Status
+                    </label>
+                    <select
+                      value={quickAttendanceForm.status}
+                      onChange={(e) => setQuickAttendanceForm((prev) => ({ ...prev, status: e.target.value }))}
+                      style={{ width: '100%', padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                    >
+                      <option value="present">Present (Full Day)</option>
+                      <option value="half_day">Half Day</option>
+                      <option value="absent">Absent</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                      Shift Type
+                    </label>
+                    <select
+                      value={quickAttendanceForm.shift_type}
+                      onChange={(e) => setQuickAttendanceForm((prev) => ({ ...prev, shift_type: e.target.value }))}
+                      style={{ width: '100%', padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                    >
+                      <option value="day">Day Shift</option>
+                      <option value="night">Night Shift</option>
+                      <option value="double">Double (2x)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Overtime Hours */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                    Overtime Hours
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    max="12"
+                    value={quickAttendanceForm.overtime_hours}
+                    onChange={(e) => setQuickAttendanceForm((prev) => ({ ...prev, overtime_hours: e.target.value }))}
+                    style={{ width: '100%', padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                  />
+                </div>
+
+                {/* Note */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                    Work Note / Remarks
+                  </label>
+                  <input
+                    type="text"
+                    value={quickAttendanceForm.note}
+                    onChange={(e) => setQuickAttendanceForm((prev) => ({ ...prev, note: e.target.value }))}
+                    placeholder="e.g. Mason work on second floor"
+                    style={{ width: '100%', padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+                <button
+                  type="button"
+                  className="muted"
+                  disabled={savingQuickAttendance}
+                  onClick={() => setQuickAttendanceModal(false)}
+                  style={{ padding: '7px 16px', borderRadius: 6 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingQuickAttendance}
+                  style={{ padding: '7px 18px', borderRadius: 6, fontWeight: 600 }}
+                >
+                  {savingQuickAttendance ? 'Saving…' : '✓ Save Attendance'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── 9. QUICK PAYMENT MODAL ────────────────────────────────────────── */}
+      {quickPaymentModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            zIndex: 2600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={() => { if (!savingQuickPayment) setQuickPaymentModal(false); }}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: 12,
+              padding: 24,
+              maxWidth: 480,
+              width: '100%',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)',
+              border: '1px solid #cbd5e1',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 17, color: '#0f172a' }}>
+                  💳 Record Quick Payment
+                </h3>
+                <p style={{ margin: '3px 0 0', fontSize: 13, color: '#64748b' }}>
+                  Payee: <strong style={{ color: '#0f172a' }}>{quickPaymentForm.name}</strong> ({quickPaymentForm.type === 'labor' ? 'Worker' : quickPaymentForm.type === 'supplier' ? 'Vendor' : 'Service Provider / Contractor'})
+                </p>
+              </div>
+              <button
+                type="button"
+                className="muted"
+                onClick={() => setQuickPaymentModal(false)}
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 16, fontWeight: 'bold' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveQuickPayment}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {/* Current Balance Notice */}
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, color: '#991b1b', fontWeight: 600 }}>Current Balance Due:</span>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: '#dc2626' }}>{INR(quickPaymentForm.balance_due)}</span>
+                </div>
+
+                {/* Select Project */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                    Select Project *
+                  </label>
+                  <select
+                    value={quickPaymentForm.project_id}
+                    onChange={(e) => {
+                      const pid = Number(e.target.value);
+                      const matched = quickPaymentForm.available_projects?.find((p) => Number(p.project_id) === pid);
+                      setQuickPaymentForm((prev) => ({
+                        ...prev,
+                        project_id: pid,
+                        project_name: matched?.project_name || prev.project_name,
+                        id: prev.type === 'labor' ? (matched?.labor_id || prev.id) : (matched?.project_vendor_id || prev.id),
+                        supplier_name: matched?.supplier_name || prev.supplier_name,
+                        balance_due: matched?.balance ?? prev.balance_due,
+                      }));
+                    }}
+                    required
+                    style={{ width: '100%', padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                  >
+                    {quickPaymentForm.available_projects?.map((p, idx) => (
+                      <option key={idx} value={p.project_id}>
+                        {p.project_name} (Due: ₹{p.balance || 0})
+                      </option>
+                    ))}
+                    {(!quickPaymentForm.available_projects || quickPaymentForm.available_projects.length === 0) && (
+                      <option value="">No projects found</option>
+                    )}
+                  </select>
+                </div>
+
+                {/* Payment Amount */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                    Payment Amount (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    required
+                    placeholder="Enter amount in ₹"
+                    value={quickPaymentForm.amount}
+                    onChange={(e) => setQuickPaymentForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    style={{ width: '100%', padding: '7px 10px', fontSize: 14, fontWeight: 600, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                  />
+                </div>
+
+                {/* Date & Mode */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                      Payment Date *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={quickPaymentForm.payment_date}
+                      onChange={(e) => setQuickPaymentForm((prev) => ({ ...prev, payment_date: e.target.value }))}
+                      style={{ width: '100%', padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                      Payment Mode
+                    </label>
+                    <select
+                      value={quickPaymentForm.mode}
+                      onChange={(e) => setQuickPaymentForm((prev) => ({ ...prev, mode: e.target.value }))}
+                      style={{ width: '100%', padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="upi">UPI / Online</option>
+                      <option value="bank_transfer">Bank Transfer</option>
+                      <option value="cheque">Cheque</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Note / Ref */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                    Note / Reference (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={quickPaymentForm.note}
+                    onChange={(e) => setQuickPaymentForm((prev) => ({ ...prev, note: e.target.value }))}
+                    placeholder="e.g. UPI Ref / Cash voucher #42"
+                    style={{ width: '100%', padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #cbd5e1' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+                <button
+                  type="button"
+                  className="muted"
+                  disabled={savingQuickPayment}
+                  onClick={() => setQuickPaymentModal(false)}
+                  style={{ padding: '7px 16px', borderRadius: 6 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingQuickPayment}
+                  style={{ padding: '7px 18px', borderRadius: 6, fontWeight: 600 }}
+                >
+                  {savingQuickPayment ? 'Recording…' : '✓ Record Payment'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Global Datalists for Materials and Units */}
       <datalist id="all-master-materials-list">
         {materialsMaster.map((m) => (
@@ -8152,10 +13870,11 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
         :global(.dark-mode) .pm-container .modal-card,
         .pm-container.dark-mode .modal-card,
         :global(.dark-mode) .pm-container table,
+        :global(.dark) .pm-container table,
         .pm-container.dark-mode table {
-          background: #18181c;
-          border-color: #2a2a30;
-          color: #f0f0f5;
+          background: #18181c !important;
+          border-color: #2a2a30 !important;
+          color: #f0f0f5 !important;
         }
         :global(.dark-mode) .pm-container th,
         .pm-container.dark-mode th {
@@ -8197,14 +13916,17 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
           color: #a1a1aa;
         }
         :global(.dark-mode) .pm-container input,
+        :global(.dark) .pm-container input,
         .pm-container.dark-mode input,
         :global(.dark-mode) .pm-container select,
+        :global(.dark) .pm-container select,
         .pm-container.dark-mode select,
         :global(.dark-mode) .pm-container textarea,
+        :global(.dark) .pm-container textarea,
         .pm-container.dark-mode textarea {
-          background: #18181c;
-          color: #f0f0f5;
-          border-color: #2a2a30;
+          background: #18181c !important;
+          color: #f0f0f5 !important;
+          border-color: #2a2a30 !important;
         }
         :global(.dark-mode) .pm-container button.muted,
         .pm-container.dark-mode button.muted {

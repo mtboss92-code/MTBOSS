@@ -1,16 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { ChevronDown } from "lucide-react";
-import { CATEGORY_NAV_TREE, DIRECT_NAV_BUTTONS, normalizeName, resolveCategoryNav, resolveDirectNavItem } from "./categoryNavTree";
+import {
+  CATEGORY_NAV_TREE,
+  DIRECT_NAV_BUTTONS,
+  normalizeName,
+  namesMatch,
+  resolveCategoryNav,
+  resolveDirectNavItem,
+} from "./categoryNavTree";
 
-const MOBILE_MQ = "(max-width: 800px)";
+const MOBILE_MQ = "(max-width: 767px)";
 
 export default function ShopCategoryNav({
   categories = [],
   products = [],
   activeCategory,
   activeSearch = "",
+  activeParentCategory = null,
+  activeSubcategory = null,
   onSelectCategory,
 }) {
   const parents = useMemo(
@@ -108,6 +118,9 @@ export default function ShopCategoryNav({
   if (!parents.length) return null;
 
   const leafIsActive = (child) => {
+    if (activeSubcategory && (normalizeName(child.label) === normalizeName(activeSubcategory) || namesMatch(child.label, activeSubcategory))) {
+      return true;
+    }
     // Never mark a fallback 'all' child as active — only real category IDs count
     if (child.categoryId == null || child.categoryId === 'all') return false;
     if (String(child.categoryId) !== String(activeCategory)) return false;
@@ -117,10 +130,26 @@ export default function ShopCategoryNav({
       || normalizeName(child.search).includes(normalizeName(activeSearch));
   };
 
-  const handleLeafSelect = (child) => {
+  const handleLeafSelect = (child, parent) => {
     if (child.disabled && !child.search && child.categoryId == null) return;
-    onSelectCategory?.(child.categoryId ?? "all", { search: child.search || child.label });
+    onSelectCategory?.(child.categoryId ?? "all", {
+      search: child.search || child.label,
+      subcategory: child.label,
+      parentCategory: parent?.label || null,
+      parentId: parent?.id || null,
+    });
     closeMenu();
+  };
+
+  const handleParentSelect = (parent) => {
+    closeMenu();
+    onSelectCategory?.("all", {
+      parentCategory: parent.label,
+      parentId: parent.id,
+      exploreParent: true,
+      subcategory: null,
+      search: "",
+    });
   };
 
   const handleParentKeyDown = (event, parent, childCount) => {
@@ -177,12 +206,16 @@ export default function ShopCategoryNav({
         {parents.map((parent) => {
           const isOpen = openId === parent.id;
           const hasActiveChild = parent.children.some((child) => leafIsActive(child));
+          const isParentActive = Boolean(
+            (activeParentCategory && (namesMatch(activeParentCategory, parent.label) || activeParentCategory === parent.id))
+            || hasActiveChild
+          );
           const isNewLaunches = parent.id === "new-launches";
 
           return (
             <div
               key={parent.id}
-              className={`store-category-parent${isOpen ? " is-open" : ""}${hasActiveChild ? " has-active" : ""}`}
+              className={`store-category-parent${isOpen ? " is-open" : ""}${isParentActive ? " has-active" : ""}`}
               onMouseEnter={() => {
                 if (!isMobile) openMenu(parent.id);
               }}
@@ -216,6 +249,33 @@ export default function ShopCategoryNav({
                 role="menu"
                 hidden={!isOpen}
               >
+                {!isNewLaunches && (
+                  <div className="store-category-explore-header" style={{ padding: '6px 12px', borderBottom: '1px solid #f1f5f9', marginBottom: '4px' }}>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 8px',
+                        borderRadius: '6px',
+                        background: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        color: 'var(--brand-blue, #0077c8)',
+                        cursor: 'pointer',
+                        textAlign: 'left'
+                      }}
+                      onClick={() => handleParentSelect(parent)}
+                    >
+                      <span>Explore all {parent.label}</span>
+                      <span>→</span>
+                    </button>
+                  </div>
+                )}
                 {isNewLaunches ? (
                   <div className="store-category-recent-section">
                     <div className="store-category-recent-header">
@@ -230,14 +290,12 @@ export default function ShopCategoryNav({
                           const price = Number(product.price);
                           const productImage = product.image_url || product.image;
                           return (
-                            <a
+                            <Link
                               key={product.id}
                               href={detailHref}
-                              target="_blank"
-                              rel="noopener noreferrer"
                               className="store-category-recent-item"
                               onClick={closeMenu}
-                              title={`Open ${product.name} in new tab`}
+                              title={`View ${product.name}`}
                             >
                               <div className="store-category-recent-thumb">
                                 {productImage ? (
@@ -258,10 +316,10 @@ export default function ShopCategoryNav({
                                       {typeof product.category === "object" ? product.category?.name : (product.category || "View product")}
                                     </span>
                                   )}
-                                  <span className="store-category-recent-arrow" aria-hidden="true">↗</span>
+                                  <span className="store-category-recent-arrow" aria-hidden="true">→</span>
                                 </span>
                               </div>
-                            </a>
+                            </Link>
                           );
                         })
                       ) : (
@@ -285,7 +343,7 @@ export default function ShopCategoryNav({
                           disabled={child.disabled}
                           aria-disabled={child.disabled}
                           title={child.disabled ? "Coming soon" : undefined}
-                          onClick={() => handleLeafSelect(child)}
+                          onClick={() => handleLeafSelect(child, parent)}
                           onKeyDown={(event) => handleLeafKeyDown(event, parent, index, parent.children)}
                         >
                           <span>{child.label}</span>
@@ -317,9 +375,9 @@ export default function ShopCategoryNav({
                 if (item.disabled) return;
                 closeMenu();
                 if (item.categoryId === 'all' || item.categoryId == null) {
-                  onSelectCategory?.('all', { search: item.search || item.label });
+                  onSelectCategory?.('all', { search: item.search || item.label, parentCategory: item.label, subcategory: item.label, isDirect: true });
                 } else {
-                  onSelectCategory?.(item.categoryId, item.search ? { search: item.search } : undefined);
+                  onSelectCategory?.(item.categoryId, { search: item.search || '', parentCategory: item.label, subcategory: item.label, isDirect: true });
                 }
               }}
             >

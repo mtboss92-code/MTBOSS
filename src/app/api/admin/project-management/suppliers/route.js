@@ -1,10 +1,32 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { ensureProjectManagementSchema, assertAgentAccess } from '@/lib/project-management';
+import { createInitializationGuard } from '@/lib/api-utils';
+
+const ensureLocalVendorsTable = createInitializationGuard(async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pm_project_local_vendors (
+      id BIGSERIAL PRIMARY KEY,
+      project_id BIGINT NOT NULL REFERENCES pm_projects(id) ON DELETE CASCADE,
+      name VARCHAR(200) NOT NULL,
+      phone VARCHAR(30),
+      city VARCHAR(100),
+      address TEXT,
+      material_type VARCHAR(100),
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(project_id, name)
+    );
+    CREATE INDEX IF NOT EXISTS pm_project_local_vendors_proj_idx ON pm_project_local_vendors(project_id);
+    CREATE INDEX IF NOT EXISTS pm_project_local_vendors_proj_active_idx ON pm_project_local_vendors(project_id, is_active) WHERE is_active;
+  `);
+});
 
 export async function GET(req) {
   try {
     await ensureProjectManagementSchema();
+    await ensureLocalVendorsTable();
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get('projectId') ? Number(searchParams.get('projectId')) : null;
     const search = (searchParams.get('search') || '').trim().toLowerCase();
@@ -13,7 +35,7 @@ export async function GET(req) {
     const auth = await assertAgentAccess(req, projectId, ['construction', 'payments']);
     if (!auth.allowed) return auth.response;
 
-    // 1. Fetch all registered suppliers (Hub source)
+    // 1. Fetch all registered suppliers (Hub source) - all active approved vendors
     const registeredRes = await pool.query(`
       SELECT 
         s.id,
@@ -26,10 +48,39 @@ export async function GET(req) {
         s.is_active,
         TRUE AS is_registered
       FROM suppliers s
+      WHERE (s.status = 'approved' OR s.status IS NULL) AND s.is_active = TRUE
       ORDER BY s.shop_name ASC, s.id ASC
     `);
 
-    // 2. Fetch distinct un-registered supplier names used in PM
+    // 2. Fetch local vendors from pm_project_local_vendors (all active, prioritizing this project)
+    const localVendorsRes = await pool.query(`
+      SELECT 
+        id, 
+        project_id, 
+        name, 
+        phone, 
+        city, 
+        address, 
+        material_type, 
+        is_active,
+        (project_id = $1::bigint) AS is_this_project
+      FROM pm_project_local_vendors
+      WHERE is_active
+      ORDER BY (project_id = $1::bigint) DESC, name ASC
+    `, [projectId]);
+
+    const localByName = new Map();
+    const dedupedLocal = [];
+    localVendorsRes.rows.forEach(lv => {
+      const key = (lv.name || '').trim().toLowerCase();
+      if (!key) return;
+      if (!localByName.has(key)) {
+        localByName.set(key, lv);
+        dedupedLocal.push(lv);
+      }
+    });
+
+    // 3. Fetch distinct un-registered supplier names used in PM
     const unregRes = await pool.query(`
       SELECT DISTINCT TRIM(supplier_name) AS supplier_name
       FROM (
@@ -56,16 +107,32 @@ export async function GET(req) {
         city: r.city || '',
         status: r.status || '',
         is_registered: true,
+        is_local: false,
       })),
-      ...unregRes.rows.map((u, idx) => ({
+      ...dedupedLocal.map(l => ({
         id: null,
-        shop_name: u.supplier_name,
+        local_vendor_id: l.id,
+        shop_name: l.name,
         business_name: '',
-        phone: '',
-        city: '',
-        status: 'unregistered',
+        phone: l.phone || '',
+        city: l.city || '',
+        material_type: l.material_type || '',
+        status: 'local',
         is_registered: false,
-      }))
+        is_local: true,
+      })),
+      ...unregRes.rows
+        .filter(u => !localByName.has(u.supplier_name.trim().toLowerCase()))
+        .map(u => ({
+          id: null,
+          shop_name: u.supplier_name,
+          business_name: '',
+          phone: '',
+          city: '',
+          status: 'unregistered',
+          is_registered: false,
+          is_local: true,
+        }))
     ];
 
     // Filter by search if provided
@@ -87,7 +154,7 @@ export async function GET(req) {
       });
     }
 
-    // 3. Project-specific supplier aggregation
+    // 4. Project-specific supplier aggregation
     // Fetch all non-deleted deliveries for this project
     const deliveriesRes = await pool.query(`
       SELECT 
@@ -171,6 +238,20 @@ export async function GET(req) {
         phone = reg.phone;
         city = reg.city;
       }
+
+      const rawLower = (rawSupplierName || shopName || '').trim().toLowerCase();
+      let isLocal = false;
+      let localId = null;
+      let materialType = '';
+      if (!isReg && localByName.has(rawLower)) {
+        const lv = localByName.get(rawLower);
+        isLocal = true;
+        localId = lv.id;
+        phone = phone || lv.phone || '';
+        city = city || lv.city || '';
+        materialType = lv.material_type || '';
+      }
+
       const displayName = isReg 
         ? (shopName || businessName || rawSupplierName || `Supplier #${supplierId}`)
         : (rawSupplierName || 'Unregistered Supplier');
@@ -179,11 +260,14 @@ export async function GET(req) {
         supplierMap.set(key, {
           key,
           supplier_id: supplierId ? Number(supplierId) : null,
+          local_vendor_id: localId,
           supplier_name: displayName,
           raw_supplier_name: rawSupplierName || '',
           phone: phone || '',
           city: city || '',
+          material_type: materialType,
           is_registered: isReg,
+          is_local: isLocal,
           total_supplied: 0,
           total_returned: 0,
           total_paid: 0,
@@ -196,14 +280,26 @@ export async function GET(req) {
       return supplierMap.get(key);
     };
 
+    // Pre-populate all local vendors explicitly added to this project so they appear in table even before first delivery
+    for (const lv of localVendorsRes.rows) {
+      if (projectId && lv.project_id && Number(lv.project_id) === Number(projectId)) {
+        getOrCreateEntry(null, lv.name, null, null, lv.phone, lv.city);
+      }
+    }
+
     // Process deliveries
     for (const d of deliveriesRes.rows) {
       const entry = getOrCreateEntry(d.supplier_id, d.raw_supplier_name, d.shop_name, d.business_name, d.phone, d.city);
       const amt = Number(d.amount) || 0;
       entry.total_supplied += amt;
       entry.delivery_count += 1;
-      if (!entry.last_delivery || (d.received_date && d.received_date > entry.last_delivery)) {
-        entry.last_delivery = d.received_date;
+      if (d.received_date) {
+        const dStr = d.received_date instanceof Date
+          ? d.received_date.toISOString().slice(0, 10)
+          : String(d.received_date).slice(0, 10);
+        if (!entry.last_delivery || dStr > entry.last_delivery) {
+          entry.last_delivery = dStr;
+        }
       }
     }
 
@@ -240,10 +336,12 @@ export async function GET(req) {
 
     // Sort by last delivery desc, then balance desc
     projectSuppliers.sort((a, b) => {
-      if (b.last_delivery && a.last_delivery) {
-        return b.last_delivery.localeCompare(a.last_delivery);
+      const timeA = a.last_delivery ? new Date(a.last_delivery).getTime() : 0;
+      const timeB = b.last_delivery ? new Date(b.last_delivery).getTime() : 0;
+      if (timeB !== timeA) {
+        return timeB - timeA;
       }
-      return (b.last_delivery ? 1 : 0) - (a.last_delivery ? 1 : 0);
+      return (b.balance || 0) - (a.balance || 0);
     });
 
     const projectTotals = projectSuppliers.reduce((acc, s) => {

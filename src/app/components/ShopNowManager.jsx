@@ -5,10 +5,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import Link from 'next/link';
-import { UploadCloud, Plus, X, Star, Sparkles, Image as ImageIcon, ArrowLeft } from 'lucide-react';
+import { UploadCloud, Plus, X, Star, Sparkles, Image as ImageIcon, ArrowLeft, HelpCircle, ShieldCheck, CheckCircle2, RotateCcw, FileText, ListChecks } from 'lucide-react';
 import VendorCommissionSummary from './VendorCommissionSummary';
 import { defaultShopStorefront } from '@/lib/shop-storefront-defaults';
 import { QUALITY_TIER_OPTIONS, qualityTierLabel } from '@/lib/quality-tier';
+import { getCategoryAttributeConfig, extractProductAttributes } from '@/lib/product-attributes';
 import './ShopNowManager.css';
 
 const ShopCategoriesManager = dynamic(() => import('./ShopCategoriesManager'), {
@@ -48,12 +49,61 @@ const desktopBannerFields = [
   ['catalog_heading', 'Catalogue heading'], ['footer_tagline', 'Footer tagline'],
 ];
 
+const ATTRIBUTE_FIELD_DEFS = {
+  grade: {
+    icon: '⭐',
+    label: 'Grade / Standard',
+    eg: 'e.g. OPC 53 Grade, Fe 500D, Class 1, Zone II',
+    placeholder: 'e.g. OPC 53 Grade, Fe 500D',
+  },
+  type: {
+    icon: '🏷️',
+    label: 'Type / Variety',
+    eg: 'e.g. PPC Cement, TMT Rebar, AAC Block, M-Sand',
+    placeholder: 'e.g. PPC Cement, TMT Rebar',
+  },
+  pack_size: {
+    icon: '📦',
+    label: 'Pack / Bag Size',
+    eg: 'e.g. 50 Kg Bag, 1 Ton, CFT, 25 Kg Bag',
+    placeholder: 'e.g. 50 Kg Bag, 1 Ton',
+  },
+  thickness: {
+    icon: '📏',
+    label: 'Thickness / Diameter',
+    eg: 'e.g. 8mm, 10mm, 12mm, 16mm, 20mm',
+    placeholder: 'e.g. 12mm, 16mm, 20mm',
+  },
+  size: {
+    icon: '📐',
+    label: 'Dimensions / Size',
+    eg: 'e.g. 9x4x3 inch, 600x600 mm, 12m Length',
+    placeholder: 'e.g. 9x4x3 inch, 600x600 mm',
+  },
+  material: {
+    icon: '🧱',
+    label: 'Material Composition',
+    eg: 'e.g. Primary Virgin Steel, Vitrified Porcelain, Clay',
+    placeholder: 'e.g. Primary Virgin Steel, Clay',
+  },
+  color: {
+    icon: '🎨',
+    label: 'Color / Shade / Finish',
+    eg: 'e.g. Grey, Super White, Terracotta',
+    placeholder: 'e.g. Grey, Super White',
+  },
+};
+
 
 const shopHeaders = (ownerRole = 'admin') => ({
   'Content-Type': 'application/json',
-  Authorization: `Bearer ${ownerRole === 'vendor'
-    ? localStorage.getItem('vendor-token') || ''
-    : localStorage.getItem('admin-token') || localStorage.getItem('token') || ''}`,
+  Authorization: `Bearer ${
+    ownerRole === 'vendor'
+      ? localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || ''
+      : ownerRole === 'supplier'
+      ? localStorage.getItem('supplier-token') || ''
+      : localStorage.getItem('admin-token') || localStorage.getItem('token') || ''
+  }`,
 });
 
 async function readApiJson(response) {
@@ -83,9 +133,15 @@ async function uploadImage(file) {
   return data.secure_url;
 }
 
-function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', initialShowForm = false }) {
+function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', initialShowForm = false, isDarkMode = false }) {
   const isVendor = ownerRole === 'vendor';
-  const productEndpoint = isVendor ? '/api/vendor/shop-products' : '/api/admin/shop-products';
+  const isSupplier = ownerRole === 'supplier';
+  const isSeller = isVendor || isSupplier;
+  const productEndpoint = isSupplier
+    ? '/api/supplier/shop-products'
+    : isVendor
+    ? '/api/vendor/shop-products'
+    : '/api/admin/shop-products';
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [cities, setCities] = useState([]);
@@ -95,13 +151,86 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
   const [galleryText, setGalleryText] = useState('');
   const [specsText, setSpecsText] = useState('');
   const [bulkText, setBulkText] = useState('');
+  const [highlights, setHighlights] = useState([]);
+  const [newHighlight, setNewHighlight] = useState('');
+  const [faqs, setFaqs] = useState([]);
+  const [returnsPolicy, setReturnsPolicy] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [showProductForm, setShowProductForm] = useState(initialShowForm);
   const [isCustomSubcategory, setIsCustomSubcategory] = useState(false);
+  const [formAttributes, setFormAttributes] = useState({ thickness: '', size: '', type: '', color: '', material: '', grade: '', pack_size: '' });
+  const [isDark, setIsDark] = useState(isDarkMode);
+  const [commissionInfo, setCommissionInfo] = useState({ rate: 0, rateSource: 'default', loaded: false, loading: false });
+
+  // Resolve admin commission rate whenever category or editing product changes
+  useEffect(() => {
+    if (!isVendor) {
+      setCommissionInfo({ rate: 0, rateSource: 'default', loaded: false, loading: false });
+      return undefined;
+    }
+    let isCancelled = false;
+    async function fetchCommissionRate() {
+      if (!form.category) {
+        setCommissionInfo({ rate: 0, rateSource: 'default', loaded: false, loading: false });
+        return;
+      }
+      setCommissionInfo((prev) => ({ ...prev, loading: true }));
+      try {
+        const params = new URLSearchParams({ category: form.category });
+        if (editingId) params.set('product_id', String(editingId));
+        const res = await fetch(`/api/shop-commissions/resolve?${params}`);
+        const data = await res.json();
+        if (!isCancelled && data?.success && data?.data) {
+          setCommissionInfo({
+            rate: Number(data.data.rate || 0),
+            rateSource: data.data.rateSource || 'default',
+            ruleId: data.data.ruleId || null,
+            loaded: true,
+            loading: false,
+          });
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setCommissionInfo((prev) => ({ ...prev, loading: false }));
+        }
+      }
+    }
+    fetchCommissionRate();
+    return () => {
+      isCancelled = true;
+    };
+  }, [form.category, editingId, isVendor]);
+
+  useEffect(() => {
+    setIsDark(isDarkMode);
+  }, [isDarkMode]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const html = document.documentElement;
+    const checkDark = () => {
+      const dark = html.classList.contains('dark-mode') || html.classList.contains('dark') || localStorage.getItem('theme') === 'dark';
+      setIsDark(dark);
+    };
+    checkDark();
+    const observer = new MutationObserver(checkDark);
+    observer.observe(html, { attributes: true, attributeFilter: ['class'] });
+    window.addEventListener('storage', checkDark);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('storage', checkDark);
+    };
+  }, []);
 
   useEffect(() => {
     if (initialShowForm) setShowProductForm(true);
   }, [initialShowForm]);
+
+  useEffect(() => {
+    const handleOpen = () => setShowProductForm(true);
+    window.addEventListener('openSupplierAddProduct', handleOpen);
+    return () => window.removeEventListener('openSupplierAddProduct', handleOpen);
+  }, []);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -111,6 +240,11 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
   const [productPagination, setProductPagination] = useState({ page: 1, limit: 25, total: 0, pages: 1 });
   const [productSearch, setProductSearch] = useState('');
   const [debouncedProductSearch, setDebouncedProductSearch] = useState('');
+  const [importRows, setImportRows] = useState([]);
+  const [importFileName, setImportFileName] = useState('');
+  const [importMode, setImportMode] = useState('create');
+  const [importing, setImporting] = useState(false);
+  const [normalizingCategories, setNormalizingCategories] = useState(false);
   const untieredCount = 0;
   const visibleProducts = products;
 
@@ -124,7 +258,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
   const loadReferenceData = useCallback(async () => {
     try {
       const [categoryRes, cityRes] = await Promise.all([
-        fetch(isVendor ? '/api/shop-categories' : '/api/shop-categories?admin=true', { headers: shopHeaders(ownerRole) }),
+        fetch(isSeller ? '/api/shop-categories' : '/api/shop-categories?admin=true', { headers: shopHeaders(ownerRole) }),
         fetch('/api/cities'),
       ]);
       const [categoryData, cityData] = await Promise.all([readApiJson(categoryRes), readApiJson(cityRes)]);
@@ -134,12 +268,12 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     } catch (error) {
       setNotice(error.message);
     }
-  }, [isVendor, ownerRole]);
+  }, [isSeller, ownerRole]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const productUrl = isVendor
+      const productUrl = isSeller
         ? productEndpoint
         : (() => {
             const params = new URLSearchParams({
@@ -160,14 +294,149 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       setProductPagination(productData.pagination || { page: 1, limit: 25, total: (productData.data || []).length, pages: 1 });
     } catch (error) { setNotice(error.message); }
     finally { setLoading(false); }
-  }, [isVendor, ownerRole, productEndpoint, productPage, debouncedProductSearch, tierFilter]);
+  }, [isSeller, ownerRole, productEndpoint, productPage, debouncedProductSearch, tierFilter]);
 
   useEffect(() => { loadReferenceData(); }, [loadReferenceData]);
   useEffect(() => { load(); }, [load]);
 
+  // CSV parser that supports quoted commas and escaped quotes. The import API
+  // remains the authority for field validation and duplicate handling.
+  const parseCsv = (content) => {
+    const rows = [];
+    let row = [], cell = '', quoted = false;
+    for (let i = 0; i < content.length; i += 1) {
+      const char = content[i];
+      if (char === '"') {
+        if (quoted && content[i + 1] === '"') { cell += '"'; i += 1; }
+        else quoted = !quoted;
+      } else if (char === ',' && !quoted) { row.push(cell); cell = ''; }
+      else if ((char === '\n' || char === '\r') && !quoted) {
+        if (char === '\r' && content[i + 1] === '\n') i += 1;
+        row.push(cell); if (row.some((value) => value.trim())) rows.push(row); row = []; cell = '';
+      } else cell += char;
+    }
+    row.push(cell); if (row.some((value) => value.trim())) rows.push(row);
+    if (rows.length < 2) throw new Error('CSV needs a header row and at least one product.');
+    const headers = rows[0].map((header) => header.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+    return rows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, (values[index] || '').trim()])));
+  };
+
+  const selectImportFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setNotice('Please upload a CSV file. Download the template first if needed.');
+      return;
+    }
+    try {
+      const rows = parseCsv(await file.text());
+      if (rows.length > 200) throw new Error('A maximum of 200 products can be imported at once.');
+      setImportRows(rows);
+      setImportFileName(file.name);
+      setNotice(`${rows.length} product row(s) ready for import. Review the preview, then click Import.`);
+    } catch (error) { setImportRows([]); setImportFileName(''); setNotice(error.message); }
+  };
+
+  const downloadImportTemplate = () => {
+    const template = [
+      'name,category,subcategory,brand,price,mrp,quote_price_range,unit,quantity,description,image_urls,highlights,faqs,returns_policy,grade,type,pack_size,thickness,size,material,color,specifications,bulk_pricing,quality_tier,available_cities,is_available,is_featured_deal',
+      'Ultratech PPC Cement 50 Kg Bag,Building Materials,Cement,Ultratech,420,450,400-450,bag,100,High strength PPC cement,https://example.com/cement.jpg,High strength|Genuine product,How should I store it?::Store in a dry covered area|Is GST invoice available?::Yes,Unopened bags may be returned within 48 hours,OPC 53,PPC Cement,50 Kg Bag,,,Cement,Grey,Manufacturer: UltraTech|Origin: India,10:410|30:400,standard,Bareilly|Rampur,true,true'
+    ].join('\n');
+    const url = URL.createObjectURL(new Blob([template], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url; link.download = 'shop-products-import-template.csv'; link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importProducts = async () => {
+    if (!importRows.length) return;
+    setImporting(true); setNotice('');
+    try {
+      if (isVendor) {
+        const toList = (value, maximum = 100) => String(value || '').split('|').map((item) => item.trim()).filter(Boolean).slice(0, maximum);
+        const toSpecifications = (value) => Object.fromEntries(toList(value, 20).map((item) => {
+          const divider = item.indexOf(':');
+          return divider < 0 ? [item, 'Yes'] : [item.slice(0, divider).trim(), item.slice(divider + 1).trim()];
+        }).filter(([key, value]) => key && value));
+        const toBulkPricing = (value) => toList(value, 10).map((item) => {
+          const [min, price] = item.split(/[:=-]/).map((part) => Number(part.replace(/[₹,\s]/g, '')));
+          return Number.isInteger(min) && min >= 2 && Number.isFinite(price) && price > 0 ? { min_quantity: min, price } : null;
+        }).filter(Boolean);
+        const toFaqs = (value) => toList(value, 20).map((item) => {
+          const divider = item.indexOf('::');
+          return divider < 0 ? null : { q: item.slice(0, divider).trim(), a: item.slice(divider + 2).trim() };
+        }).filter((item) => item?.q && item?.a);
+        const vendorSpecifications = (row) => {
+          const attributes = {
+            Grade: row.grade, Type: row.type, PackSize: row.pack_size, Thickness: row.thickness,
+            Size: row.size, Material: row.material, Colors: row.color,
+          };
+          return Object.fromEntries(Object.entries({ ...toSpecifications(row.specifications), ...attributes })
+            .map(([key, value]) => [key, String(value || '').trim()]).filter(([, value]) => value));
+        };
+        const responses = await Promise.all(importRows.map(async (row) => {
+          const images = toList(row.images || row.image_urls || row.image_url, 8);
+          const response = await fetch(productEndpoint, {
+            method: 'POST', headers: shopHeaders(ownerRole), body: JSON.stringify({
+              ...row,
+              name: row.name || row.product_name,
+              price: row.price || row.selling_price,
+              compare_at_price: row.compare_at_price || row.mrp || row.original_price,
+              quantity: row.quantity || row.stock || 0,
+              image_url: images[0] || '', images,
+              specifications: vendorSpecifications(row),
+              highlights: toList(row.highlights, 20),
+              faqs: toFaqs(row.faqs),
+              returns_policy: row.returns_policy || row.return_policy || '',
+              bulk_pricing: toBulkPricing(row.bulk_pricing || row.bulk_prices),
+              available_cities: toList(row.available_cities || row.cities),
+              is_featured_deal: ['true', 'yes', '1'].includes(String(row.is_featured_deal || row.featured || '').toLowerCase()),
+              quality_tier: row.quality_tier || row.quality || 'all',
+            }),
+          });
+          const data = await readApiJson(response);
+          return response.ok ? { success: true } : { success: false, error: data.error || 'Could not add product' };
+        }));
+        const added = responses.filter((item) => item.success).length;
+        const failed = responses.length - added;
+        setNotice(`${added} product(s) submitted for admin approval.${failed ? ` ${failed} row(s) could not be added.` : ''}`);
+        setImportRows([]); setImportFileName(''); notifyShopProductsUpdated();
+        await load();
+        return;
+      }
+      const response = await fetch('/api/admin/shop-products/import', {
+        method: 'POST', headers: shopHeaders('admin'), body: JSON.stringify({ products: importRows, mode: importMode }),
+      });
+      const data = await readApiJson(response);
+      if (!response.ok) throw new Error(data.error || 'Could not import products');
+      const result = data.data;
+      const errorSummary = result.errors?.length ? ` ${result.errors.length} row(s) skipped.` : '';
+      setNotice(`Import complete: ${result.created} added, ${result.updated} updated.${errorSummary}`);
+      setImportRows([]); setImportFileName(''); notifyShopProductsUpdated();
+      await Promise.all([load(), loadReferenceData()]);
+    } catch (error) { setNotice(error.message); }
+    finally { setImporting(false); }
+  };
+
+  const fixExistingProductCategories = async () => {
+    setNormalizingCategories(true); setNotice('');
+    try {
+      const response = await fetch('/api/admin/shop-products/import', {
+        method: 'POST', headers: shopHeaders('admin'), body: JSON.stringify({ action: 'normalize-categories' }),
+      });
+      const data = await readApiJson(response);
+      if (!response.ok) throw new Error(data.error || 'Could not fix product categories');
+      setNotice(`Category mapping fixed. ${data.data.updated} product(s) were moved to their related category/subcategory.`);
+      notifyShopProductsUpdated();
+      await Promise.all([load(), loadReferenceData()]);
+    } catch (error) { setNotice(error.message); }
+    finally { setNormalizingCategories(false); }
+  };
+
   const edit = async (product) => {
     let full = product;
-    if (!isVendor && (!Array.isArray(product.images) || product.specifications == null)) {
+    if (!isSeller && (!Array.isArray(product.images) || product.specifications == null)) {
       try {
         const res = await fetch(`${productEndpoint}?id=${product.id}`, { headers: shopHeaders(ownerRole) });
         const data = await readApiJson(res);
@@ -181,6 +450,16 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       ...(Array.isArray(full.images) ? full.images : [])
     ].filter(Boolean)));
     setImagesList(existingImgs);
+    const extractedAttrs = extractProductAttributes(full);
+    setFormAttributes({
+      thickness: extractedAttrs.thickness || '',
+      size: extractedAttrs.size || '',
+      type: extractedAttrs.type || '',
+      color: extractedAttrs.color || '',
+      material: extractedAttrs.material || '',
+      grade: extractedAttrs.grade || '',
+      pack_size: extractedAttrs.pack_size || '',
+    });
     setForm({
       name: full.name || '', description: full.description || '', category: full.category || '', subcategory: full.subcategory || '', quality_tier: full.quality_tier || '',
       quote_price_range: full.quote_price_range || '', price: full.price ?? '', compare_at_price: full.compare_at_price ?? '', is_featured_deal: full.is_featured_deal === true, brand: full.brand || '', unit: full.unit || '', quantity: full.quantity ?? 0,
@@ -189,6 +468,10 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     setGalleryText(existingImgs.join('\n'));
     setSpecsText(Object.entries(full.specifications || {}).map(([key, value]) => `${key}: ${value}`).join('\n'));
     setBulkText((full.bulk_pricing || []).map((tier) => `${tier.min_quantity}: ${tier.price}`).join('\n'));
+    setHighlights(Array.isArray(full.highlights) ? full.highlights : []);
+    setNewHighlight('');
+    setFaqs(Array.isArray(full.faqs) ? full.faqs : []);
+    setReturnsPolicy(full.returns_policy || '');
     setNotice('');
     document.getElementById(formId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
@@ -197,24 +480,34 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     setEditingId(null);
     setShowProductForm(false);
     setIsCustomSubcategory(false);
+    setFormAttributes({ thickness: '', size: '', type: '', color: '', material: '', grade: '', pack_size: '' });
     setForm(emptyProduct);
     setImagesList([]);
     setNewImageUrl('');
     setGalleryText('');
     setSpecsText('');
     setBulkText('');
+    setHighlights([]);
+    setNewHighlight('');
+    setFaqs([]);
+    setReturnsPolicy('');
     setNotice('');
   };
 
   const startAddProduct = () => {
     setEditingId(null);
     setIsCustomSubcategory(false);
+    setFormAttributes({ thickness: '', size: '', type: '', color: '', material: '', grade: '', pack_size: '' });
     setForm(emptyProduct);
     setImagesList([]);
     setNewImageUrl('');
     setGalleryText('');
     setSpecsText('');
     setBulkText('');
+    setHighlights([]);
+    setNewHighlight('');
+    setFaqs([]);
+    setReturnsPolicy('');
     setNotice('');
     setShowProductForm(true);
     requestAnimationFrame(() => {
@@ -233,6 +526,13 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
 
       const parseLines = (value) => (value || '').split('\n').map((line) => line.trim()).filter(Boolean);
       const specifications = {};
+      if (formAttributes.thickness?.trim()) specifications.Thickness = formAttributes.thickness.trim();
+      if (formAttributes.size?.trim()) specifications.Size = formAttributes.size.trim();
+      if (formAttributes.type?.trim()) specifications.Type = formAttributes.type.trim();
+      if (formAttributes.color?.trim()) specifications.Colors = formAttributes.color.trim();
+      if (formAttributes.material?.trim()) specifications.Material = formAttributes.material.trim();
+      if (formAttributes.grade?.trim()) specifications.Grade = formAttributes.grade.trim();
+      if (formAttributes.pack_size?.trim()) specifications.PackSize = formAttributes.pack_size.trim();
       parseLines(specsText).forEach((line) => {
         const separator = line.indexOf(':');
         if (separator !== -1) {
@@ -272,6 +572,9 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
           images: allImgs,
           specifications,
           bulk_pricing,
+          highlights: highlights.map((h) => String(h).trim()).filter(Boolean),
+          faqs: faqs.map((f) => ({ q: String(f.q || '').trim(), a: String(f.a || '').trim() })).filter((f) => f.q && f.a),
+          returns_policy: returnsPolicy.trim(),
           ...(isEditing ? { id: editingId } : {})
         }),
       });
@@ -279,7 +582,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       if (!response.ok) throw new Error(data.error || 'Could not save product');
       notifyShopProductsUpdated();
       reset();
-      if (isVendor) {
+      if (isSeller) {
         setNotice(
           isEditing
             ? (data?.resubmitted_for_approval ? 'Submitted for admin approval.' : 'Product updated.')
@@ -395,6 +698,74 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     }));
   };
 
+  const addHighlightItem = () => {
+    const trimmed = newHighlight.trim();
+    if (!trimmed) return;
+    setHighlights((prev) => [...prev, trimmed]);
+    setNewHighlight('');
+  };
+
+  const removeHighlightItem = (index) => {
+    setHighlights((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const loadPresetHighlights = () => {
+    const presets = [
+      '100% Genuine & Brand Certified Material',
+      'Tested for Structural Strength & Load Bearing Capacity',
+      'Direct Sourced from Authorized Manufacturers / Mills',
+      'Standard Weight & Packaging Verification at Dispatch',
+      'Express Delivery & Safe On-site Unloading Support'
+    ];
+    setHighlights((prev) => Array.from(new Set([...prev, ...presets])));
+  };
+
+  const addFaqItem = () => {
+    setFaqs((prev) => [...prev, { q: '', a: '' }]);
+  };
+
+  const updateFaqItem = (index, field, value) => {
+    setFaqs((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  const removeFaqItem = (index) => {
+    setFaqs((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const loadPresetFaqs = () => {
+    const presets = [
+      {
+        q: 'How should this material be stored at the site?',
+        a: 'Store in an elevated, dry, covered shed on wooden pallets away from moisture and direct rainwater.'
+      },
+      {
+        q: 'Is an official GST tax invoice provided?',
+        a: 'Yes, 100% genuine manufacturer test certificate and GST invoice accompany every delivery.'
+      },
+      {
+        q: 'How do bulk order discounts work?',
+        a: 'Bulk discounts unlock automatically for high volume orders or above ₹50,000 at checkout.'
+      },
+      {
+        q: 'What is the estimated delivery timeline?',
+        a: 'Orders within service cities are typically dispatched and delivered within 24 to 48 hours.'
+      }
+    ];
+    setFaqs((prev) => (prev.length === 0 ? presets : [...prev, ...presets]));
+  };
+
+  const loadPresetReturnsPolicy = () => {
+    setReturnsPolicy(
+      'Site Inspection: Customers can inspect quantity, brand stamps, and packaging at the time of truck unloading.\n' +
+      'Transit Damage: Any burst bags or damaged items reported on the delivery challan will be replaced immediately or refunded.\n' +
+      'Unopened Materials: Standard 48-hour return policy applies for unopened, undamaged materials.'
+    );
+  };
+
   return <div className="shop-admin-panel">
     {showProductForm || editingId ? (
       <>
@@ -403,24 +774,13 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
             <button
               type="button"
               onClick={reset}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '6px 14px',
-                border: '1px solid var(--border)',
-                borderRadius: 6,
-                background: 'transparent',
-                cursor: 'pointer',
-                fontWeight: 600,
-                fontSize: 13
-              }}
+              className="shop-admin-back-btn"
             >
               <ArrowLeft size={16} /> Back to products
             </button>
             <div>
               <h2>{editingId ? 'Edit product' : 'Add product'}</h2>
-              <p>{isVendor ? 'Fill out product details for admin approval.' : 'Enter product details and fixed Buy Now price.'}</p>
+              <p>{isSeller ? 'Fill out product details for admin approval.' : 'Enter product details and fixed Buy Now price.'}</p>
             </div>
           </div>
         </div>
@@ -428,9 +788,12 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
         <form id={formId} className="shop-admin-card" onSubmit={save}>
       <h3>{editingId ? 'Edit product' : 'Add product'}</h3>
       <div className="shop-admin-fields">
-        <label>Product name *<input required maxLength={255} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
         <label>
-          Category *
+          <span>Product name <span style={{ color: '#ef4444' }}>*</span></span>
+          <input required maxLength={255} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        </label>
+        <label>
+          <span>Category <span style={{ color: '#ef4444' }}>*</span></span>
           <select
             required
             value={form.category}
@@ -447,13 +810,32 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
             }}
           >
             <option value="">Select category</option>
-            {categories.map((cat) => (
-              <option key={cat.id} value={cat.name}>{cat.name}</option>
-            ))}
+            {(() => {
+              const standardNavbarCats = [
+                'Building Materials',
+                'Carpentry',
+                'Plumbing',
+                'Electrical',
+                'Furniture & Architectural Hardware',
+                'New Launches',
+                'Chemicals',
+                'Paints',
+              ];
+              const catNames = new Set(standardNavbarCats);
+              categories.forEach((c) => {
+                if (c.name && c.name.trim()) catNames.add(c.name.trim());
+              });
+              if (form.category && !catNames.has(form.category)) {
+                catNames.add(form.category);
+              }
+              return Array.from(catNames).map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ));
+            })()}
           </select>
         </label>
         <label>
-          Subcategory
+          <span>Subcategory</span>
           {!isCustomSubcategory ? (
             <select
               value={form.subcategory}
@@ -515,6 +897,8 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                   'sand': ['River Sand (Nadi ki Ret)', 'M-Sand (Manufactured Sand)', 'Coarse Sand', 'Fine Sand', 'Pit Sand'],
                   'aggregate ( barjri)': ['Fine Aggregate', 'Coarse Aggregate'],
                   'new launches': ['Cabinet Hardware', 'Kitchen Systems & Hardware', 'General Hardware & Tools', 'Bathroom Renovation Materials', 'Conduits & Piping', 'PVC Pipes', 'Kitchen Sinks & Faucets', 'Home Appliances & Power Backup'],
+                  'chemicals': ['Construction Chemicals', 'Waterproofing Chemicals', 'Tile Adhesives', 'Admixtures'],
+                  'paints': ['Interior Paints', 'Exterior Paints', 'Primers', 'Enamels & Distempers', 'Wall Putty'],
                 };
 
                 const normCatKey = (form.category || '').toLowerCase().trim();
@@ -552,28 +936,221 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
               <button
                 type="button"
                 onClick={() => setIsCustomSubcategory(false)}
-                style={{
-                  fontSize: 12,
-                  padding: '6px 10px',
-                  background: '#f1f5f9',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
+                className="shop-admin-subcat-btn"
               >
                 Choose from list
               </button>
             </div>
           )}
         </label>
-        <label>Quality Tier *<select required value={form.quality_tier} onChange={(e) => setForm({ ...form, quality_tier: e.target.value })}><option value="">Select quality tier</option>{QUALITY_TIER_OPTIONS.map((tier) => <option key={tier.value} value={tier.value}>{tier.label}</option>)}</select><small>Used by the Budget Calculator to match this product to a Quality Package.</small></label>
-        <label>Buy Now fixed price (₹) *<input required type="number" min="0.01" max="99999999.99" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Enter fixed price (e.g. 450)" /><small>Required: Enter the selling price per unit.</small></label>
-        <label>Original price (₹, optional)<input type="number" min="0" step="0.01" value={form.compare_at_price} onChange={(e) => setForm({ ...form, compare_at_price: e.target.value })} placeholder="Shows discount when above selling price" /><small>A discount badge is calculated automatically when this is above the Buy Now price.</small></label>
-        <label>Brand<input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} placeholder="e.g. UltraTech" /></label>
-        <label>Unit *<select required value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}><option value="">Select unit</option>{form.unit && !units.includes(form.unit) && <option value={form.unit}>{form.unit}</option>}{units.map((unit) => <option key={unit} value={unit}>{unit}</option>)}</select></label>
-        <label>Quantity available<input type="number" min="0" step="1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></label>
-        <label className="shop-admin-wide">Description<textarea rows="3" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+        {/* Dynamic Category Specifications Section (HomeRun Engine) */}
+        {form.category && form.subcategory && (() => {
+          const config = getCategoryAttributeConfig(form.category, form.subcategory);
+          const fields = config.fields || [];
+          if (!fields.length) return null;
+
+          const renderFieldCard = (key) => {
+            const def = ATTRIBUTE_FIELD_DEFS[key] || {
+              icon: '⚙️',
+              label: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+              eg: `Enter ${key.replace(/_/g, ' ')}...`,
+              placeholder: `e.g. ${key.replace(/_/g, ' ')}`,
+            };
+            const valList = Array.isArray(config[key]) ? config[key] : [];
+            const currentVal = formAttributes[key] || '';
+
+            return (
+              <div key={key} className="shop-spec-card">
+                <div>
+                  <div className="shop-spec-card-head">
+                    <label className="shop-spec-label">
+                      <span>{def.icon}</span> {def.label}
+                    </label>
+                    {currentVal && (
+                      <button
+                        type="button"
+                        onClick={() => setFormAttributes({ ...formAttributes, [key]: '' })}
+                        className="shop-spec-clear-btn"
+                        title="Clear selection"
+                      >
+                        ✕ Clear
+                      </button>
+                    )}
+                  </div>
+                  <div className="shop-spec-eg">{def.eg}</div>
+                  <input
+                    type="text"
+                    placeholder={def.placeholder}
+                    value={currentVal}
+                    onChange={(e) => setFormAttributes({ ...formAttributes, [key]: e.target.value })}
+                    className="shop-spec-input"
+                  />
+                </div>
+                {valList.length > 0 && (
+                  <div className="shop-spec-pills">
+                    {valList.map((val) => {
+                      const isSelected = currentVal.toLowerCase().trim() === val.toLowerCase().trim();
+                      return (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => setFormAttributes({ ...formAttributes, [key]: isSelected ? '' : val })}
+                          className={`shop-spec-pill ${isSelected ? 'selected' : ''}`}
+                        >
+                          {isSelected && <span className="shop-spec-pill-check">✓</span>}
+                          {val}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          };
+
+          return (
+            <div className="shop-admin-wide shop-spec-box">
+              <div className="shop-spec-head">
+                <div>
+                  <div className="shop-spec-title-row">
+                    <Sparkles size={17} className="shop-spec-sparkle-icon" />
+                    <strong className="shop-spec-title">
+                      {config.label}
+                    </strong>
+                  </div>
+                  <small className="shop-spec-sub">
+                    Fill specifications for {form.subcategory} so buyers on Shop Now can filter by these exact attributes.
+                  </small>
+                </div>
+                <span className="shop-spec-badge">
+                  <span>✓</span> Subcategory: {form.subcategory}
+                </span>
+              </div>
+
+              <div className="shop-spec-grid">
+                {fields.map((fKey) => renderFieldCard(fKey))}
+              </div>
+            </div>
+          );
+        })()}
+
+        <label>
+          <span>Quality Tier <span style={{ color: '#ef4444' }}>*</span></span>
+          <select required value={form.quality_tier} onChange={(e) => setForm({ ...form, quality_tier: e.target.value })}>
+            <option value="">Select quality tier</option>
+            {QUALITY_TIER_OPTIONS.map((tier) => <option key={tier.value} value={tier.value}>{tier.label}</option>)}
+          </select>
+          <small>Used by the Budget Calculator to match this product to a Quality Package.</small>
+        </label>
+        <label>
+          <span>Product Selling Price (₹) <span style={{ color: '#ef4444' }}>*</span></span>
+          <input required type="number" min="0.01" max="99999999.99" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Enter fixed price (e.g. 450)" />
+          <small>Required: Enter the selling price per unit.</small>
+        </label>
+        <label>
+          <span>Product Discount Price (₹)</span>
+          <input type="number" min="0" step="0.01" value={form.compare_at_price} onChange={(e) => setForm({ ...form, compare_at_price: e.target.value })} placeholder="Shows discount when above selling price" />
+          <small>A discount badge is calculated automatically when this is above the Buy Now price.</small>
+        </label>
+
+        {/* Vendors see the applicable commission; admin-owned products do not have a vendor payout. */}
+        {isVendor && (() => {
+          const numPrice = Number(form.price) > 0 && Number.isFinite(Number(form.price)) ? Number(form.price) : 0;
+          const currentRate = Number(commissionInfo?.rate ?? 0);
+          const adminFee = Math.round((numPrice * (currentRate / 100)) * 100) / 100;
+          const vendorPayout = Math.max(0, Math.round((numPrice - adminFee) * 100) / 100);
+          const rateSourceText = commissionInfo.rateSource === 'product'
+            ? 'Product Rule'
+            : commissionInfo.rateSource === 'category'
+            ? `Category Rule (${form.category})`
+            : 'Default Platform Rate';
+
+          return (
+            <div className="shop-admin-wide shop-commission-calculator-card">
+              <div className="shop-commission-card-header">
+                <div className="shop-commission-header-left">
+                  <span style={{ fontSize: '1.25rem' }}>💰</span>
+                  <div>
+                    <h4 className="shop-commission-title">Platform Charges & Admin Commission</h4>
+                    <span className="shop-commission-subtitle">
+                      {commissionInfo.loading
+                        ? 'Calculating applicable admin platform rate...'
+                        : form.category
+                        ? `Live charges applied by Admin for ${form.category}`
+                        : 'Select a category above to view applicable charges'}
+                    </span>
+                  </div>
+                </div>
+                {form.category && (
+                  <span className={`shop-commission-badge ${currentRate > 0 ? 'badge-rate' : 'badge-zero'}`}>
+                    {commissionInfo.rateSource === 'product' ? '🎯' : commissionInfo.rateSource === 'category' ? '📂' : '⚙️'} {rateSourceText}: {currentRate.toFixed(2)}%
+                  </span>
+                )}
+              </div>
+
+              <div className="shop-commission-grid">
+                <div className="shop-commission-col">
+                  <span className="shop-commission-label">Product Selling Price (Customer Pays)</span>
+                  <span className="shop-commission-val">
+                    ₹{numPrice > 0 ? numPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </span>
+                </div>
+                <div className="shop-commission-col comm-charge">
+                  <span className="shop-commission-label">
+                    Admin Commission ({currentRate}%)
+                  </span>
+                  <span className={`shop-commission-val ${adminFee > 0 ? 'text-red' : ''}`}>
+                    {adminFee > 0 ? `- ₹${adminFee.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '₹0.00'}
+                  </span>
+                </div>
+                <div className="shop-commission-col comm-payout">
+                  <span className="shop-commission-label">
+                    {isSeller ? 'Your Net Earning (Vendor Receives)' : 'Vendor Net Payout'}
+                  </span>
+                  <span className="shop-commission-val text-green">
+                    ₹{numPrice > 0 ? vendorPayout.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="shop-commission-footer">
+                {!form.category ? (
+                  <span>⚠️ Please select a <strong>Category</strong> above to see the platform fee and admin commission for this product.</span>
+                ) : numPrice <= 0 ? (
+                  <span>ℹ️ Enter a <strong>Product Selling Price</strong> above to preview the live commission deduction and net vendor payout.</span>
+                ) : currentRate > 0 ? (
+                  <span>
+                    ✅ When a customer orders this product, <strong>₹{adminFee.toFixed(2)}</strong> ({currentRate}% commission) will go to <strong>Admin</strong> as platform fee, and <strong>₹{vendorPayout.toFixed(2)}</strong> will be paid to the vendor.
+                  </span>
+                ) : (
+                  <span>
+                    🎉 <strong>0.00% Platform Fee Active:</strong> No commission is deducted by Admin on this product (Vendor receives 100% of ₹{numPrice.toFixed(2)}).
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+        <label>
+          <span>Brand</span>
+          <input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} placeholder="e.g. UltraTech" />
+        </label>
+        <label>
+          <span>Unit <span style={{ color: '#ef4444' }}>*</span></span>
+          <select required value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}>
+            <option value="">Select unit</option>
+            {form.unit && !units.includes(form.unit) && <option value={form.unit}>{form.unit}</option>}
+            {units.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>Quantity available</span>
+          <input type="number" min="0" step="1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
+        </label>
+        <label className="shop-admin-wide">
+          <span>Description</span>
+          <textarea rows="3" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        </label>
 
         {/* Multi-Image Gallery Box */}
         <div className="shop-admin-wide shop-admin-gallery-box">
@@ -660,8 +1237,8 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
             </div>
           )}
 
-          <details style={{ marginTop: 8, fontSize: '12px', color: 'var(--shop-admin-subtext)' }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Bulk edit URLs / Manual raw list</summary>
+          <details className="shop-admin-gallery-details">
+            <summary>Bulk edit URLs / Manual raw list</summary>
             <div style={{ marginTop: 6 }}>
               <textarea
                 rows="3"
@@ -676,25 +1253,272 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                   }
                 }}
                 placeholder="One URL per line..."
-                style={{ width: '100%', fontSize: '12px', fontFamily: 'monospace' }}
               />
             </div>
           </details>
         </div>
 
-        <label className="shop-admin-wide">Specifications (one Name: Value per line, optional)<textarea rows="3" value={specsText} onChange={(e) => setSpecsText(e.target.value)} placeholder="Optional: e.g. Grade: PPC&#10;Pack size: 50 kg" /><small>Optional: Leave blank if not applicable, or enter specifications one per line.</small></label>
-        <label className="shop-admin-wide">Bulk prices (one Quantity: Price per line, optional)<textarea rows="3" value={bulkText} onChange={(e) => setBulkText(e.target.value)} placeholder="Optional: e.g. 10: 415&#10;30: 405" /><small>Optional: Leave blank if not offering bulk tier discounts.</small></label>
-        <fieldset className="shop-admin-wide shop-admin-city-field"><legend>Delivery cities for this product</legend><div>{cities.map((city) => <label key={city}><input type="checkbox" checked={form.available_cities.includes(city)} onChange={(event) => setForm({ ...form, available_cities: event.target.checked ? [...form.available_cities, city] : form.available_cities.filter((item) => item !== city) })} /> {city}</label>)}</div><small>Select the cities where this product can actually be delivered.</small></fieldset>
+        <label className="shop-admin-wide">
+          <span>Specifications (one Name: Value per line, optional)</span>
+          <textarea rows="3" value={specsText} onChange={(e) => setSpecsText(e.target.value)} placeholder="Optional: e.g. Grade: PPC&#10;Pack size: 50 kg" />
+          <small>Optional: Leave blank if not applicable, or enter specifications one per line.</small>
+        </label>
+        <label className="shop-admin-wide">
+          <span>Bulk prices (one Quantity: Price per line, optional)</span>
+          <textarea rows="3" value={bulkText} onChange={(e) => setBulkText(e.target.value)} placeholder="Optional: e.g. 10: 415&#10;30: 405" />
+          <small>Optional: Leave blank if not offering bulk tier discounts.</small>
+        </label>
+
+        {/* Product Page Accordions Section: Highlights, FAQs & Returns Policy */}
+        <div className="shop-admin-wide shop-spec-box shop-pdp-content-box">
+          <div className="shop-spec-head">
+            <div>
+              <div className="shop-spec-title-row">
+                <Sparkles size={17} className="shop-spec-sparkle-icon" />
+                <strong className="shop-spec-title">
+                  Shop Now Page Accordions (Highlights, FAQs &amp; Return Policy)
+                </strong>
+              </div>
+              <small className="shop-spec-sub">
+                Configure the dynamic accordions shown to buyers on the Shop Now product detail page.
+              </small>
+            </div>
+            <span className="shop-spec-badge">
+              <span>✓</span> Live on Product Page
+            </span>
+          </div>
+
+          <div className="shop-pdp-sections-grid">
+            {/* Section 1: Highlights */}
+            <div className="shop-pdp-card">
+              <div className="shop-pdp-card-head">
+                <div>
+                  <div className="shop-pdp-card-title">
+                    <span className="shop-pdp-card-icon">✨</span>
+                    <strong>1. Product Highlights (Key Bullets)</strong>
+                  </div>
+                  <div className="shop-pdp-card-sub">
+                    Appears in the 1st accordion with verified checkmark badges.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadPresetHighlights}
+                  className="shop-pdp-preset-btn"
+                  title="Insert recommended construction highlights"
+                >
+                  ⚡ Preset Highlights
+                </button>
+              </div>
+
+              <div className="shop-pdp-input-row">
+                <input
+                  type="text"
+                  value={newHighlight}
+                  onChange={(e) => setNewHighlight(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addHighlightItem();
+                    }
+                  }}
+                  placeholder="e.g. 100% Genuine &amp; Brand Certified Material"
+                  className="shop-spec-input"
+                />
+                <button
+                  type="button"
+                  onClick={addHighlightItem}
+                  className="shop-pdp-add-btn"
+                >
+                  + Add
+                </button>
+              </div>
+
+              {highlights.length > 0 ? (
+                <div className="shop-pdp-list">
+                  {highlights.map((h, idx) => (
+                    <div key={idx} className="shop-pdp-list-item">
+                      <span className="shop-pdp-bullet-check">✓</span>
+                      <span className="shop-pdp-item-text">{h}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeHighlightItem(idx)}
+                        className="shop-pdp-del-btn"
+                        title="Remove highlight"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="shop-pdp-empty-state">
+                  No custom highlights added. (Default category specifications will be shown if left blank).
+                </div>
+              )}
+            </div>
+
+            {/* Section 2: FAQs */}
+            <div className="shop-pdp-card">
+              <div className="shop-pdp-card-head">
+                <div>
+                  <div className="shop-pdp-card-title">
+                    <span className="shop-pdp-card-icon">❓</span>
+                    <strong>2. Frequently Asked Questions (FAQs)</strong>
+                  </div>
+                  <div className="shop-pdp-card-sub">
+                    Appears in the 3rd accordion (FAQs) on the product page.
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={loadPresetFaqs}
+                    className="shop-pdp-preset-btn"
+                    title="Insert standard construction FAQs"
+                  >
+                    📋 Standard FAQs
+                  </button>
+                  <button
+                    type="button"
+                    onClick={addFaqItem}
+                    className="shop-pdp-add-btn"
+                  >
+                    + Add Question
+                  </button>
+                </div>
+              </div>
+
+              {faqs.length > 0 ? (
+                <div className="shop-pdp-faq-list">
+                  {faqs.map((f, idx) => (
+                    <div key={idx} className="shop-pdp-faq-card">
+                      <div className="shop-pdp-faq-head">
+                        <span className="shop-pdp-faq-num">Q{idx + 1}</span>
+                        <input
+                          type="text"
+                          value={f.q}
+                          onChange={(e) => updateFaqItem(idx, 'q', e.target.value)}
+                          placeholder="Question: e.g. How should this material be stored?"
+                          className="shop-spec-input shop-pdp-faq-q-input"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeFaqItem(idx)}
+                          className="shop-pdp-del-btn"
+                          title="Remove FAQ"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <textarea
+                        rows="2"
+                        value={f.a}
+                        onChange={(e) => updateFaqItem(idx, 'a', e.target.value)}
+                        placeholder="Answer: e.g. Store in a dry elevated shed away from moisture..."
+                        className="shop-pdp-faq-a-input"
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="shop-pdp-empty-state">
+                  No custom FAQs added. (Standard site FAQs will be displayed if left blank).
+                </div>
+              )}
+            </div>
+
+            {/* Section 3: Returns & Exchange Policy */}
+            <div className="shop-pdp-card">
+              <div className="shop-pdp-card-head">
+                <div>
+                  <div className="shop-pdp-card-title">
+                    <span className="shop-pdp-card-icon">🔄</span>
+                    <strong>3. Returns &amp; Exchange Policy</strong>
+                  </div>
+                  <div className="shop-pdp-card-sub">
+                    Appears in the 4th accordion (Returns &amp; Exchange Policy).
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadPresetReturnsPolicy}
+                  className="shop-pdp-preset-btn"
+                  title="Insert 48-Hour Return Policy"
+                >
+                  📋 Standard Policy
+                </button>
+              </div>
+
+              <textarea
+                rows="4"
+                value={returnsPolicy}
+                onChange={(e) => setReturnsPolicy(e.target.value)}
+                placeholder="e.g. Site Inspection: Customers can inspect quantity at unloading.&#10;Transit Damage: Damaged items reported on delivery challan replaced immediately.&#10;Unopened Materials: 48-hour return policy for unopened items."
+                className="shop-pdp-policy-textarea"
+              />
+              <div className="shop-pdp-hint">
+                Tip: Leave blank to use MT-Boss standard construction return &amp; replacement policy.
+              </div>
+            </div>
+          </div>
+        </div>
+        <fieldset className="shop-admin-wide shop-admin-city-field">
+          <legend>Delivery cities for this product</legend>
+          <div>
+            {cities.map((city) => (
+              <label key={city}>
+                <input
+                  type="checkbox"
+                  checked={form.available_cities.includes(city)}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      available_cities: event.target.checked
+                        ? [...form.available_cities, city]
+                        : form.available_cities.filter((item) => item !== city),
+                    })
+                  }
+                />{' '}
+                {city}
+              </label>
+            ))}
+          </div>
+          <small>Select the cities where this product can actually be delivered.</small>
+        </fieldset>
       </div>
-      <div className="shop-admin-form-footer"><label className="shop-admin-check"><input type="checkbox" checked={form.is_available} onChange={(e) => setForm({ ...form, is_available: e.target.checked })} /> Show on Shop Now</label><label className="shop-admin-check"><input type="checkbox" checked={form.is_featured_deal} onChange={(e) => setForm({ ...form, is_featured_deal: e.target.checked })} /> Feature in Deals of the Week</label><button type="submit" disabled={saving}>{saving ? 'Saving...' : editingId ? 'Save changes' : 'Add product'}</button><button type="button" onClick={reset}>Cancel</button></div>
+      <div className="shop-admin-form-footer">
+        <label className="shop-admin-check">
+          <input
+            type="checkbox"
+            checked={form.is_available}
+            onChange={(e) => setForm({ ...form, is_available: e.target.checked })}
+          />{' '}
+          Show on Shop Now
+        </label>
+        <label className="shop-admin-check">
+          <input
+            type="checkbox"
+            checked={form.is_featured_deal}
+            onChange={(e) => setForm({ ...form, is_featured_deal: e.target.checked })}
+          />{' '}
+          Feature in Deals of the Week
+        </label>
+        <button type="submit" disabled={saving}>
+          {saving ? 'Saving...' : editingId ? 'Save changes' : 'Add product'}
+        </button>
+        <button type="button" onClick={reset}>
+          Cancel
+        </button>
+      </div>
     </form>
       </>
     ) : (
       <>
         <div className="shop-admin-heading">
           <div>
-            <h2>{isVendor ? 'My products' : 'Products'}</h2>
-            <p>Enter product details and fixed Buy Now price.{!isVendor && ' Supplier and vendor uploads appear here too.'}</p>
+            <h2>{isSeller ? 'My products' : 'Products'}</h2>
+            <p>Enter product details and fixed Buy Now price.{!isSeller && ' Supplier and vendor uploads appear here too.'}</p>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button
@@ -720,7 +1544,41 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
           </div>
         </div>
         {notice && <p className="shop-admin-notice" role="status">{notice}</p>}
-        <div className="shop-admin-card"><div className="shop-admin-list-head"><h3>{isVendor ? 'My products' : 'All products'} ({isVendor ? products.length : productPagination.total})</h3><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>{!isVendor && <input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Search products…" style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', minWidth: 180 }} />}<label className="shop-admin-tier-filter">Quality Tier<select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)}><option value="any">All products</option><option value="none">No Quality Tier set</option>{QUALITY_TIER_OPTIONS.map((tier) => <option key={tier.value} value={tier.value}>{tier.value === 'all' ? 'All tiers' : tier.label}</option>)}</select></label></div></div>{loading ? <p>Loading products...</p> : !products.length ? <p>No products yet. Add the first product above.</p> : !visibleProducts.length ? <p>No products match this Quality Tier filter.</p> : <div className="shop-admin-table-wrap"><table><thead><tr><th>Product</th><th>Category</th><th>Quality</th><th>Get Quote range</th><th>Buy Now price / unit</th>{!isVendor && <th>Discount</th>}{!isVendor && <th>Source</th>}<th>Status</th><th>Actions</th></tr></thead><tbody>{visibleProducts.map((product) => { const price = Number(product.price); const originalPrice = Number(product.compare_at_price); const discountPercent = originalPrice > price && price > 0 ? Math.round(((originalPrice - price) / originalPrice) * 100) : null; return <tr key={product.id}><td><strong>{product.name}</strong>{product.description && <small>{product.description}</small>}</td><td>{product.category || 'Unassigned'}</td><td>{qualityTierLabel(product.quality_tier) || <span className="shop-admin-tier-missing">Not set</span>}</td><td>{product.quote_price_range ? `₹${product.quote_price_range}` : '—'}</td><td>{price > 0 ? `₹${price.toLocaleString('en-IN')} / ${product.unit || 'unit'}` : <span style={{ color: '#d97706', fontWeight: 600 }}>Price on request</span>}</td>{!isVendor && <td>{discountPercent === null ? '—' : `${discountPercent}% OFF`}</td>}{!isVendor && <td>{product.vendor_id ? `Vendor #${product.vendor_id}` : product.supplier_id === 0 ? 'Admin' : `Supplier #${product.supplier_id}`}</td>}<td>{isVendor ? (() => {
+        {(!isSeller || isVendor) && (
+          <section className="shop-admin-card" style={{ marginBottom: 16, border: '1px dashed var(--border, #cbd5e1)' }}>
+            <div className="shop-admin-list-head" style={{ gap: 12 }}>
+              <div>
+                <h3 style={{ marginBottom: 4 }}>Bulk product import</h3>
+                <p style={{ margin: 0, fontSize: 13 }}>{isVendor ? 'Upload up to 200 products at once. Products are sent to Admin for approval.' : 'Upload up to 200 products at once. Missing subcategories are automatically placed under the related main category.'}</p>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button type="button" className="shop-import-button secondary" onClick={downloadImportTemplate}><FileText size={15} /> Download template</button>
+                <label htmlFor="shop-products-import-file" className="shop-import-button primary">
+                  <UploadCloud size={15} /> Choose CSV
+                </label>
+                <input id="shop-products-import-file" className="shop-import-file-input" type="file" accept=".csv,text/csv" onChange={selectImportFile} />
+                {!isVendor && <button type="button" className="shop-import-button secondary" onClick={fixExistingProductCategories} disabled={normalizingCategories}>{normalizingCategories ? 'Fixing…' : 'Fix existing categories'}</button>}
+              </div>
+            </div>
+            {importRows.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13 }}>{importFileName}: {importRows.length} product(s) ready</p>
+                <div className="shop-admin-table-wrap shop-import-preview">
+                  <table><thead><tr><th>Name</th><th>Category</th><th>Brand</th><th>Price</th><th>Stock</th></tr></thead>
+                    <tbody>{importRows.slice(0, 5).map((item, index) => <tr key={index}><td>{item.name || item.product_name || '—'}</td><td>{item.category || '—'}</td><td>{item.brand || '—'}</td><td>{item.price || item.selling_price || '—'}</td><td>{item.quantity || item.stock || '0'}</td></tr>)}</tbody>
+                  </table>
+                </div>
+                {importRows.length > 5 && <small className="shop-import-preview-note">Showing first 5 of {importRows.length} products. All {importRows.length} products will be imported.</small>}
+                <div className="shop-import-actions">
+                  {!isVendor && <label className="shop-admin-tier-filter">Duplicate products<select value={importMode} onChange={(event) => setImportMode(event.target.value)}><option value="create">Skip duplicates</option><option value="update">Update matching products</option></select></label>}
+                  <button type="button" className="shop-import-confirm" onClick={importProducts} disabled={importing}>{importing ? 'Importing…' : isVendor ? `✓ Submit ${importRows.length} products for approval` : `✓ Import all ${importRows.length} products`}</button>
+                  <button type="button" className="shop-import-clear" onClick={() => { setImportRows([]); setImportFileName(''); }}>Clear file</button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+        <div className="shop-admin-card"><div className="shop-admin-list-head"><h3>{isSeller ? 'My products' : 'All products'} ({isSeller ? products.length : productPagination.total})</h3><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>{!isSeller && <input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Search products…" style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', minWidth: 180 }} />}<label className="shop-admin-tier-filter">Quality Tier<select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)}><option value="any">All products</option><option value="none">No Quality Tier set</option>{QUALITY_TIER_OPTIONS.map((tier) => <option key={tier.value} value={tier.value}>{tier.value === 'all' ? 'All tiers' : tier.label}</option>)}</select></label></div></div>{loading ? <p>Loading products...</p> : !products.length ? <p>No products yet. Add the first product above.</p> : !visibleProducts.length ? <p>No products match this Quality Tier filter.</p> : <div className="shop-admin-table-wrap"><table><thead><tr><th>Product</th><th>Category</th><th>Quality</th><th>Get Quote range</th><th>Buy Now price / unit</th>{!isSeller && <th>Discount</th>}{!isSeller && <th>Source</th>}<th>Status</th><th>Actions</th></tr></thead><tbody>{visibleProducts.map((product) => { const price = Number(product.price); const originalPrice = Number(product.compare_at_price); const discountPercent = originalPrice > price && price > 0 ? Math.round(((originalPrice - price) / originalPrice) * 100) : null; return <tr key={product.id}><td><strong>{product.name}</strong>{product.description && <small>{product.description}</small>}</td><td>{product.category || 'Unassigned'}</td><td>{qualityTierLabel(product.quality_tier) || <span className="shop-admin-tier-missing">Not set</span>}</td><td>{product.quote_price_range ? `₹${product.quote_price_range}` : '—'}</td><td>{price > 0 ? `₹${price.toLocaleString('en-IN')} / ${product.unit || 'unit'}` : <span style={{ color: '#d97706', fontWeight: 600 }}>Price on request</span>}</td>{!isSeller && <td>{discountPercent === null ? '—' : `${discountPercent}% OFF`}</td>}{!isSeller && <td>{product.vendor_id ? `Vendor #${product.vendor_id}` : product.supplier_id === 0 ? 'Admin' : `Supplier #${product.supplier_id}`}</td>}<td>{isSeller ? (() => {
   const approval = product.specifications?.__approval__;
   const status = approval?.status || 'approved';
   if (status === 'pending') {
@@ -739,8 +1597,8 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     );
   }
   return <span className="shop-approval-badge badge-approved" title="Approved by admin">✓ Approved {product.is_available ? '' : '(Hidden)'}</span>;
-})() : (product.is_available ? 'Visible' : 'Hidden')}</td><td><div className="shop-admin-actions"><button type="button" onClick={() => edit(product)}>Edit</button>{(!isVendor || !product.specifications?.__approval__?.status || product.specifications.__approval__.status === 'approved') && <button type="button" onClick={() => toggle(product)}>{product.is_available ? 'Hide' : 'Show'}</button>}<button type="button" onClick={() => remove(product)}>Delete</button></div></td></tr>; })}</tbody></table></div>}
-    {!isVendor && !loading && productPagination.pages > 1 ? (
+})() : (product.is_available ? 'Visible' : 'Hidden')}</td><td><div className="shop-admin-actions"><button type="button" onClick={() => edit(product)}>Edit</button>{(!isSeller || !product.specifications?.__approval__?.status || product.specifications.__approval__.status === 'approved') && <button type="button" onClick={() => toggle(product)}>{product.is_available ? 'Hide' : 'Show'}</button>}<button type="button" onClick={() => remove(product)}>Delete</button></div></td></tr>; })}</tbody></table></div>}
+    {!isSeller && !loading && productPagination.pages > 1 ? (
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>Page {productPagination.page} of {productPagination.pages}</span>
         <div style={{ display: 'flex', gap: 6 }}>
@@ -1101,12 +1959,18 @@ function OfferManager() {
     <div className="shop-admin-heading"><div><h2>Offers</h2><p>Show offer badges on Shop Now products by category, subcategory and/or brand. Blank targeting fields apply to everything.</p></div><button type="button" onClick={load}>Refresh</button></div>
     {notice && <p className="shop-admin-notice" role="status">{notice}</p>}
     <form className="shop-admin-card" onSubmit={save}><h3>{editingId ? 'Edit offer' : 'Create offer'}</h3><div className="shop-admin-fields">
-      <label>Offer name *<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Cement sale" /></label>
+      <label>
+        <span>Offer name <span style={{ color: '#ef4444' }}>*</span></span>
+        <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Cement sale" />
+      </label>
       <label>Category<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value, subcategory: '' })}><option value="">All categories</option>{categories.map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}</select></label>
       <label>Subcategory<select value={form.subcategory} onChange={(e) => setForm({ ...form, subcategory: e.target.value })} disabled={!form.category}><option value="">All subcategories</option>{subcategories.map((item) => { const name = typeof item === 'object' && item !== null ? item.name : item; return <option key={name} value={name}>{name}</option>; })}</select></label>
       <label>Brand<input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} placeholder="e.g. UltraTech" /></label>
       <label>Discount type<select value={form.discount_type} onChange={(e) => setForm({ ...form, discount_type: e.target.value })}><option value="percent">Percentage</option><option value="fixed">Fixed amount</option></select></label>
-      <label>Discount value *<input required type="number" min="0.01" step="0.01" max={form.discount_type === 'percent' ? '100' : undefined} value={form.discount_value} onChange={(e) => setForm({ ...form, discount_value: e.target.value })} /></label>
+      <label>
+        <span>Discount value <span style={{ color: '#ef4444' }}>*</span></span>
+        <input required type="number" min="0.01" step="0.01" max={form.discount_type === 'percent' ? '100' : undefined} value={form.discount_value} onChange={(e) => setForm({ ...form, discount_value: e.target.value })} />
+      </label>
       <label>Badge text<input maxLength={80} value={form.badge_text} onChange={(e) => setForm({ ...form, badge_text: e.target.value })} placeholder="6% OFF (blank = automatic)" /></label>
       <label>Priority<input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: e.target.value })} /><small>Lower number wins when multiple offers match.</small></label>
       <label>Start date/time<input type="datetime-local" value={form.starts_at} onChange={(e) => setForm({ ...form, starts_at: e.target.value })} /></label>
@@ -1128,7 +1992,7 @@ export default function ShopNowManager({ isDarkMode, initialTab = 'categories' }
     }
   };
 
-  return <div className="shop-admin-root">
+  return <div className={`shop-admin-root ${isDarkMode ? 'dark-mode dark' : ''}`}>
     <div className="shop-admin-toolbar"><div><h2>Shop Now Manager</h2><p>Add products and manage what customers see on Shop Now.</p></div><button type="button" onClick={openAddProduct}>+ Add Product</button></div>
     <div className="shop-admin-tabs" role="tablist" aria-label="Shop Now management">
       <button type="button" role="tab" aria-selected={tab === 'categories'} className={tab === 'categories' ? 'active' : ''} onClick={() => setTab('categories')}>Categories</button>
@@ -1137,7 +2001,7 @@ export default function ShopNowManager({ isDarkMode, initialTab = 'categories' }
     </div>
     <Suspense fallback={<p>Loading shop panel…</p>}>
       {tab === 'categories' && <ShopCategoriesManager isDarkMode={isDarkMode} />}
-      {tab === 'products' && <ProductManager />}
+      {tab === 'products' && <ProductManager isDarkMode={isDarkMode} />}
       {tab === 'content' && <AppearanceManager />}
       {tab === 'coupons' && <ShopCouponsManager />}
     </Suspense>
@@ -1204,9 +2068,9 @@ export default function ShopNowManager({ isDarkMode, initialTab = 'categories' }
 }
 
 export function VendorShopProductsManager({ isDarkMode = false }) {
-  return <div className="shop-admin-root">
+  return <div className={`shop-admin-root ${isDarkMode ? 'dark-mode dark' : ''}`}>
     <VendorCommissionSummary isDarkMode={isDarkMode} />
-    <ProductManager ownerRole="vendor" formId="vendor-shop-product-form" />
+    <ProductManager ownerRole="vendor" formId="vendor-shop-product-form" isDarkMode={isDarkMode} />
   </div>;
 }
 
@@ -1215,8 +2079,19 @@ export function ShopProductsManager({ isDarkMode = false }) {
   const showForm = searchParams ? searchParams.get('action') === 'add' : false;
 
   return (
-    <div className="shop-admin-root">
-      <ProductManager ownerRole="admin" formId="shop-product-form" initialShowForm={showForm} />
+    <div className={`shop-admin-root ${isDarkMode ? 'dark-mode dark' : ''}`}>
+      <ProductManager ownerRole="admin" formId="shop-product-form" initialShowForm={showForm} isDarkMode={isDarkMode} />
+    </div>
+  );
+}
+
+export function SupplierShopProductsManager({ isDarkMode = false }) {
+  const searchParams = useSearchParams();
+  const showForm = searchParams ? searchParams.get('action') === 'add' : false;
+
+  return (
+    <div className={`shop-admin-root ${isDarkMode ? 'dark-mode dark' : ''}`}>
+      <ProductManager ownerRole="supplier" formId="supplier-shop-product-form" initialShowForm={showForm} isDarkMode={isDarkMode} />
     </div>
   );
 }

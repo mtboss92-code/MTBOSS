@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { AdminStatCard, AdminSectionCard, AdminMoney, AdminButton, AdminInput } from './AdminUI';
+import RequiredAsterisk from '../components/RequiredAsterisk';
 
 const managerLoading = () => <div className="empty-state">Loading section...</div>;
 const dynamicManager = (loader) => dynamic(loader, { loading: managerLoading });
@@ -132,7 +133,21 @@ function AdminDashboard() {
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') || 'overview');
   const initialProjectId = searchParams.get('projectId') || null;
-  const isDarkMode = false;
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const html = document.documentElement;
+    const sync = () =>
+      setIsDarkMode(
+        html.classList.contains('dark-mode') ||
+        html.classList.contains('dark') ||
+        localStorage.getItem('theme') === 'dark'
+      );
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(html, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
   const [loading, setLoading] = useState(true);
   const [submissions, setSubmissions] = useState([]);
   const [selectedSubmission, setSelectedSubmission] = useState(null);
@@ -500,23 +515,23 @@ function AdminDashboard() {
           return;
         }
 
-        // Overview requests are independent, so do them concurrently. Previously
-        // each slow endpoint delayed every endpoint after it and blocked the page.
+        // Overview requests are independent, but firing all 7 at once exhausts the
+        // Neon pooler (max ~5). Run them in small batches of 3.
         setLoading(false);
-        await Promise.all([
-          requestJson('/api/contact').then((data) => {
+        const overviewJobs = [
+          () => requestJson('/api/contact').then((data) => {
             if (data?.success) setSubmissions(data.data || []);
           }),
-          requestJson('/api/properties?status=pending&fields=list&limit=1&page=1').then((data) => {
-            if (data?.success) setPendingProperties(data.pagination?.total || (data.data || []).length);
+          () => requestJson('/api/properties?status_counts=1').then((data) => {
+            if (data?.success) setPendingProperties(data.data?.pending || 0);
           }),
-          requestJson('/api/admin/vendors?status=pending&counts=1').then((data) => {
+          () => requestJson('/api/admin/vendors?status=pending&counts=1').then((data) => {
             if (data?.success) setPendingVendors(data.pagination?.total || 0);
           }),
-          requestJson('/api/admin/suppliers?status=pending&counts=1').then((data) => {
+          () => requestJson('/api/admin/suppliers?status=pending&counts=1').then((data) => {
             if (data?.success) setPendingSuppliers(data.pagination?.total || 0);
           }),
-          requestJson('/api/admin/suppliers', { method: 'PATCH' }).then((data) => {
+          () => requestJson('/api/admin/suppliers', { method: 'PATCH' }).then((data) => {
             if (data?.success) {
               setSupplierCommission({
                 total: parseFloat(data.data.total_commission || 0),
@@ -526,7 +541,7 @@ function AdminDashboard() {
               });
             }
           }),
-          requestJson('/api/admin/shop-commissions').then((data) => {
+          () => requestJson('/api/admin/shop-commissions').then((data) => {
             if (data?.success && data?.data) {
               setShopVendorCommission({
                 today: parseFloat(data.data.today || 0),
@@ -537,7 +552,7 @@ function AdminDashboard() {
               });
             }
           }),
-          requestJson('/api/admin/bookings').then((data) => {
+          () => requestJson('/api/admin/bookings').then((data) => {
             if (!data?.success) return;
 
             const all = data.data || [];
@@ -557,7 +572,12 @@ function AdminDashboard() {
                 .reduce((sum, booking) => sum + calcCommission(booking), 0)
             );
           }),
-        ]);
+        ];
+
+        for (let i = 0; i < overviewJobs.length; i += 3) {
+          // eslint-disable-next-line no-await-in-loop
+          await Promise.all(overviewJobs.slice(i, i + 3).map((job) => job().catch(() => undefined)));
+        }
       } catch (error) {
         console.error('Error fetching data:', error);
       } finally {
@@ -2557,7 +2577,10 @@ function AdminDashboard() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.6rem' }}>
                   {CAREER_EDIT_FIELDS.map(field => (
                     <label key={field.name} style={{ display: 'block' }}>
-                      <span className="modal-field-label">{field.label}</span>
+                      <span className="modal-field-label">
+                        {field.label}
+                        {field.required ? <> <RequiredAsterisk /></> : null}
+                      </span>
                       <input
                         type={field.type || 'text'}
                         required={field.required}

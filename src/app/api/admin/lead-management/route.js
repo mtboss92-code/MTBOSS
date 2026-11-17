@@ -42,7 +42,11 @@ const ensureLeadManagementSchema = createInitializationGuard(async () => {
     `CREATE INDEX IF NOT EXISTS idx_agent_leads_agent_id ON agent_leads (agent_id)`,
   ];
   for (const sql of alters) await pool.query(sql);
+  // Heavy backfill runs in syncExternalLeads — not on every notification/lite poll.
+});
 
+async function syncExternalLeads({ force = false } = {}) {
+  if (!force && lastLeadSyncAt && Date.now() - lastLeadSyncAt < SYNC_TTL_MS) return;
   try {
     await pool.query(`
       UPDATE agent_leads l
@@ -60,10 +64,6 @@ const ensureLeadManagementSchema = createInitializationGuard(async () => {
   } catch (err) {
     console.warn('Backfill primary service leads error:', err.message);
   }
-});
-
-async function syncExternalLeads({ force = false } = {}) {
-  if (!force && lastLeadSyncAt && Date.now() - lastLeadSyncAt < SYNC_TTL_MS) return;
   const syncs = [
     `INSERT INTO agent_leads
        (city, state, address, client_name, client_phone, alternate_phone, client_email, service_type, lead_type, status,
@@ -213,6 +213,7 @@ async function getLeadRows({
   page = 1,
   limit = 100,
   unbounded = false,
+  lite = false,
 } = {}) {
   const params = [];
   const filters = [];
@@ -242,6 +243,30 @@ async function getLeadRows({
 
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   const orderSql = ` ORDER BY l.created_at DESC, l.id DESC`;
+
+  // Notification / lite polls only need identity + status timestamps — skip heavy joins.
+  if (lite && !unbounded) {
+    const safePage = Math.max(1, parseInt(page, 10) || 1);
+    const safeLimit = Math.min(200, Math.max(1, parseInt(limit, 10) || 100));
+    const offset = (safePage - 1) * safeLimit;
+    params.push(safeLimit, offset);
+    const result = await pool.query(
+      `SELECT
+         l.id, l.client_name, l.service_type, l.lead_source, l.status, l.lead_stage,
+         l.created_at, l.updated_at
+       FROM agent_leads l
+       ${where}
+       ${orderSql}
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+    return {
+      rows: result.rows,
+      total: result.rows.length + offset,
+      page: safePage,
+      limit: safeLimit,
+    };
+  }
 
   if (unbounded) {
     const result = await pool.query(
@@ -324,9 +349,14 @@ export async function GET(req) {
     if (!requireRole(req, 'admin')) {
       return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
     }
-    await ensureLeadManagementSchema();
 
     const { searchParams } = new URL(req.url);
+    const liteEarly = searchParams.get('lite') === '1';
+    // Notification polls only read core agent_leads columns — skip DDL bootstrap.
+    if (!liteEarly) {
+      await ensureLeadManagementSchema();
+    }
+
     const singleLeadId = searchParams.get('leadId');
     if (singleLeadId) {
       const leadRes = await pool.query(
@@ -498,7 +528,7 @@ export async function GET(req) {
 
     const page = searchParams.get('page') || '1';
     const limit = searchParams.get('limit') || '100';
-    const { rows, total, page: p, limit: l } = await getLeadRows({ ...filters, page, limit });
+    const { rows, total, page: p, limit: l } = await getLeadRows({ ...filters, page, limit, lite });
     const dirs = lite
       ? { agents: [], franchises: [], vendors: [] }
       : await getAssignableDirectories();
@@ -518,6 +548,7 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
+  let client;
   try {
     const admin = requireRole(req, 'admin');
     if (!admin) {
@@ -536,8 +567,38 @@ export async function POST(req) {
     if (!client_name || !client_phone || !city) {
       return NextResponse.json({ success: false, error: 'Client name, phone and city are required' }, { status: 400 });
     }
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // Lock this customer identity for the duration of the request. This closes
+    // the gap before the browser can render its disabled "Saving…" button.
+    const normalizedPhone = String(client_phone).replace(/\D/g, '');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `admin-lead:${normalizedPhone}:${String(client_name).trim().toLowerCase()}:${String(city).trim().toLowerCase()}`,
+    ]);
+    const duplicate = await client.query(
+      `SELECT *
+         FROM agent_leads
+        WHERE source_ref_table IS NULL
+          AND REGEXP_REPLACE(client_phone, '[^0-9]', '', 'g') = $1
+          AND LOWER(TRIM(client_name)) = LOWER(TRIM($2))
+          AND LOWER(TRIM(city)) = LOWER(TRIM($3))
+          AND created_at > NOW() - INTERVAL '5 minutes'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`,
+      [normalizedPhone, client_name, city]
+    );
+    if (duplicate.rows[0]) {
+      await client.query('COMMIT');
+      return NextResponse.json({
+        success: true,
+        data: duplicate.rows[0],
+        duplicate: true,
+        message: 'This lead was already saved.',
+      });
+    }
     if (agent_id) {
-      const approvedAgent = await pool.query(
+      const approvedAgent = await client.query(
         `SELECT id FROM agents
           WHERE id = $1
             AND status = 'Approved'
@@ -547,19 +608,26 @@ export async function POST(req) {
         [agent_id, city]
       );
       if (!approvedAgent.rows[0]) {
+        await client.query('ROLLBACK');
         return NextResponse.json({ success: false, error: 'Select an active approved agent from the lead city.' }, { status: 400 });
       }
     }
     if (assigned_franchise_id) {
-      const match = await pool.query(`SELECT id FROM franchises WHERE id = $1 AND status = 'Approved' AND LOWER(TRIM(COALESCE(city,''))) = LOWER(TRIM($2))`, [assigned_franchise_id, city]);
-      if (!match.rows[0]) return NextResponse.json({ success: false, error: 'Select an approved franchise from the lead city.' }, { status: 400 });
+      const match = await client.query(`SELECT id FROM franchises WHERE id = $1 AND status = 'Approved' AND LOWER(TRIM(COALESCE(city,''))) = LOWER(TRIM($2))`, [assigned_franchise_id, city]);
+      if (!match.rows[0]) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ success: false, error: 'Select an approved franchise from the lead city.' }, { status: 400 });
+      }
     }
     if (assigned_vendor_id) {
-      const match = await pool.query(`SELECT id FROM vendors WHERE id = $1 AND is_approved = TRUE AND status = 'active' AND package_status = 'active' AND (package_expires_at IS NULL OR package_expires_at > NOW()) AND LOWER(TRIM(COALESCE(city,''))) = LOWER(TRIM($2))`, [assigned_vendor_id, city]);
-      if (!match.rows[0]) return NextResponse.json({ success: false, error: 'Select a paid active approved vendor from the lead city.' }, { status: 400 });
+      const match = await client.query(`SELECT id FROM vendors WHERE id = $1 AND is_approved = TRUE AND status = 'active' AND package_status = 'active' AND (package_expires_at IS NULL OR package_expires_at > NOW()) AND LOWER(TRIM(COALESCE(city,''))) = LOWER(TRIM($2))`, [assigned_vendor_id, city]);
+      if (!match.rows[0]) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ success: false, error: 'Select a paid active approved vendor from the lead city.' }, { status: 400 });
+      }
     }
 
-    const result = await pool.query(
+    const result = await client.query(
       `INSERT INTO agent_leads
         (agent_id, assigned_franchise_id, assigned_vendor_id, city, client_name, client_phone, client_email,
          service_type, lead_type, status, follow_up_date, notes, client_requirement,
@@ -584,10 +652,14 @@ export async function POST(req) {
       ]
     );
 
+    await client.query('COMMIT');
     return NextResponse.json({ success: true, data: result.rows[0] }, { status: 201 });
   } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Lead management POST error:', error);
     return NextResponse.json({ success: false, error: 'Server error' }, { status: 500 });
+  } finally {
+    client?.release();
   }
 }
 

@@ -6,6 +6,7 @@ import "./admin-theme.css";
 import { AdminStatusBadge } from "./AdminUI";
 import DashboardNotifications from "./DashboardNotifications";
 import { useRouter, useSearchParams } from "next/navigation";
+import { ACTIVE_ROLE_KEY } from "@/lib/client-session";
 import {
   LayoutDashboard,
   UserCog,
@@ -51,6 +52,7 @@ const menuStructure = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, tab: '' },
   { id: 'users', label: 'Users', icon: Users, tab: 'users' },
   { id: 'agent-tasks', label: 'Tasks', icon: CalendarClock, tab: 'agent-tasks' },
+  { id: 'franchises', label: 'Franchises', icon: BriefcaseBusiness, tab: 'franchises' },
 
   // Approvals
   {
@@ -131,7 +133,6 @@ const menuStructure = [
       { label: 'Shipping Settings', tab: 'shipping-settings' },
       { label: 'Vendor Commission', tab: 'shop-commission-settings' },
       { label: 'Cashback & Wallet', tab: 'cashback' },
-      { label: 'Franchises', tab: 'franchises' },
     ],
   },
 
@@ -193,7 +194,6 @@ const menuStructure = [
     children: [
       { label: 'Office Locations', tab: 'office-locations' },
       { label: 'Cities', tab: 'cities' },
-      // { label: 'Franchises', tab: 'franchises' },
     ],
   },
 
@@ -300,7 +300,7 @@ function SidebarGroup({
           id={submenuId}
           role="region"
           aria-labelledby={`group-btn-${item.id}`}
-          className="mt-1 ml-4 pl-3 border-l-2 border-zinc-200 space-y-1 list-none"
+          className="mt-1 ml-4 pl-3 border-l-2 border-line space-y-1 list-none"
         >
           {item.children.map((child) => {
             const isChildTabActive = (child.tab || "") === currentTab;
@@ -477,7 +477,30 @@ export default function DashboardLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef(null);
-  const isDarkMode = false;
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const html = document.documentElement;
+    const sync = () =>
+      setIsDarkMode(
+        html.classList.contains('dark-mode') ||
+        html.classList.contains('dark') ||
+        localStorage.getItem('theme') === 'dark'
+      );
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(html, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+
+  const toggleTheme = () => {
+    const nextMode = !isDarkMode;
+    setIsDarkMode(nextMode);
+    document.documentElement.classList.toggle('dark-mode', nextMode);
+    document.documentElement.classList.toggle('dark', nextMode);
+    localStorage.setItem('theme', nextMode ? 'dark' : 'light');
+    window.dispatchEvent(new Event('storage'));
+  };
   const [user, setUser] = useState({});
   const router = useRouter();
 
@@ -502,12 +525,61 @@ export default function DashboardLayout({ children }) {
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       try {
-        let u = JSON.parse(localStorage.getItem("user"));
-        if (!u) {
+        const activeRole = localStorage.getItem(ACTIVE_ROLE_KEY);
+        const adminToken =
+          localStorage.getItem("admin-token") ||
+          (localStorage.getItem("token") &&
+            (() => {
+              try {
+                return JSON.parse(localStorage.getItem("user") || "{}").role === "admin";
+              } catch {
+                return false;
+              }
+            })());
+
+        // Non-admin roles should never stay on the admin dashboard layout
+        if (!adminToken) {
+          if (activeRole === "agent" || localStorage.getItem("agent-token")) {
+            router.replace("/agent/dashboard");
+            return;
+          }
+          if (activeRole === "franchise" || localStorage.getItem("franchise-token")) {
+            router.replace("/franchise/dashboard");
+            return;
+          }
+          if (activeRole === "vendor" || localStorage.getItem("vendor-token") || localStorage.getItem("service-provider-token")) {
+            router.replace("/vendor/dashboard");
+            return;
+          }
+          if (activeRole === "supplier" || localStorage.getItem("supplier-token")) {
+            router.replace("/supplier/dashboard");
+            return;
+          }
+        }
+
+        let u = null;
+        if (activeRole === "agent") {
           const agentStr = localStorage.getItem("agent");
           if (agentStr) {
             u = JSON.parse(agentStr);
             u.role = "agent";
+          }
+        } else if (activeRole === "admin") {
+          const adminStr = localStorage.getItem("admin") || localStorage.getItem("user");
+          if (adminStr) {
+            u = JSON.parse(adminStr);
+            u.role = u.role || "admin";
+          }
+        } else {
+          const userStr = localStorage.getItem("user");
+          if (userStr) {
+            u = JSON.parse(userStr);
+          } else {
+            const agentStr = localStorage.getItem("agent");
+            if (agentStr) {
+              u = JSON.parse(agentStr);
+              u.role = "agent";
+            }
           }
         }
         setUser(u || {});
@@ -599,7 +671,7 @@ export default function DashboardLayout({ children }) {
           <SidebarNav
             sidebarOpen={true}
             closeSidebarOnMobile={closeSidebarOnMobile}
-            isDarkMode={false}
+            isDarkMode={isDarkMode}
             user={user}
           />
         </Suspense>
@@ -636,6 +708,24 @@ export default function DashboardLayout({ children }) {
           </div>
           <div className="flex-1" />
           <div className="relative flex items-center gap-1">
+                        {/* Dark Mode Toggle */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+              title={isDarkMode ? "Light mode" : "Dark mode"}
+              className="rounded-lg p-2 transition-colors hover:bg-black/5 dark:hover:bg-white/10 text-ink-700"
+            >
+              {isDarkMode ? (
+                <svg className="w-5 h-5 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5 text-slate-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                </svg>
+              )}
+            </button>
             <DashboardNotifications />
             <div className="relative" ref={profileRef}>
               <button

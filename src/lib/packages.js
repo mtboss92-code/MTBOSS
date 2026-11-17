@@ -3,7 +3,8 @@ import { createInitializationGuard } from '@/lib/api-utils';
 
 // Package definitions (defaults and fallbacks)
 export const PACKAGES = [
-  { id: 'pkg_6m', name: '6 Months', duration_months: 6, price: 100, label: '6 Month Plan', description: 'Perfect for getting started. Complete booking access.', is_active: true, sort_order: 1, target_role: 'all' },
+  { id: 'pkg_free_1m', name: 'Free Plan', duration_months: 0, price: 0, label: 'Free Plan', description: 'Setup store & add products free. Leads & direct payouts unlock on paid plan.', is_active: true, sort_order: 0, target_role: 'all' },
+  { id: 'pkg_6m', name: '6 Months', duration_months: 6, price: 2999, label: '6 Month Plan', description: 'Perfect for getting started. Complete booking access.', is_active: true, sort_order: 1, target_role: 'all' },
   { id: 'pkg_1y', name: '1 Year', duration_months: 12, price: 4999, label: '1 Year Plan', description: 'Most popular. Great value with a full year of leads.', is_active: true, sort_order: 2, target_role: 'all' },
   { id: 'pkg_2y', name: '2 Years', duration_months: 24, price: 7999, label: '2 Year Plan', description: 'Best deal. Long-term peace of mind and maximum savings.', is_active: true, sort_order: 3, target_role: 'all' },
 ];
@@ -39,18 +40,22 @@ export const ensurePackageSchema = createInitializationGuard(async () => {
     try { await pool.query(sql); } catch (_) {}
   }
 
-  // Seed default packages if empty
+  // Seed default packages and ensure pkg_free_1m exists
   try {
-    const countRes = await pool.query(`SELECT COUNT(*)::int AS cnt FROM subscription_packages`);
-    if ((countRes.rows[0]?.cnt || 0) === 0) {
-      for (const p of PACKAGES) {
-        await pool.query(
-          `INSERT INTO subscription_packages (id, name, duration_months, price, label, description, is_active, sort_order, target_role)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-           ON CONFLICT (id) DO NOTHING`,
-          [p.id, p.name, p.duration_months, p.price, p.label, p.description, p.is_active, p.sort_order, p.target_role]
-        );
-      }
+    for (const p of PACKAGES) {
+      await pool.query(
+        `INSERT INTO subscription_packages (id, name, duration_months, price, label, description, is_active, sort_order, target_role)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (id) DO UPDATE SET
+           name = EXCLUDED.name,
+           duration_months = EXCLUDED.duration_months,
+           price = EXCLUDED.price,
+           label = EXCLUDED.label,
+           description = EXCLUDED.description,
+           is_active = EXCLUDED.is_active,
+           sort_order = EXCLUDED.sort_order`,
+        [p.id, p.name, p.duration_months, p.price, p.label, p.description, p.is_active, p.sort_order, p.target_role]
+      );
     }
   } catch (seedErr) {
     console.warn('Subscription packages seed notice:', seedErr.message);
@@ -83,6 +88,9 @@ export const ensurePackageSchema = createInitializationGuard(async () => {
     `ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS package_starts_at TIMESTAMPTZ`,
     `ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS package_expires_at TIMESTAMPTZ`,
     `ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS package_status TEXT DEFAULT 'none'`,
+    `ALTER TABLE material_enquiries ADD COLUMN IF NOT EXISTS is_free_tier_order BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE material_enquiries ADD COLUMN IF NOT EXISTS free_tier_vendor_id INTEGER`,
+    `UPDATE suppliers SET package_expires_at = NULL, package_duration_months = 0, package_name = 'Free Plan' WHERE package_id = 'pkg_free_1m' OR COALESCE(package_price, 0) <= 0`,
   ];
 
   for (const sql of supplierAlters) {
@@ -172,24 +180,30 @@ export function calculateExpiry(startDate, durationMonths) {
 export function isPackageActive(row) {
   if (!row.package_status || row.package_status === 'none') return false;
   if (row.package_status !== 'active') return false;
+  // Free tier plan has no time limit (unlimited validity)
+  const isFree = Number(row.package_price || 0) <= 0 || row.package_id === 'pkg_free_1m';
+  if (isFree) return true;
   if (!row.package_expires_at) return true;
   return new Date(row.package_expires_at) > new Date();
 }
 
 export function getPackageInfo(row) {
+  const isFree = Number(row.package_price || 0) <= 0 || row.package_id === 'pkg_free_1m';
   return {
-    package_id: row.package_id || null,
-    package_name: row.package_name || null,
+    package_id: row.package_id || (isFree ? 'pkg_free_1m' : null),
+    package_name: isFree ? (row.package_name || 'Free Plan') : (row.package_name || null),
     package_price: Number(row.package_price || 0),
-    package_duration_months: row.package_duration_months || 0,
+    package_duration_months: isFree ? 0 : (row.package_duration_months || 0),
     package_purchased_at: row.package_purchased_at || null,
     package_starts_at: row.package_starts_at || null,
-    package_expires_at: row.package_expires_at || null,
+    package_expires_at: isFree ? null : (row.package_expires_at || null),
     package_status: row.package_status || 'none',
     is_active: isPackageActive(row),
-    days_remaining: row.package_expires_at
-      ? Math.max(0, Math.ceil((new Date(row.package_expires_at) - new Date()) / (1000 * 60 * 60 * 24)))
-      : 0,
+    is_free_plan: isFree,
+    days_remaining: isFree
+      ? null
+      : (row.package_expires_at
+          ? Math.max(0, Math.ceil((new Date(row.package_expires_at) - new Date()) / (1000 * 60 * 60 * 24)))
+          : null),
   };
 }
-

@@ -10,9 +10,11 @@ import { notifyAdminSubmission, deliverMaterialOrderReceipt } from '@/lib/custom
 import { calculateShipping, getShippingSettings } from '@/lib/shipping';
 import { calculateCoupon, couponIsCurrentlyActive, productHasOffer } from '@/lib/coupon-calculations';
 import { evaluateCartPromotions } from '@/lib/promotion-calculations';
-import { getShopVendorCommissionPercent, recordShopVendorCommission, resolveCommissionRate } from '@/lib/shop-commissions';
+import { getShopVendorCommissionPercent, recordShopVendorCommission, resolveCommissionRate, ensureVendorForSupplier } from '@/lib/shop-commissions';
 import { snapshotOrderCashback, ensureCashbackSchema } from '@/lib/cashback/service';
 import { computeRedeemLimit, reserveWalletRedeem } from '@/lib/wallet/redeem';
+import { createPayURequest } from '@/lib/payu';
+import { createPayUIntent, getPayUCallbackUrl, newPayUTxnId } from '@/lib/payu-intents';
 
 const ensureTable = createInitializationGuard(async () => {
   await pool.query(`
@@ -71,6 +73,14 @@ const ensureTable = createInitializationGuard(async () => {
     `ALTER TABLE material_enquiries ADD COLUMN IF NOT EXISTS cashback_status VARCHAR(30) DEFAULT 'NONE'`,
     `ALTER TABLE material_enquiries ADD COLUMN IF NOT EXISTS wallet_used NUMERIC(12,2) NOT NULL DEFAULT 0.00`,
     `ALTER TABLE material_enquiries ADD COLUMN IF NOT EXISTS wallet_redeem_status VARCHAR(30) NOT NULL DEFAULT 'NONE'`,
+    `ALTER TABLE material_enquiries ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'COD'`,
+    `ALTER TABLE material_enquiries ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'PENDING'`,
+    `ALTER TABLE material_enquiries ADD COLUMN IF NOT EXISTS payment_gateway VARCHAR(50)`,
+    `ALTER TABLE material_enquiries ADD COLUMN IF NOT EXISTS payment_gateway_id VARCHAR(255)`,
+    `ALTER TABLE material_enquiries ADD COLUMN IF NOT EXISTS payment_completed_at TIMESTAMP`,
+    `ALTER TABLE material_enquiries ADD COLUMN IF NOT EXISTS is_free_tier_order BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE material_enquiries ADD COLUMN IF NOT EXISTS free_tier_vendor_id INTEGER`,
+    `ALTER TABLE material_enquiries ADD COLUMN IF NOT EXISTS supplier_id INTEGER`,
     `CREATE INDEX IF NOT EXISTS idx_me_status_created ON material_enquiries (status, created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_me_created_at ON material_enquiries (created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_me_user_id ON material_enquiries (user_id)`,
@@ -113,8 +123,9 @@ export async function POST(req) {
       quantity_text, order_unit, delivery_date,
       delivery_address, latitude, longitude,
       message, selected_city,
-      use_wallet, wallet_amount,
+      use_wallet, wallet_amount, payment_method,
     } = body;
+    const requestedPaymentMethod = cleanText(payment_method)?.toUpperCase() === 'ONLINE' ? 'ONLINE' : 'COD';
     const isCart = Array.isArray(body.items);
     const couponId = Number(body.coupon_id);
     const useWallet = Boolean(use_wallet);
@@ -122,7 +133,7 @@ export async function POST(req) {
       ? Math.max(0, Number(wallet_amount))
       : null;
     const orderIntent = cleanText(body.order_intent)?.toLowerCase() || (isCart ? 'cart' : 'quote');
-    if (!['quote', 'buy', 'cart'].includes(orderIntent) || (isCart && orderIntent !== 'cart') || (!isCart && orderIntent === 'cart')) {
+    if (!['quote', 'buy', 'cart'].includes(orderIntent)) {
       return NextResponse.json({ success: false, error: 'Invalid shop order type' }, { status: 400 });
     }
     if (isCart && (body.items.length === 0 || body.items.length > 20)) {
@@ -259,6 +270,7 @@ export async function POST(req) {
         let productTotal = 0;
         let sourceCity = '';
         let product = null;
+        let isFreeTierSupplier = false;
         const coverage = await client.query(`SELECT 1 WHERE EXISTS (
           SELECT 1 FROM suppliers s WHERE LOWER(TRIM(s.city))=LOWER(TRIM($1))
             AND s.status='approved' AND s.is_active=TRUE
@@ -279,6 +291,8 @@ export async function POST(req) {
           const productResult = await client.query(
             `SELECT m.name, m.category, m.unit, m.quantity, m.price, m.compare_at_price, m.bulk_pricing, m.is_available,
                     m.supplier_id, m.vendor_id, m.specifications,
+                    s.shop_name AS supplier_shop_name, s.phone AS supplier_phone, s.email AS supplier_email,
+                    s.package_id AS supplier_package_id, s.package_price AS supplier_package_price, s.package_status AS supplier_package_status,
                     COALESCE(NULLIF(TRIM(v.city), ''), NULLIF(TRIM(s.city), ''), CASE WHEN jsonb_array_length(COALESCE(m.available_cities, '[]'::jsonb))=1 THEN m.available_cities->>0 END) AS source_city,
                     CASE
                       WHEN jsonb_array_length(COALESCE(m.available_cities, '[]'::jsonb)) > 0 THEN m.available_cities
@@ -296,6 +310,10 @@ export async function POST(req) {
             [item.product_id]
           );
           product = productResult.rows[0];
+          isFreeTierSupplier = Boolean(product?.supplier_id > 0 && (
+            Number(product?.supplier_package_price || 0) <= 0 ||
+            product?.supplier_package_id === 'pkg_free_1m'
+          ));
           const approvalStatus = (product?.vendor_id != null && product.specifications?.__approval__?.status)
             ? product.specifications.__approval__.status
             : 'approved';
@@ -417,6 +435,8 @@ export async function POST(req) {
         }
 
         const grandTotal = Math.max(0, itemBaseGrandTotal - itemWalletUsed);
+        const itemPaymentMethod = orderIntent === 'quote' ? 'QUOTE' : (grandTotal === 0 ? 'WALLET' : requestedPaymentMethod);
+        const itemPaymentStatus = orderIntent === 'quote' ? 'NOT_APPLICABLE' : (grandTotal === 0 ? 'PAID' : 'PENDING');
 
         const result = await client.query(
         `INSERT INTO material_enquiries
@@ -439,6 +459,11 @@ export async function POST(req) {
           itemWalletUsed, itemWalletStatus,
         ]
       );
+        // Best-effort update of payment method if column exists
+        await client.query(
+          `UPDATE material_enquiries SET payment_method = $1, payment_status = $2 WHERE id = $3`,
+          [itemPaymentMethod, itemPaymentStatus, result.rows[0].id]
+        ).catch(() => {});
         const orderId = result.rows[0].id;
 
         // Perform transactional wallet debit & FIFO lot reservation
@@ -474,8 +499,25 @@ export async function POST(req) {
           actorName: cleanName,
         });
 
-        // Step 3: Check product source - apply fee calculation ONLY on vendor-sourced products (skip Admin)
-        const vendorId = product?.vendor_id ? Number(product.vendor_id) : null;
+        // Step 3: Check product source - apply fee calculation on vendor- and supplier-sourced products (skip Admin direct products)
+        let vendorId = product?.vendor_id ? Number(product.vendor_id) : null;
+        const supplierId = product?.supplier_id ? Number(product.supplier_id) : null;
+
+        // If vendorId is null but supplierId > 0 (supplier added the product), resolve matching vendor
+        if (!vendorId && supplierId && supplierId > 0) {
+          try {
+            vendorId = await ensureVendorForSupplier(supplierId, { client });
+            if (vendorId && item.product_id) {
+              await client.query(
+                'UPDATE supplier_materials SET vendor_id = $1 WHERE id = $2 AND (vendor_id IS NULL OR vendor_id = 0)',
+                [vendorId, item.product_id]
+              );
+            }
+          } catch (vErr) {
+            console.warn('Could not auto-link vendor for supplier in order:', vErr.message);
+          }
+        }
+
         if (vendorId && vendorId > 0) {
           const vendorExists = await client.query('SELECT 1 FROM vendors WHERE id = $1', [vendorId]);
           if (vendorExists.rows.length > 0) {
@@ -540,7 +582,54 @@ export async function POST(req) {
           order_unit: item.order_unit,
           cashback_amount: cashbackSnap.cashbackAmount,
           cashback_status: cashbackSnap.cashbackStatus,
+          payment_method: itemPaymentMethod,
+          payment_status: itemPaymentStatus,
+          is_free_tier_order: Boolean(isFreeTierSupplier),
+          free_tier_vendor_id: isFreeTierSupplier ? (product?.supplier_id || null) : null,
+          supplier_shop_name: product?.supplier_shop_name || null,
+          supplier_phone: product?.supplier_phone || null,
+          supplier_email: product?.supplier_email || null,
         });
+      }
+      const totalPayable = orders.reduce((sum, o) => sum + Number(o.grand_total || 0), 0);
+      let payuPayment = null;
+      if (orderIntent !== 'quote' && requestedPaymentMethod === 'ONLINE' && totalPayable > 0) {
+        try {
+          const txnid = newPayUTxnId('MTSHOP');
+          const primaryOrder = orders[0];
+          const callbackUrl = getPayUCallbackUrl(req);
+          const allOrderIds = orders.map((o) => o.id).join(',');
+
+          await createPayUIntent({
+            txnid,
+            purpose: 'shop_order',
+            entityId: primaryOrder.id,
+            packageId: allOrderIds,
+            amount: totalPayable,
+            client,
+          });
+
+          payuPayment = createPayURequest({
+            txnid,
+            amount: totalPayable,
+            productinfo: orders.length === 1
+              ? `${orders[0].material_type || 'Material Order'}`.slice(0, 80)
+              : `MTBOSS Material Order (${orders.length} items)`.slice(0, 80),
+            firstname: cleanName.split(' ')[0] || 'Customer',
+            email: cleanEmail || user.email || 'customer@mtboss.in',
+            phone: cleanPhone,
+            surl: callbackUrl,
+            furl: callbackUrl,
+            udf1: String(primaryOrder.id),
+            udf2: primaryOrder.order_reference,
+            udf3: 'shop_order',
+            udf4: allOrderIds,
+            udf5: '',
+          });
+        } catch (payuErr) {
+          console.error('[material-enquiries] Failed to initiate PayU payment:', payuErr);
+          throw new Error(`Unable to initialize online payment: ${payuErr.message}`);
+        }
       }
       await client.query('COMMIT');
       const totals = orders.reduce((summary, order) => ({
@@ -556,8 +645,41 @@ export async function POST(req) {
 
       // Respond immediately so mobile clients are not blocked by SMTP/admin notifications.
       const notificationJobs = orders.flatMap((order) => [
-        notifyAdminSubmission({ type: 'material order', name: cleanName, phone: cleanPhone, email: targetEmail, reference: order.order_reference, details: { Category: order.category_name, Material: order.material_type, Quantity: order.quantity_text, Unit: order.order_unit, City: canonicalCity } }),
-        deliverMaterialOrderReceipt({ email: targetEmail, customerName: cleanName, phone: cleanPhone, category: order.category_name, material: order.material_type, quantity: order.quantity_text, unit: order.order_unit, city: canonicalCity, orderReference: order.order_reference, deliveryAddress: delivery_address }),
+        notifyAdminSubmission({
+          type: order.is_free_tier_order ? '⚠️ Free Vendor Product Order' : 'material order',
+          name: cleanName,
+          phone: cleanPhone,
+          email: targetEmail,
+          reference: order.order_reference,
+          details: {
+            Category: order.category_name,
+            Material: order.material_type,
+            Quantity: order.quantity_text,
+            Unit: order.order_unit,
+            City: canonicalCity,
+            ...(order.is_free_tier_order ? {
+              'Vendor Tier': '🟡 1 Month Free Trial (Unpaid)',
+              'Vendor Shop': order.supplier_shop_name || 'N/A',
+              'Vendor Phone': order.supplier_phone || 'N/A',
+              'VENDOR NOTICE': 'Contact vendor to purchase Paid Subscription before payout!',
+            } : {})
+          }
+        }),
+        deliverMaterialOrderReceipt({
+          email: targetEmail,
+          customerName: cleanName,
+          phone: cleanPhone,
+          category: order.category_name,
+          material: order.material_type,
+          quantity: order.quantity_text,
+          unit: order.order_unit,
+          city: canonicalCity,
+          orderReference: order.order_reference,
+          deliveryAddress: delivery_address,
+          amount: order.grand_total,
+          paymentMethod: order.payment_method === 'ONLINE' ? 'Online Payment (PayU)' : (order.payment_method === 'WALLET' ? 'Wallet' : 'Cash on Delivery'),
+          deliveryDate: delivery_date,
+        }),
       ]);
       after(async () => {
         const results = await Promise.allSettled(notificationJobs);
@@ -567,7 +689,7 @@ export async function POST(req) {
         }
       });
 
-      return NextResponse.json({ success: true, data: isCart ? { orders, totals } : { ...orders[0], totals } }, { status: 201 });
+      return NextResponse.json({ success: true, data: isCart ? { orders, totals } : { ...orders[0], totals }, payment: payuPayment }, { status: 201 });
 
     } catch (error) {
       await client.query('ROLLBACK');
