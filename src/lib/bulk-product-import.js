@@ -175,7 +175,11 @@ export async function executeBulkProductImport({
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index] || {};
     const name = text(row.name || row.product_name, 255);
-    const categoryName = text(row.category, 200);
+    const categoryName = text(row.category || row.main_category || row.category_name, 200);
+    const rawSubcategory = text(
+      row.subcategory || row.sub_category || row.sub_cat || row['sub category'] || row['sub-category'] || row['subcategory_name'] || '',
+      255
+    );
     const price = number(row.price || row.selling_price);
 
     if (!name || !categoryName || !(price > 0)) {
@@ -188,7 +192,7 @@ export async function executeBulkProductImport({
     }
 
     const quantity = Math.max(0, Math.floor(number(row.quantity ?? row.stock) ?? 0));
-    const placement = resolveCatalogPlacement(categoryName, row.subcategory, name);
+    const placement = resolveCatalogPlacement(categoryName, rawSubcategory, name);
     const category = await findOrCreateCategory(client, placement.categoryName, text(row.unit, 100) || 'pcs', placement.subcategory);
     const tier = normalizeQualityTier(row.quality_tier || row.quality || 'all') || 'all';
     const images = pipeList(row.images || row.image_urls || row.image_url, 8).filter((url) => url.length <= 1000);
