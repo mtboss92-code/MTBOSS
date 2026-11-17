@@ -236,6 +236,11 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
   const [productPagination, setProductPagination] = useState({ page: 1, limit: 25, total: 0, pages: 1 });
   const [productSearch, setProductSearch] = useState('');
   const [debouncedProductSearch, setDebouncedProductSearch] = useState('');
+  const [importRows, setImportRows] = useState([]);
+  const [importFileName, setImportFileName] = useState('');
+  const [importMode, setImportMode] = useState('create');
+  const [importing, setImporting] = useState(false);
+  const [normalizingCategories, setNormalizingCategories] = useState(false);
   const untieredCount = 0;
   const visibleProducts = products;
 
@@ -289,6 +294,89 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
 
   useEffect(() => { loadReferenceData(); }, [loadReferenceData]);
   useEffect(() => { load(); }, [load]);
+
+  // CSV parser that supports quoted commas and escaped quotes. The import API
+  // remains the authority for field validation and duplicate handling.
+  const parseCsv = (content) => {
+    const rows = [];
+    let row = [], cell = '', quoted = false;
+    for (let i = 0; i < content.length; i += 1) {
+      const char = content[i];
+      if (char === '"') {
+        if (quoted && content[i + 1] === '"') { cell += '"'; i += 1; }
+        else quoted = !quoted;
+      } else if (char === ',' && !quoted) { row.push(cell); cell = ''; }
+      else if ((char === '\n' || char === '\r') && !quoted) {
+        if (char === '\r' && content[i + 1] === '\n') i += 1;
+        row.push(cell); if (row.some((value) => value.trim())) rows.push(row); row = []; cell = '';
+      } else cell += char;
+    }
+    row.push(cell); if (row.some((value) => value.trim())) rows.push(row);
+    if (rows.length < 2) throw new Error('CSV needs a header row and at least one product.');
+    const headers = rows[0].map((header) => header.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+    return rows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, (values[index] || '').trim()])));
+  };
+
+  const selectImportFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setNotice('Please upload a CSV file. Download the template first if needed.');
+      return;
+    }
+    try {
+      const rows = parseCsv(await file.text());
+      if (rows.length > 200) throw new Error('A maximum of 200 products can be imported at once.');
+      setImportRows(rows);
+      setImportFileName(file.name);
+      setNotice(`${rows.length} product row(s) ready for import. Review the preview, then click Import.`);
+    } catch (error) { setImportRows([]); setImportFileName(''); setNotice(error.message); }
+  };
+
+  const downloadImportTemplate = () => {
+    const template = [
+      'name,category,subcategory,brand,price,mrp,unit,quantity,description,image_urls,specifications,bulk_pricing,quality_tier,available_cities,is_available,is_featured_deal',
+      'Ultratech PPC Cement 50 Kg Bag,Building Materials,Cement,Ultratech,420,450,bag,100,High strength PPC cement,https://example.com/cement.jpg,Grade: PPC|Pack Size: 50 Kg,10:410|30:400,standard,Bareilly|Rampur,true,true'
+    ].join('\n');
+    const url = URL.createObjectURL(new Blob([template], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url; link.download = 'shop-products-import-template.csv'; link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importProducts = async () => {
+    if (!importRows.length) return;
+    setImporting(true); setNotice('');
+    try {
+      const response = await fetch('/api/admin/shop-products/import', {
+        method: 'POST', headers: shopHeaders('admin'), body: JSON.stringify({ products: importRows, mode: importMode }),
+      });
+      const data = await readApiJson(response);
+      if (!response.ok) throw new Error(data.error || 'Could not import products');
+      const result = data.data;
+      const errorSummary = result.errors?.length ? ` ${result.errors.length} row(s) skipped.` : '';
+      setNotice(`Import complete: ${result.created} added, ${result.updated} updated.${errorSummary}`);
+      setImportRows([]); setImportFileName(''); notifyShopProductsUpdated();
+      await Promise.all([load(), loadReferenceData()]);
+    } catch (error) { setNotice(error.message); }
+    finally { setImporting(false); }
+  };
+
+  const fixExistingProductCategories = async () => {
+    setNormalizingCategories(true); setNotice('');
+    try {
+      const response = await fetch('/api/admin/shop-products/import', {
+        method: 'POST', headers: shopHeaders('admin'), body: JSON.stringify({ action: 'normalize-categories' }),
+      });
+      const data = await readApiJson(response);
+      if (!response.ok) throw new Error(data.error || 'Could not fix product categories');
+      setNotice(`Category mapping fixed. ${data.data.updated} product(s) were moved to their related category/subcategory.`);
+      notifyShopProductsUpdated();
+      await Promise.all([load(), loadReferenceData()]);
+    } catch (error) { setNotice(error.message); }
+    finally { setNormalizingCategories(false); }
+  };
 
   const edit = async (product) => {
     let full = product;
@@ -1400,6 +1488,40 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
           </div>
         </div>
         {notice && <p className="shop-admin-notice" role="status">{notice}</p>}
+        {!isSeller && (
+          <section className="shop-admin-card" style={{ marginBottom: 16, border: '1px dashed var(--border, #cbd5e1)' }}>
+            <div className="shop-admin-list-head" style={{ gap: 12 }}>
+              <div>
+                <h3 style={{ marginBottom: 4 }}>Bulk product import</h3>
+                <p style={{ margin: 0, fontSize: 13 }}>Upload up to 200 products at once. Missing subcategories are automatically placed under the related main category.</p>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button type="button" className="shop-import-button secondary" onClick={downloadImportTemplate}><FileText size={15} /> Download template</button>
+                <label htmlFor="shop-products-import-file" className="shop-import-button primary">
+                  <UploadCloud size={15} /> Choose CSV
+                </label>
+                <input id="shop-products-import-file" className="shop-import-file-input" type="file" accept=".csv,text/csv" onChange={selectImportFile} />
+                <button type="button" className="shop-import-button secondary" onClick={fixExistingProductCategories} disabled={normalizingCategories}>{normalizingCategories ? 'Fixing…' : 'Fix existing categories'}</button>
+              </div>
+            </div>
+            {importRows.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13 }}>{importFileName}: {importRows.length} product(s) ready</p>
+                <div className="shop-admin-table-wrap shop-import-preview">
+                  <table><thead><tr><th>Name</th><th>Category</th><th>Brand</th><th>Price</th><th>Stock</th></tr></thead>
+                    <tbody>{importRows.slice(0, 5).map((item, index) => <tr key={index}><td>{item.name || item.product_name || '—'}</td><td>{item.category || '—'}</td><td>{item.brand || '—'}</td><td>{item.price || item.selling_price || '—'}</td><td>{item.quantity || item.stock || '0'}</td></tr>)}</tbody>
+                  </table>
+                </div>
+                {importRows.length > 5 && <small className="shop-import-preview-note">Showing first 5 of {importRows.length} products. All {importRows.length} products will be imported.</small>}
+                <div className="shop-import-actions">
+                  <label className="shop-admin-tier-filter">Duplicate products<select value={importMode} onChange={(event) => setImportMode(event.target.value)}><option value="create">Skip duplicates</option><option value="update">Update matching products</option></select></label>
+                  <button type="button" className="shop-import-confirm" onClick={importProducts} disabled={importing}>{importing ? 'Importing…' : `✓ Import all ${importRows.length} products`}</button>
+                  <button type="button" className="shop-import-clear" onClick={() => { setImportRows([]); setImportFileName(''); }}>Clear file</button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
         <div className="shop-admin-card"><div className="shop-admin-list-head"><h3>{isSeller ? 'My products' : 'All products'} ({isSeller ? products.length : productPagination.total})</h3><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>{!isSeller && <input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Search products…" style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', minWidth: 180 }} />}<label className="shop-admin-tier-filter">Quality Tier<select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)}><option value="any">All products</option><option value="none">No Quality Tier set</option>{QUALITY_TIER_OPTIONS.map((tier) => <option key={tier.value} value={tier.value}>{tier.value === 'all' ? 'All tiers' : tier.label}</option>)}</select></label></div></div>{loading ? <p>Loading products...</p> : !products.length ? <p>No products yet. Add the first product above.</p> : !visibleProducts.length ? <p>No products match this Quality Tier filter.</p> : <div className="shop-admin-table-wrap"><table><thead><tr><th>Product</th><th>Category</th><th>Quality</th><th>Get Quote range</th><th>Buy Now price / unit</th>{!isSeller && <th>Discount</th>}{!isSeller && <th>Source</th>}<th>Status</th><th>Actions</th></tr></thead><tbody>{visibleProducts.map((product) => { const price = Number(product.price); const originalPrice = Number(product.compare_at_price); const discountPercent = originalPrice > price && price > 0 ? Math.round(((originalPrice - price) / originalPrice) * 100) : null; return <tr key={product.id}><td><strong>{product.name}</strong>{product.description && <small>{product.description}</small>}</td><td>{product.category || 'Unassigned'}</td><td>{qualityTierLabel(product.quality_tier) || <span className="shop-admin-tier-missing">Not set</span>}</td><td>{product.quote_price_range ? `₹${product.quote_price_range}` : '—'}</td><td>{price > 0 ? `₹${price.toLocaleString('en-IN')} / ${product.unit || 'unit'}` : <span style={{ color: '#d97706', fontWeight: 600 }}>Price on request</span>}</td>{!isSeller && <td>{discountPercent === null ? '—' : `${discountPercent}% OFF`}</td>}{!isSeller && <td>{product.vendor_id ? `Vendor #${product.vendor_id}` : product.supplier_id === 0 ? 'Admin' : `Supplier #${product.supplier_id}`}</td>}<td>{isSeller ? (() => {
   const approval = product.specifications?.__approval__;
   const status = approval?.status || 'approved';

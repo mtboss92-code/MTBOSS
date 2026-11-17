@@ -1131,7 +1131,7 @@ export default function Storefront({ categories, products, offers = [], content,
         if (timeB !== timeA) return timeB - timeA;
         return (Number(b.product_id || b.id) || 0) - (Number(a.product_id || a.id) || 0);
       })
-  ).slice(0, 8);
+  );
   
   // Options calculation for HomeRun popovers
   const baseHierarchyProducts = useMemo(() => {
