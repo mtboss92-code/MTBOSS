@@ -3,6 +3,7 @@ import pool from '@/lib/db';
 import { requireRole } from '@/lib/auth';
 import { createInitializationGuard } from '@/lib/api-utils';
 import { QUALITY_TIER_COLUMN_SQL, normalizeQualityTier } from '@/lib/quality-tier';
+import { ensureVendorForSupplier } from '@/lib/shop-commissions';
 
 const ensureTable = createInitializationGuard(async () => {
   await pool.query(`CREATE TABLE IF NOT EXISTS supplier_materials (
@@ -227,15 +228,23 @@ export async function POST(req) {
       created_at: new Date().toISOString(),
     };
 
+    // Ensure linked vendor record so admin commission and platform fee tracking work properly
+    let vendorId = null;
+    try {
+      vendorId = await ensureVendorForSupplier(supplier);
+    } catch (vErr) {
+      console.warn('Could not ensure vendor for supplier:', vErr.message);
+    }
+
     const result = await pool.query(
       `INSERT INTO supplier_materials
        (supplier_id, vendor_id, name, description, quote_price_range, price, unit, quantity,
         image_url, category, subcategory, brand, compare_at_price, is_featured_deal, images, specifications, bulk_pricing,
         available_cities, is_available, quality_tier, faqs, returns_policy, highlights)
-       VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb,
-               $15::jsonb, $16::jsonb, $17::jsonb, FALSE, $18, $19::jsonb, $20, $21::jsonb)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb,
+               $16::jsonb, $17::jsonb, $18::jsonb, FALSE, $19, $20::jsonb, $21, $22::jsonb)
        RETURNING *`,
-      [supplier.id, p.name, p.description, p.quote_price_range, p.price, p.unit, p.quantity,
+      [supplier.id, vendorId, p.name, p.description, p.quote_price_range, p.price, p.unit, p.quantity,
        p.image_url, p.category, p.subcategory, p.brand, p.compare_at_price, p.is_featured_deal, JSON.stringify(p.images),
        JSON.stringify(cleanSpecs), JSON.stringify(p.bulk_pricing),
        JSON.stringify(p.available_cities), p.quality_tier, JSON.stringify(p.faqs), p.returns_policy, JSON.stringify(p.highlights)]
@@ -326,19 +335,28 @@ export async function PUT(req) {
       cleanSpecs.__approval__ = existingApproval;
     }
 
+    let vendorId = existing.vendor_id || null;
+    if (!vendorId) {
+      try {
+        vendorId = await ensureVendorForSupplier(supplier);
+      } catch (_) {}
+    }
+
     const result = await pool.query(
       `UPDATE supplier_materials SET
         supplier_id=$1, name=$2, description=$3, quote_price_range=$4, price=$5,
         unit=$6, quantity=$7, image_url=$8, category=$9, subcategory=$10, brand=$11, compare_at_price=$12,
         is_featured_deal=$13, images=$14::jsonb, specifications=$15::jsonb, bulk_pricing=$16::jsonb,
         available_cities=$17::jsonb, is_available=$18, quality_tier=$19,
-        faqs=$21::jsonb, returns_policy=$22, highlights=$23::jsonb, updated_at=NOW()
+        faqs=$21::jsonb, returns_policy=$22, highlights=$23::jsonb,
+        vendor_id=COALESCE(vendor_id, $24),
+        updated_at=NOW()
        WHERE id=$20 RETURNING *`,
       [supplier.id, p.name, p.description, p.quote_price_range, p.price, p.unit, p.quantity, p.image_url,
         p.category, p.subcategory, p.brand, p.compare_at_price, p.is_featured_deal, JSON.stringify(p.images),
         JSON.stringify(cleanSpecs), JSON.stringify(p.bulk_pricing),
         JSON.stringify(p.available_cities), nextAvailable, p.quality_tier, id,
-        JSON.stringify(p.faqs), p.returns_policy, JSON.stringify(p.highlights)]
+        JSON.stringify(p.faqs), p.returns_policy, JSON.stringify(p.highlights), vendorId]
     );
     if (!result.rows.length) return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
     if (globalThis.__shopProductCache) globalThis.__shopProductCache.clear();

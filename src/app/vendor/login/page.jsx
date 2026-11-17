@@ -406,7 +406,7 @@ export default function ServiceProviderLoginPage() {
                 </div>
 
                 <div style={{ textAlign: 'right', marginTop: '-0.25rem' }}>
-                  <Link href="/forgot-password" style={{ fontSize: '0.8rem', fontWeight: 700, color: brandBlue, textDecoration: 'none' }}>
+                  <Link href="/vendor/forgot-password" style={{ fontSize: '0.8rem', fontWeight: 700, color: brandBlue, textDecoration: 'none' }}>
                     Forgot password?
                   </Link>
                 </div>

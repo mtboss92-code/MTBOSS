@@ -1,8 +1,99 @@
 'use client';
 
 /**
+ * Locate the visible, active cart icon/button on screen.
+ * Checks desktop, mobile, and detail page layouts and ensures
+ * that only an element with real visibility (not hidden by display: none) is chosen.
+ */
+function getVisibleCartTarget() {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return null;
+
+  const isDesktop = window.innerWidth >= 768;
+
+  // Prioritize desktop vs mobile based on current viewport
+  const prioritizedSelectors = isDesktop
+    ? [
+        '#desktop-store-cart-btn',
+        '.storefront-desktop .store-cart-button',
+        '.store-cart-button',
+        '[data-cart-target="desktop-cart"]',
+        '#mobile-store-cart-btn',
+        '.mobile-cart-btn',
+        '[data-cart-target]',
+      ]
+    : [
+        '#mobile-store-cart-btn',
+        '.storefront-mobile .mobile-cart-btn',
+        '.mobile-cart-btn',
+        '[data-cart-target="mobile-cart"]',
+        '[data-cart-target]',
+        '#desktop-store-cart-btn',
+        '.store-cart-button',
+      ];
+
+  // Also include general fallbacks
+  const generalFallbacks = [
+    'a[href$="/ShopNow/cart"]',
+    'a[href$="/cart"]',
+    'button[aria-label*="shopping cart" i]',
+    'a[aria-label*="shopping cart" i]',
+  ];
+
+  const allSelectors = [...prioritizedSelectors, ...generalFallbacks];
+
+  for (const sel of allSelectors) {
+    const elements = Array.from(document.querySelectorAll(sel));
+    for (const el of elements) {
+      if (!(el instanceof HTMLElement)) continue;
+
+      // Ignore close buttons, steppers, or quantity wrappers that might mention cart
+      if (
+        el.classList.contains('mobile-sheet-close') ||
+        el.classList.contains('store-quantity-control') ||
+        el.classList.contains('mobile-stepper')
+      ) {
+        continue;
+      }
+
+      // Check geometric visibility
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 14 || rect.height < 14) continue;
+
+      // Verify computed styles
+      const style = window.getComputedStyle(el);
+      if (
+        style.display === 'none' ||
+        style.visibility === 'hidden' ||
+        parseFloat(style.opacity || '1') === 0
+      ) {
+        continue;
+      }
+
+      // Verify ancestor isn't display:none
+      if (!el.offsetParent && style.position !== 'fixed') {
+        continue;
+      }
+
+      // Must be roughly within horizontal bounds
+      if (rect.right <= 0 || rect.left >= window.innerWidth) continue;
+
+      // The cart button in an e-commerce header is located in the right-hand portion of the navbar
+      // (or at least not collapsed to the far-left origin 0,0 where the logo sits)
+      if (isDesktop && rect.left < window.innerWidth * 0.35) {
+        // Skip elements that are on the left side (like a logo or left menu)
+        continue;
+      }
+
+      return { el, rect };
+    }
+  }
+
+  return null;
+}
+
+/**
  * Trigger a delightful "fly-to-cart" floating popup animation from the clicked
- * "+ Add to cart" button toward the cart icon/button in the navbar.
+ * "+ Add" button toward the cart icon/button in the navbar.
  *
  * @param {Event} e - Click event or mouse event
  * @param {Object} product - The product object being added
@@ -14,29 +105,44 @@ export function triggerFlyToCart(e, product) {
   let startX = window.innerWidth / 2;
   let startY = window.innerHeight / 2;
 
-  if (e?.currentTarget) {
+  if (e?.currentTarget && typeof e.currentTarget.getBoundingClientRect === 'function') {
     const rect = e.currentTarget.getBoundingClientRect();
-    startX = rect.left + rect.width / 2;
-    startY = rect.top + rect.height / 2;
-  } else if (e?.clientX && e?.clientY) {
+    if (rect.width > 0 && rect.height > 0) {
+      startX = rect.left + rect.width / 2;
+      startY = rect.top + rect.height / 2;
+    }
+  } else if (e?.target && typeof e.target.getBoundingClientRect === 'function') {
+    const rect = e.target.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      startX = rect.left + rect.width / 2;
+      startY = rect.top + rect.height / 2;
+    }
+  } else if (typeof e?.clientX === 'number' && typeof e?.clientY === 'number') {
     startX = e.clientX;
     startY = e.clientY;
   }
 
   // 2. Locate visible Cart button target
-  const cartBtn = document.querySelector(
-    '.store-cart-button:not([hidden]), .mobile-cart-btn:not([hidden]), #detail-page-cart-btn, button[aria-label*="cart" i], a[aria-label*="cart" i]'
-  );
+  const isDesktop = window.innerWidth >= 768;
+  const target = getVisibleCartTarget();
+  let targetEl = null;
+  let endX = isDesktop ? window.innerWidth - 120 : window.innerWidth - 32;
+  let endY = isDesktop ? 85 : 32;
 
-  let endX = window.innerWidth - 60;
-  let endY = 32;
+  if (target) {
+    targetEl = target.el;
+    endX = target.rect.left + target.rect.width / 2;
+    endY = target.rect.top + target.rect.height / 2;
+  }
 
-  if (cartBtn) {
-    const destRect = cartBtn.getBoundingClientRect();
-    if (destRect.width > 0 && destRect.height > 0) {
-      endX = destRect.left + destRect.width / 2;
-      endY = destRect.top + destRect.height / 2;
-    }
+  // Safety constraint: Cart is ALWAYS on the top-right side in our design.
+  // Never let endX stray to the top-left (the logo is around x: 20px-80px).
+  if (isDesktop && endX < window.innerWidth * 0.45) {
+    endX = window.innerWidth - 120;
+    endY = 85;
+  } else if (!isDesktop && endX < window.innerWidth * 0.45) {
+    endX = window.innerWidth - 32;
+    endY = 32;
   }
 
   // 3. Resolve product image & title
@@ -77,8 +183,9 @@ export function triggerFlyToCart(e, product) {
   // 5. Quadratic Bezier Curve fling animation via requestAnimationFrame
   const duration = 650; // ms
   const startTime = performance.now();
-  // Arc peak: curve upward above the straight line path
-  const peakY = Math.min(startY, endY) - Math.max(90, Math.abs(startX - endX) * 0.22);
+
+  // Arc peak: curve upward gracefully above the path, but stay safely inside the visible screen
+  const peakY = Math.max(20, Math.min(startY, endY) - 50);
   const midX = (startX + endX) / 2;
 
   function animate(currentTime) {
@@ -104,12 +211,12 @@ export function triggerFlyToCart(e, product) {
     } else {
       flyer.remove();
       // Target Cart Bounce Feedback
-      if (cartBtn) {
-        cartBtn.classList.remove('cart-bounce-pop');
-        void cartBtn.offsetWidth;
-        cartBtn.classList.add('cart-bounce-pop');
+      if (targetEl) {
+        targetEl.classList.remove('cart-bounce-pop');
+        void targetEl.offsetWidth;
+        targetEl.classList.add('cart-bounce-pop');
         setTimeout(() => {
-          cartBtn.classList.remove('cart-bounce-pop');
+          targetEl.classList.remove('cart-bounce-pop');
         }, 600);
       }
     }

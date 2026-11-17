@@ -685,7 +685,12 @@ export default function AgentPage() {
               {/* Agreement */}
               <div className={`p-4 rounded-sm border ${dark ? "bg-zinc-900 border-zinc-700" : "bg-sky-50 border-sky-100"}`}>
                 <label className="flex items-start gap-3 cursor-pointer">
-                  <input type="checkbox" required className="mt-0.5 accent-[var(--brand-blue)]" />
+                  <input
+                    type="checkbox"
+                    required
+                    className="mt-0.5 h-6 w-6 min-h-6 min-w-6 shrink-0 cursor-pointer accent-[var(--brand-blue)]"
+                    aria-label="Confirm agent registration information"
+                  />
                   <span className={`text-[11px] leading-relaxed ${dark ? "text-zinc-400" : "text-zinc-600"}`}>
                     I confirm that the information provided is accurate. I agree to MTBOSS Construction&apos;s agent terms and understand that registration does not guarantee agent status until verified.
                   </span>

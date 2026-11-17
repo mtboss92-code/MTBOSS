@@ -13,7 +13,7 @@ export async function POST(req) {
     if (!email || !user_type || !otp || !new_password) {
       return NextResponse.json({ success: false, error: 'All fields are required' }, { status: 400 });
     }
-    if (!['user', 'supplier', 'vendor', 'agent'].includes(user_type)) {
+    if (!['user', 'supplier', 'vendor', 'agent', 'franchise'].includes(user_type)) {
       return NextResponse.json({ success: false, error: 'Invalid user type' }, { status: 400 });
     }
     const normalizedEmail = String(email).trim().toLowerCase();
@@ -86,6 +86,20 @@ export async function POST(req) {
         );
         if (!result.rows[0]) {
           return NextResponse.json({ success: false, error: 'Agent login is not active for this email.' }, { status: 400 });
+        }
+      } else if (user_type === 'franchise') {
+        const result = await pool.query(
+          `UPDATE franchises
+             SET password_hash = $1,
+                 updated_at = NOW()
+           WHERE LOWER(TRIM(email)) = $2
+             AND status = 'Approved'
+             AND login_enabled = TRUE
+           RETURNING id`,
+          [hash, normalizedEmail]
+        );
+        if (!result.rows[0]) {
+          return NextResponse.json({ success: false, error: 'Franchise login is not active for this email.' }, { status: 400 });
         }
       } else {
         // users table uses 'password' column (not password_hash)

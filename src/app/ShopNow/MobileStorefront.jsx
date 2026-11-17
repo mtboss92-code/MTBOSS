@@ -568,6 +568,8 @@ export default function MobileStorefront({
 
               <Link
                 href="/ShopNow/cart"
+                id="mobile-store-cart-btn"
+                data-cart-target="mobile-cart"
                 className="mobile-header-icon-btn mobile-cart-btn"
                 aria-label="Shopping Cart"
               >
@@ -678,6 +680,7 @@ export default function MobileStorefront({
 
               <Link
                 href="/ShopNow/cart"
+                data-cart-target="mobile-listing-cart"
                 className="mobile-listing-action-btn mobile-cart-btn"
                 aria-label="Shopping Cart"
               >
@@ -748,6 +751,7 @@ export default function MobileStorefront({
             <div className="mobile-listing-header-actions">
               <Link
                 href="/ShopNow/cart"
+                data-cart-target="mobile-listing-cart"
                 className="mobile-listing-action-btn mobile-cart-btn"
                 aria-label="Shopping Cart"
               >
@@ -2205,6 +2209,30 @@ function MobileProductCard({
 
         {/* Right: Product details */}
         <div className="mobile-card-details">
+          {/* Promotion / Delivery Strip */}
+          <div className="store-card-promo-section">
+            <div className="store-delivery-trust-row" style={{ fontSize: '9.5px', gap: '6px' }}>
+              <span className="store-trust-item"><CreditCard size={10} /> Pay on Delivery</span>
+            </div>
+            {activePromos.length > 0 ? (
+              activePromos.slice(0, 1).map((promo) => {
+                const isFreeShipping = promo.promo_type === 'free_shipping';
+                const promoSpendText = promo.min_cart_value > 0 ? `on orders above ${formatPromoSpend(promo.min_cart_value)}` : 'on all orders';
+                return (
+                  <div key={promo.id || promo.name} className="store-card-blue-promo" style={{ fontSize: '9.5px', padding: '2px 6px' }}>
+                    <Truck size={10} />
+                    <span>{isFreeShipping ? 'Free Delivery' : `${promo.discount_value}% Discount`} {promoSpendText}</span>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="store-card-blue-promo" style={{ fontSize: '9.5px', padding: '2px 6px' }}>
+                <Truck size={10} />
+                <span>Free Delivery on orders above ₹500</span>
+              </div>
+            )}
+          </div>
+
           {/* Product Name */}
           <Link
             href={detailHref}
@@ -2212,38 +2240,6 @@ function MobileProductCard({
           >
             <h3 className="mobile-card-title">{product.name}</h3>
           </Link>
-          {/* Specification Chips (Thickness, Size, Type, Material) */}
-          {(() => {
-            const attrs = extractProductAttributes(product);
-            const chips = [
-              product.brand,
-              attrs.thickness,
-              attrs.size,
-              attrs.type,
-              attrs.material,
-            ].filter(Boolean);
-            if (!chips.length) return null;
-            return (
-              <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', margin: '2px 0 4px' }}>
-                {chips.slice(0, 3).map((chip, idx) => (
-                  <span
-                    key={`${chip}-${idx}`}
-                    style={{
-                      fontSize: '9.5px',
-                      fontWeight: '700',
-                      padding: '1px 5px',
-                      borderRadius: '4px',
-                      background: '#f1f5f9',
-                      color: '#334155',
-                      border: '1px solid #e2e8f0',
-                    }}
-                  >
-                    {chip}
-                  </span>
-                ))}
-              </div>
-            );
-          })()}
 
           {cityUnavailable && (
             <span className="text-[10px] font-bold text-red-600 block mt-0.5">Out of stock in {selectedCity}</span>
@@ -2251,53 +2247,20 @@ function MobileProductCard({
           {outOfStock && !cityUnavailable && (
             <span className="text-[10px] font-bold text-red-600 block mt-0.5">Currently out of stock</span>
           )}
-          {isAvailable && (
-            <span className="text-[10px] font-semibold text-emerald-600 block mt-0.5">In Stock</span>
-          )}
 
           {/* Price & MRP (only if rate is added) */}
           {hasFixedPrice && (
             <div className="mobile-card-price-row">
-              <strong className="mobile-card-price">
-                ₹{price.toLocaleString("en-IN")}
-                <span className="mobile-card-unit"> / {displayUnit(product.unit)}</span>
-              </strong>
               {mrp > price && (
                 <del className="mobile-card-mrp">₹{mrp.toLocaleString("en-IN")}</del>
               )}
+              <strong className="mobile-card-price">
+                ₹{price.toLocaleString("en-IN")}
+              </strong>
             </div>
           )}
 
-          {/* Promotion Strip(s) (HomeRun Image 2 style - supports ANY active promotion) */}
-          {activePromos.slice(0, 2).map((promo) => {
-            const isFreeShipping = promo.promo_type === 'free_shipping';
-            const isFlat = promo.promo_type === 'flat';
-            const isPercent = promo.promo_type === 'percentage';
-
-            const stickerLabel = isFreeShipping ? 'FREE' : isFlat ? 'FLAT' : 'Special';
-            const stickerVal = isFreeShipping ? 'SHIP' : isPercent ? `${promo.discount_value}%` : `₹${Number(promo.discount_value).toLocaleString('en-IN')}`;
-            const promoTitle = isFreeShipping ? 'Free Delivery' : 'Discount';
-            const promoSpendText = promo.min_cart_value > 0 ? `on orders above ${formatPromoSpend(promo.min_cart_value)}` : 'on all orders';
-
-            return (
-              <div
-                key={promo.id || promo.name}
-                className={`store-homerun-promo-strip ${isFreeShipping ? 'store-homerun-promo-shipping' : ''}`}
-                title={promo.description || promo.name}
-              >
-                <div className={`store-promo-sticker ${isFreeShipping ? 'store-promo-sticker-shipping' : ''}`}>
-                  <span className="store-promo-sticker-label">{stickerLabel}</span>
-                  <span className="store-promo-sticker-pct">{stickerVal}</span>
-                </div>
-                <div className="store-promo-text">
-                  <strong className="store-promo-title">{promoTitle}</strong>
-                  <span className="store-promo-sub">{promoSpendText}</span>
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Bulk Prices link (Image 2 style: Unlock Bulk Prices of ₹335) */}
+          {/* Bulk Prices link (Image 2 style: Unlock Bulk Prices of ₹...) */}
           {bulkPrice ? (
             <button
               type="button"
@@ -2308,8 +2271,16 @@ function MobileProductCard({
             </button>
           ) : null}
 
-          {/* Action Row: Stepper or Add button */}
-          <div className="mobile-card-actions">
+          {/* Action Row: Buy Now + Stepper or Add button */}
+          <div className="mobile-card-actions" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
+            <button
+              type="button"
+              className={`mobile-buy-btn ${!isAvailable ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={!isAvailable}
+              onClick={() => onBuy(product)}
+            >
+              Buy Now
+            </button>
             {quantity > 0 ? (
               <div className="mobile-stepper" aria-label={`${product.name} quantity in cart`}>
                 <button
@@ -2331,11 +2302,11 @@ function MobileProductCard({
             ) : (
               <button
                 type="button"
-                className={`mobile-add-btn ${!isAvailable ? 'opacity-50 cursor-not-allowed bg-gray-200 dark:bg-zinc-800 text-gray-500' : ''}`}
+                className={`mobile-add-btn ${!isAvailable ? 'opacity-50 cursor-not-allowed' : ''}`}
                 disabled={!isAvailable}
                 onClick={(e) => onAdd(product, e)}
               >
-                {!isAvailable ? "Out of Stock" : <><Plus size={14} /> ADD</>}
+                {!isAvailable ? "Out of Stock" : "Add"}
               </button>
             )}
           </div>

@@ -285,7 +285,7 @@ export default function SupplierSignupPage() {
               <>
                 <div className="ss-field">
                   <label className="ss-label">Email Address <RequiredAsterisk /></label>
-                  <input className="ss-input" type="email" name="email" value={formData.email} onChange={handleChange} placeholder="supplier@example.com" required />
+                  <input className="ss-input" type="email" name="email" value={formData.email} onChange={handleChange} placeholder="Vendor@example.com" required />
                 </div>
                 <div className="ss-row">
                   <div className="ss-field">

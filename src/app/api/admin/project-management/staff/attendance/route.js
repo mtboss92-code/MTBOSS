@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { ensureStaffSchema, actorFromAdmin, writePmPhase2Audit, assertAgentAccess } from '@/lib/project-management';
+import { ensureStaffSchema, actorFromAdmin, writePmPhase2Audit, assertAgentAccess, isWithin48HoursIST } from '@/lib/project-management';
 
 const validDate = (x) => /^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) && !Number.isNaN(Date.parse(x));
 
@@ -113,6 +113,14 @@ export async function POST(req) {
 
         if (!Number.isInteger(staffId) || staffId <= 0 || !validDate(attendanceDate) || !['present', 'absent', 'half_day'].includes(status)) {
           continue;
+        }
+
+        if (!isWithin48HoursIST(attendanceDate)) {
+          await c.query('ROLLBACK');
+          return NextResponse.json({
+            success: false,
+            error: 'Attendance sirf pichle 48 hours (aaj aur pichle 2 din) ki mark ya edit ki ja sakti hai.'
+          }, { status: 400 });
         }
 
         const stRes = await c.query('SELECT project_id, pay_type, salary_rate FROM pm_project_staff WHERE id = $1', [staffId]);

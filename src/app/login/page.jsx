@@ -719,6 +719,12 @@ export default function LoginPage() {
                     </div>
                   </div>
 
+                  <div style={{ textAlign: 'right', marginTop: '-0.2rem', marginBottom: '0.8rem' }}>
+                    <Link href="/forgot-password" style={{ fontSize: '.8rem', fontWeight: 700, color: '#2563eb', textDecoration: 'none' }}>
+                      Forgot password?
+                    </Link>
+                  </div>
+
                   <button type="submit" className="lp-submit" disabled={loading}>
                     {loading ? (
                       <><span className="lp-spinner" /> Signing in…</>

@@ -160,6 +160,46 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
   const [isCustomSubcategory, setIsCustomSubcategory] = useState(false);
   const [formAttributes, setFormAttributes] = useState({ thickness: '', size: '', type: '', color: '', material: '', grade: '', pack_size: '' });
   const [isDark, setIsDark] = useState(isDarkMode);
+  const [commissionInfo, setCommissionInfo] = useState({ rate: 0, rateSource: 'default', loaded: false, loading: false });
+
+  // Resolve admin commission rate whenever category or editing product changes
+  useEffect(() => {
+    if (!isSeller) {
+      setCommissionInfo({ rate: 0, rateSource: 'default', loaded: false, loading: false });
+      return undefined;
+    }
+    let isCancelled = false;
+    async function fetchCommissionRate() {
+      if (!form.category) {
+        setCommissionInfo({ rate: 0, rateSource: 'default', loaded: false, loading: false });
+        return;
+      }
+      setCommissionInfo((prev) => ({ ...prev, loading: true }));
+      try {
+        const params = new URLSearchParams({ category: form.category });
+        if (editingId) params.set('product_id', String(editingId));
+        const res = await fetch(`/api/shop-commissions/resolve?${params}`);
+        const data = await res.json();
+        if (!isCancelled && data?.success && data?.data) {
+          setCommissionInfo({
+            rate: Number(data.data.rate || 0),
+            rateSource: data.data.rateSource || 'default',
+            ruleId: data.data.ruleId || null,
+            loaded: true,
+            loading: false,
+          });
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setCommissionInfo((prev) => ({ ...prev, loading: false }));
+        }
+      }
+    }
+    fetchCommissionRate();
+    return () => {
+      isCancelled = true;
+    };
+  }, [form.category, editingId, isSeller]);
 
   useEffect(() => {
     setIsDark(isDarkMode);
@@ -200,6 +240,11 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
   const [productPagination, setProductPagination] = useState({ page: 1, limit: 25, total: 0, pages: 1 });
   const [productSearch, setProductSearch] = useState('');
   const [debouncedProductSearch, setDebouncedProductSearch] = useState('');
+  const [importRows, setImportRows] = useState([]);
+  const [importFileName, setImportFileName] = useState('');
+  const [importMode, setImportMode] = useState('create');
+  const [importing, setImporting] = useState(false);
+  const [normalizingCategories, setNormalizingCategories] = useState(false);
   const untieredCount = 0;
   const visibleProducts = products;
 
@@ -253,6 +298,95 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
 
   useEffect(() => { loadReferenceData(); }, [loadReferenceData]);
   useEffect(() => { load(); }, [load]);
+
+  // CSV parser that supports quoted commas and escaped quotes. The import API
+  // remains the authority for field validation and duplicate handling.
+  const parseCsv = (content) => {
+    const rows = [];
+    let row = [], cell = '', quoted = false;
+    for (let i = 0; i < content.length; i += 1) {
+      const char = content[i];
+      if (char === '"') {
+        if (quoted && content[i + 1] === '"') { cell += '"'; i += 1; }
+        else quoted = !quoted;
+      } else if (char === ',' && !quoted) { row.push(cell); cell = ''; }
+      else if ((char === '\n' || char === '\r') && !quoted) {
+        if (char === '\r' && content[i + 1] === '\n') i += 1;
+        row.push(cell); if (row.some((value) => value.trim())) rows.push(row); row = []; cell = '';
+      } else cell += char;
+    }
+    row.push(cell); if (row.some((value) => value.trim())) rows.push(row);
+    if (rows.length < 2) throw new Error('CSV needs a header row and at least one product.');
+    const headers = rows[0].map((header) => header.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+    return rows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, (values[index] || '').trim()])));
+  };
+
+  const selectImportFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setNotice('Please upload a CSV file. Download the template first if needed.');
+      return;
+    }
+    try {
+      const rows = parseCsv(await file.text());
+      if (rows.length > 200) throw new Error('A maximum of 200 products can be imported at once.');
+      setImportRows(rows);
+      setImportFileName(file.name);
+      setNotice(`${rows.length} product row(s) ready for import. Review the preview, then click Import.`);
+    } catch (error) { setImportRows([]); setImportFileName(''); setNotice(error.message); }
+  };
+
+  const downloadImportTemplate = () => {
+    const template = [
+      'name,category,subcategory,brand,price,mrp,quote_price_range,unit,quantity,description,image_urls,highlights,faqs,returns_policy,grade,type,pack_size,thickness,size,material,color,specifications,bulk_pricing,quality_tier,available_cities,is_available,is_featured_deal',
+      'Ultratech PPC Cement 50 Kg Bag,Building Materials,Cement,Ultratech,420,450,400-450,bag,100,High strength PPC cement,https://example.com/cement.jpg,High strength|Genuine product,How should I store it?::Store in a dry covered area|Is GST invoice available?::Yes,Unopened bags may be returned within 48 hours,OPC 53,PPC Cement,50 Kg Bag,,,Cement,Grey,Manufacturer: UltraTech|Origin: India,10:410|30:400,standard,Bareilly|Rampur,true,true'
+    ].join('\n');
+    const url = URL.createObjectURL(new Blob([template], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url; link.download = 'shop-products-import-template.csv'; link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importProducts = async () => {
+    if (!importRows.length) return;
+    setImporting(true); setNotice('');
+    try {
+      const response = await fetch(`${productEndpoint}/import`, {
+        method: 'POST',
+        headers: shopHeaders(ownerRole),
+        body: JSON.stringify({ products: importRows, mode: importMode }),
+      });
+      const data = await readApiJson(response);
+      if (!response.ok) throw new Error(data.error || 'Could not import products');
+      const result = data.data || {};
+      const errorSummary = result.errors?.length ? ` ${result.errors.length} row(s) skipped.` : '';
+      if (isSeller) {
+        setNotice(`Bulk upload complete: ${result.created || 0} product(s) submitted for admin approval${result.updated ? `, ${result.updated} updated` : ''}.${errorSummary}`);
+      } else {
+        setNotice(`Import complete: ${result.created || 0} added, ${result.updated || 0} updated.${errorSummary}`);
+      }
+      setImportRows([]); setImportFileName(''); notifyShopProductsUpdated();
+      await Promise.all([load(), loadReferenceData()]);
+    } catch (error) { setNotice(error.message); }
+    finally { setImporting(false); }
+  };
+
+  const fixExistingProductCategories = async () => {
+    setNormalizingCategories(true); setNotice('');
+    try {
+      const response = await fetch('/api/admin/shop-products/import', {
+        method: 'POST', headers: shopHeaders('admin'), body: JSON.stringify({ action: 'normalize-categories' }),
+      });
+      const data = await readApiJson(response);
+      if (!response.ok) throw new Error(data.error || 'Could not fix product categories');
+      setNotice(`Category mapping fixed. ${data.data.updated} product(s) were moved to their related category/subcategory.`);
+      notifyShopProductsUpdated();
+      await Promise.all([load(), loadReferenceData()]);
+    } catch (error) { setNotice(error.message); }
+    finally { setNormalizingCategories(false); }
+  };
 
   const edit = async (product) => {
     let full = product;
@@ -872,6 +1006,85 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
           <input type="number" min="0" step="0.01" value={form.compare_at_price} onChange={(e) => setForm({ ...form, compare_at_price: e.target.value })} placeholder="Shows discount when above selling price" />
           <small>A discount badge is calculated automatically when this is above the Buy Now price.</small>
         </label>
+
+        {/* Vendors see the applicable commission; admin-owned products do not have a vendor payout. */}
+        {isSeller && (() => {
+          const numPrice = Number(form.price) > 0 && Number.isFinite(Number(form.price)) ? Number(form.price) : 0;
+          const currentRate = Number(commissionInfo?.rate ?? 0);
+          const adminFee = Math.round((numPrice * (currentRate / 100)) * 100) / 100;
+          const vendorPayout = Math.max(0, Math.round((numPrice - adminFee) * 100) / 100);
+          const rateSourceText = commissionInfo.rateSource === 'product'
+            ? 'Product Rule'
+            : commissionInfo.rateSource === 'category'
+            ? `Category Rule (${form.category})`
+            : 'Default Platform Rate';
+
+          return (
+            <div className="shop-admin-wide shop-commission-calculator-card">
+              <div className="shop-commission-card-header">
+                <div className="shop-commission-header-left">
+                  <span style={{ fontSize: '1.25rem' }}>💰</span>
+                  <div>
+                    <h4 className="shop-commission-title">Platform Charges & Admin Commission</h4>
+                    <span className="shop-commission-subtitle">
+                      {commissionInfo.loading
+                        ? 'Calculating applicable admin platform rate...'
+                        : form.category
+                        ? `Live charges applied by Admin for ${form.category}`
+                        : 'Select a category above to view applicable charges'}
+                    </span>
+                  </div>
+                </div>
+                {form.category && (
+                  <span className={`shop-commission-badge ${currentRate > 0 ? 'badge-rate' : 'badge-zero'}`}>
+                    {commissionInfo.rateSource === 'product' ? '🎯' : commissionInfo.rateSource === 'category' ? '📂' : '⚙️'} {rateSourceText}: {currentRate.toFixed(2)}%
+                  </span>
+                )}
+              </div>
+
+              <div className="shop-commission-grid">
+                <div className="shop-commission-col">
+                  <span className="shop-commission-label">Product Selling Price (Customer Pays)</span>
+                  <span className="shop-commission-val">
+                    ₹{numPrice > 0 ? numPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </span>
+                </div>
+                <div className="shop-commission-col comm-charge">
+                  <span className="shop-commission-label">
+                    Admin Commission ({currentRate}%)
+                  </span>
+                  <span className={`shop-commission-val ${adminFee > 0 ? 'text-red' : ''}`}>
+                    {adminFee > 0 ? `- ₹${adminFee.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '₹0.00'}
+                  </span>
+                </div>
+                <div className="shop-commission-col comm-payout">
+                  <span className="shop-commission-label">
+                    {isSeller ? 'Your Net Earning (Vendor Receives)' : 'Vendor Net Payout'}
+                  </span>
+                  <span className="shop-commission-val text-green">
+                    ₹{numPrice > 0 ? vendorPayout.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="shop-commission-footer">
+                {!form.category ? (
+                  <span>⚠️ Please select a <strong>Category</strong> above to see the platform fee and admin commission for this product.</span>
+                ) : numPrice <= 0 ? (
+                  <span>ℹ️ Enter a <strong>Product Selling Price</strong> above to preview the live commission deduction and net vendor payout.</span>
+                ) : currentRate > 0 ? (
+                  <span>
+                    ✅ When a customer orders this product, <strong>₹{adminFee.toFixed(2)}</strong> ({currentRate}% commission) will go to <strong>Admin</strong> as platform fee, and <strong>₹{vendorPayout.toFixed(2)}</strong> will be paid to the vendor.
+                  </span>
+                ) : (
+                  <span>
+                    🎉 <strong>0.00% Platform Fee Active:</strong> No commission is deducted by Admin on this product (Vendor receives 100% of ₹{numPrice.toFixed(2)}).
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })()}
         <label>
           <span>Brand</span>
           <input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} placeholder="e.g. UltraTech" />
@@ -1285,6 +1498,40 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
           </div>
         </div>
         {notice && <p className="shop-admin-notice" role="status">{notice}</p>}
+        {(
+          <section className="shop-admin-card" style={{ marginBottom: 16, border: '1px dashed var(--border, #cbd5e1)' }}>
+            <div className="shop-admin-list-head" style={{ gap: 12 }}>
+              <div>
+                <h3 style={{ marginBottom: 4 }}>Bulk product import</h3>
+                <p style={{ margin: 0, fontSize: 13 }}>{isSeller ? 'Upload up to 200 products at once. Products are sent to Admin for approval.' : 'Upload up to 200 products at once. Missing subcategories are automatically placed under the related main category.'}</p>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button type="button" className="shop-import-button secondary" onClick={downloadImportTemplate}><FileText size={15} /> Download template</button>
+                <label htmlFor="shop-products-import-file" className="shop-import-button primary">
+                  <UploadCloud size={15} /> Choose CSV
+                </label>
+                <input id="shop-products-import-file" className="shop-import-file-input" type="file" accept=".csv,text/csv" onChange={selectImportFile} />
+                {!isSeller && <button type="button" className="shop-import-button secondary" onClick={fixExistingProductCategories} disabled={normalizingCategories}>{normalizingCategories ? 'Fixing…' : 'Fix existing categories'}</button>}
+              </div>
+            </div>
+            {importRows.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13 }}>{importFileName}: {importRows.length} product(s) ready</p>
+                <div className="shop-admin-table-wrap shop-import-preview">
+                  <table><thead><tr><th>Name</th><th>Category</th><th>Brand</th><th>Price</th><th>Stock</th></tr></thead>
+                    <tbody>{importRows.slice(0, 5).map((item, index) => <tr key={index}><td>{item.name || item.product_name || '—'}</td><td>{item.category || '—'}</td><td>{item.brand || '—'}</td><td>{item.price || item.selling_price || '—'}</td><td>{item.quantity || item.stock || '0'}</td></tr>)}</tbody>
+                  </table>
+                </div>
+                {importRows.length > 5 && <small className="shop-import-preview-note">Showing first 5 of {importRows.length} products. All {importRows.length} products will be imported.</small>}
+                <div className="shop-import-actions">
+                  <label className="shop-admin-tier-filter">Duplicate products<select value={importMode} onChange={(event) => setImportMode(event.target.value)}><option value="create">Skip duplicates</option><option value="update">Update matching products</option></select></label>
+                  <button type="button" className="shop-import-confirm" onClick={importProducts} disabled={importing}>{importing ? 'Importing…' : isSeller ? `✓ Submit ${importRows.length} products for approval` : `✓ Import all ${importRows.length} products`}</button>
+                  <button type="button" className="shop-import-clear" onClick={() => { setImportRows([]); setImportFileName(''); }}>Clear file</button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
         <div className="shop-admin-card"><div className="shop-admin-list-head"><h3>{isSeller ? 'My products' : 'All products'} ({isSeller ? products.length : productPagination.total})</h3><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>{!isSeller && <input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Search products…" style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', minWidth: 180 }} />}<label className="shop-admin-tier-filter">Quality Tier<select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)}><option value="any">All products</option><option value="none">No Quality Tier set</option>{QUALITY_TIER_OPTIONS.map((tier) => <option key={tier.value} value={tier.value}>{tier.value === 'all' ? 'All tiers' : tier.label}</option>)}</select></label></div></div>{loading ? <p>Loading products...</p> : !products.length ? <p>No products yet. Add the first product above.</p> : !visibleProducts.length ? <p>No products match this Quality Tier filter.</p> : <div className="shop-admin-table-wrap"><table><thead><tr><th>Product</th><th>Category</th><th>Quality</th><th>Get Quote range</th><th>Buy Now price / unit</th>{!isSeller && <th>Discount</th>}{!isSeller && <th>Source</th>}<th>Status</th><th>Actions</th></tr></thead><tbody>{visibleProducts.map((product) => { const price = Number(product.price); const originalPrice = Number(product.compare_at_price); const discountPercent = originalPrice > price && price > 0 ? Math.round(((originalPrice - price) / originalPrice) * 100) : null; return <tr key={product.id}><td><strong>{product.name}</strong>{product.description && <small>{product.description}</small>}</td><td>{product.category || 'Unassigned'}</td><td>{qualityTierLabel(product.quality_tier) || <span className="shop-admin-tier-missing">Not set</span>}</td><td>{product.quote_price_range ? `₹${product.quote_price_range}` : '—'}</td><td>{price > 0 ? `₹${price.toLocaleString('en-IN')} / ${product.unit || 'unit'}` : <span style={{ color: '#d97706', fontWeight: 600 }}>Price on request</span>}</td>{!isSeller && <td>{discountPercent === null ? '—' : `${discountPercent}% OFF`}</td>}{!isSeller && <td>{product.vendor_id ? `Vendor #${product.vendor_id}` : product.supplier_id === 0 ? 'Admin' : `Supplier #${product.supplier_id}`}</td>}<td>{isSeller ? (() => {
   const approval = product.specifications?.__approval__;
   const status = approval?.status || 'approved';
@@ -1304,7 +1551,26 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     );
   }
   return <span className="shop-approval-badge badge-approved" title="Approved by admin">✓ Approved {product.is_available ? '' : '(Hidden)'}</span>;
-})() : (product.is_available ? 'Visible' : 'Hidden')}</td><td><div className="shop-admin-actions"><button type="button" onClick={() => edit(product)}>Edit</button>{(!isSeller || !product.specifications?.__approval__?.status || product.specifications.__approval__.status === 'approved') && <button type="button" onClick={() => toggle(product)}>{product.is_available ? 'Hide' : 'Show'}</button>}<button type="button" onClick={() => remove(product)}>Delete</button></div></td></tr>; })}</tbody></table></div>}
+})() : (() => {
+  const approval = product.specifications?.__approval__;
+  const status = approval?.status;
+  if (status === 'pending') {
+    return <span className="shop-approval-badge badge-pending" title="Awaiting admin approval in Product Approvals">⏳ Pending approval</span>;
+  }
+  if (status === 'rejected') {
+    return (
+      <div className="shop-approval-rejected-wrap">
+        <span className="shop-approval-badge badge-rejected" title={approval?.rejection_reason || 'Rejected by admin'}>✕ Rejected</span>
+        {approval?.rejection_reason && (
+          <small className="shop-approval-reason" title={approval.rejection_reason}>
+            Reason: {approval.rejection_reason}
+          </small>
+        )}
+      </div>
+    );
+  }
+  return product.is_available ? 'Visible' : 'Hidden';
+})()}</td><td><div className="shop-admin-actions"><button type="button" onClick={() => edit(product)}>Edit</button>{(!isSeller || !product.specifications?.__approval__?.status || product.specifications.__approval__.status === 'approved') && <button type="button" onClick={() => toggle(product)}>{product.is_available ? 'Hide' : 'Show'}</button>}<button type="button" onClick={() => remove(product)}>Delete</button></div></td></tr>; })}</tbody></table></div>}
     {!isSeller && !loading && productPagination.pages > 1 ? (
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>Page {productPagination.page} of {productPagination.pages}</span>

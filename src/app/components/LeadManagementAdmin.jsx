@@ -60,7 +60,9 @@ export default function LeadManagementAdmin({ isDarkMode }) {
   const [convertingLead, setConvertingLead] = useState(null);
   const [conversionData, setConversionData] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSavingLead, setIsSavingLead] = useState(false);
   const isSubmittingRef = useRef(false);
+  const isSavingLeadRef = useRef(false);
   const idempotencyKeyRef = useRef(null);
   const searchInputRef = useRef(null);
   const searchHostRef = useRef(null);
@@ -218,8 +220,27 @@ export default function LeadManagementAdmin({ isDarkMode }) {
         && (!city || lead.city === city);
     });
 
+    // Keep accidental repeat submissions from appearing as separate leads in
+    // the admin list. The API prevents new duplicates; this also cleans up
+    // identical legacy/manual submissions without deleting any records.
+    const seen = new Set();
+    const uniqueResult = result.filter((lead) => {
+      const date = lead.created_at ? new Date(lead.created_at).toISOString().slice(0, 10) : '';
+      const phone = String(lead.client_phone || '').replace(/\D/g, '');
+      const key = [
+        String(lead.lead_source || '').trim().toLowerCase(),
+        String(lead.client_name || '').trim().toLowerCase(),
+        phone,
+        String(lead.city || '').trim().toLowerCase(),
+        date,
+      ].join('|');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
     // Ensure the newest leads are always shown at the top of the table
-    return [...result].sort((a, b) => {
+    return [...uniqueResult].sort((a, b) => {
       const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
       const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
       if (timeB !== timeA) return timeB - timeA;
@@ -236,20 +257,30 @@ export default function LeadManagementAdmin({ isDarkMode }) {
 
   async function createLead(event) {
     event.preventDefault();
+    if (isSavingLeadRef.current) return;
+    isSavingLeadRef.current = true;
+    setIsSavingLead(true);
     setMessage('');
-    const res = await fetch('/api/admin/lead-management', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json();
-    if (data.success) {
-      setForm(emptyForm);
-      setMessage('Lead created successfully.');
-      setIsCreatingLead(false);
-      await loadLeads();
-    } else {
-      setMessage(data.error || 'Could not create lead.');
+    try {
+      const res = await fetch('/api/admin/lead-management', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setForm(emptyForm);
+        setMessage(data.duplicate ? 'This lead was already saved; duplicate entry was prevented.' : 'Lead created successfully.');
+        setIsCreatingLead(false);
+        await loadLeads();
+      } else {
+        setMessage(data.error || 'Could not create lead.');
+      }
+    } catch {
+      setMessage('Could not create lead.');
+    } finally {
+      isSavingLeadRef.current = false;
+      setIsSavingLead(false);
     }
   }
 
@@ -594,6 +625,7 @@ export default function LeadManagementAdmin({ isDarkMode }) {
             <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
               <button
                 type="submit"
+                  disabled={isSavingLead}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -605,14 +637,16 @@ export default function LeadManagementAdmin({ isDarkMode }) {
                   padding: '0.65rem 1.25rem',
                   fontWeight: 900,
                   fontSize: '0.85rem',
-                  cursor: 'pointer',
+                    cursor: isSavingLead ? 'wait' : 'pointer',
+                    opacity: isSavingLead ? 0.7 : 1,
                 }}
               >
                 <Plus size={16} strokeWidth={2} aria-hidden="true" />
-                Submit Lead
+                {isSavingLead ? 'Saving…' : 'Submit Lead'}
               </button>
               <button
                 type="button"
+                disabled={isSavingLead}
                 onClick={() => {
                   setIsCreatingLead(false);
                   setMessage('');

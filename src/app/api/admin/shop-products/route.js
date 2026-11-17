@@ -237,11 +237,22 @@ export async function PUT(req) {
     const id = Number(body.id);
     if (!Number.isInteger(id) || id < 1) return NextResponse.json({ success: false, error: 'Valid product ID required' }, { status: 400 });
     if (body.action === 'toggle') {
+      const isAvailable = body.is_available === true;
       const toggled = await pool.query(
-        'UPDATE supplier_materials SET is_available=$1, updated_at=NOW() WHERE id=$2 RETURNING *',
-        [body.is_available === true, id]
+        `UPDATE supplier_materials
+         SET is_available = $1,
+             specifications = CASE
+               WHEN $1 = TRUE AND specifications->'__approval__'->>'status' = 'pending' THEN
+                 jsonb_set(COALESCE(specifications, '{}'::jsonb), '{__approval__,status}', '"approved"')
+               ELSE specifications
+             END,
+             updated_at = NOW()
+         WHERE id = $2
+         RETURNING *`,
+        [isAvailable, id]
       );
       if (!toggled.rows.length) return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
+      if (globalThis.__shopProductCache) globalThis.__shopProductCache.clear();
       return NextResponse.json({ success: true, data: toggled.rows[0] });
     }
     const parsed = await validProduct(body, { allowUnassigned: true });

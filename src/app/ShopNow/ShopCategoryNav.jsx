@@ -12,7 +12,7 @@ import {
   resolveDirectNavItem,
 } from "./categoryNavTree";
 
-const MOBILE_MQ = "(max-width: 800px)";
+const MOBILE_MQ = "(max-width: 767px)";
 
 export default function ShopCategoryNav({
   categories = [],

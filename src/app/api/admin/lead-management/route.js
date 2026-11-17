@@ -548,6 +548,7 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
+  let client;
   try {
     const admin = requireRole(req, 'admin');
     if (!admin) {
@@ -566,8 +567,38 @@ export async function POST(req) {
     if (!client_name || !client_phone || !city) {
       return NextResponse.json({ success: false, error: 'Client name, phone and city are required' }, { status: 400 });
     }
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // Lock this customer identity for the duration of the request. This closes
+    // the gap before the browser can render its disabled "Saving…" button.
+    const normalizedPhone = String(client_phone).replace(/\D/g, '');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `admin-lead:${normalizedPhone}:${String(client_name).trim().toLowerCase()}:${String(city).trim().toLowerCase()}`,
+    ]);
+    const duplicate = await client.query(
+      `SELECT *
+         FROM agent_leads
+        WHERE source_ref_table IS NULL
+          AND REGEXP_REPLACE(client_phone, '[^0-9]', '', 'g') = $1
+          AND LOWER(TRIM(client_name)) = LOWER(TRIM($2))
+          AND LOWER(TRIM(city)) = LOWER(TRIM($3))
+          AND created_at > NOW() - INTERVAL '5 minutes'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`,
+      [normalizedPhone, client_name, city]
+    );
+    if (duplicate.rows[0]) {
+      await client.query('COMMIT');
+      return NextResponse.json({
+        success: true,
+        data: duplicate.rows[0],
+        duplicate: true,
+        message: 'This lead was already saved.',
+      });
+    }
     if (agent_id) {
-      const approvedAgent = await pool.query(
+      const approvedAgent = await client.query(
         `SELECT id FROM agents
           WHERE id = $1
             AND status = 'Approved'
@@ -577,19 +608,26 @@ export async function POST(req) {
         [agent_id, city]
       );
       if (!approvedAgent.rows[0]) {
+        await client.query('ROLLBACK');
         return NextResponse.json({ success: false, error: 'Select an active approved agent from the lead city.' }, { status: 400 });
       }
     }
     if (assigned_franchise_id) {
-      const match = await pool.query(`SELECT id FROM franchises WHERE id = $1 AND status = 'Approved' AND LOWER(TRIM(COALESCE(city,''))) = LOWER(TRIM($2))`, [assigned_franchise_id, city]);
-      if (!match.rows[0]) return NextResponse.json({ success: false, error: 'Select an approved franchise from the lead city.' }, { status: 400 });
+      const match = await client.query(`SELECT id FROM franchises WHERE id = $1 AND status = 'Approved' AND LOWER(TRIM(COALESCE(city,''))) = LOWER(TRIM($2))`, [assigned_franchise_id, city]);
+      if (!match.rows[0]) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ success: false, error: 'Select an approved franchise from the lead city.' }, { status: 400 });
+      }
     }
     if (assigned_vendor_id) {
-      const match = await pool.query(`SELECT id FROM vendors WHERE id = $1 AND is_approved = TRUE AND status = 'active' AND package_status = 'active' AND (package_expires_at IS NULL OR package_expires_at > NOW()) AND LOWER(TRIM(COALESCE(city,''))) = LOWER(TRIM($2))`, [assigned_vendor_id, city]);
-      if (!match.rows[0]) return NextResponse.json({ success: false, error: 'Select a paid active approved vendor from the lead city.' }, { status: 400 });
+      const match = await client.query(`SELECT id FROM vendors WHERE id = $1 AND is_approved = TRUE AND status = 'active' AND package_status = 'active' AND (package_expires_at IS NULL OR package_expires_at > NOW()) AND LOWER(TRIM(COALESCE(city,''))) = LOWER(TRIM($2))`, [assigned_vendor_id, city]);
+      if (!match.rows[0]) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ success: false, error: 'Select a paid active approved vendor from the lead city.' }, { status: 400 });
+      }
     }
 
-    const result = await pool.query(
+    const result = await client.query(
       `INSERT INTO agent_leads
         (agent_id, assigned_franchise_id, assigned_vendor_id, city, client_name, client_phone, client_email,
          service_type, lead_type, status, follow_up_date, notes, client_requirement,
@@ -614,10 +652,14 @@ export async function POST(req) {
       ]
     );
 
+    await client.query('COMMIT');
     return NextResponse.json({ success: true, data: result.rows[0] }, { status: 201 });
   } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Lead management POST error:', error);
     return NextResponse.json({ success: false, error: 'Server error' }, { status: 500 });
+  } finally {
+    client?.release();
   }
 }
 

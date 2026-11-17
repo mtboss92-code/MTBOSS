@@ -317,89 +317,55 @@ function ProductCard({ product, quantity, canAdd, onAdd, onChangeQty, onQuote, o
         <ProductVisual image={productImage} category={product.category} name={product.name} />
       </Link>
       <div className="store-product-details">
-        <span className={`store-product-tag ${!canOrder ? 'store-product-tag-unavailable' : 'store-product-tag-available'}`}>
-          {canOrder ? 'In Stock' : 'Out of Stock'}
-        </span>
+        {/* Delivery / Trust & Promotion Line */}
+        <div className="store-card-promo-section">
+          <div className="store-delivery-trust-row">
+            <span className="store-trust-item">
+              <CreditCard size={11} /> Pay on Delivery
+            </span>
+          </div>
+
+          {activePromos.length > 0 ? (
+            activePromos.slice(0, 1).map((promo) => {
+              const isFreeShipping = promo.promo_type === 'free_shipping';
+              const promoSpendText = promo.min_cart_value > 0 ? `on orders above ${formatPromoSpend(promo.min_cart_value)}` : 'on all orders';
+              return (
+                <div key={promo.id || promo.name} className="store-card-blue-promo">
+                  <Truck size={12} />
+                  <span>{isFreeShipping ? 'Free Delivery' : `${promo.discount_value}% Discount`} {promoSpendText}</span>
+                </div>
+              );
+            })
+          ) : (
+            <div className="store-card-blue-promo">
+              <Truck size={12} />
+              <span>Free Delivery on orders above ₹500</span>
+            </div>
+          )}
+        </div>
+
+        {/* Product Title */}
         <Link
           href={detailHref}
           className="store-product-title"
+          title={product.name}
         >
           <h3>{product.name}</h3>
         </Link>
-        <p className="store-product-category">{(typeof product.category === 'object' ? product.category?.name : product.category) || ''}{product.unit ? ` · ${product.unit}` : ""}</p>
-        {/* Specification Chips (Thickness, Size, Type, Material) */}
-        {(() => {
-          const attrs = extractProductAttributes(product);
-          const chips = [
-            attrs.thickness,
-            attrs.size,
-            attrs.type,
-            attrs.material,
-          ].filter(Boolean);
-          if (!chips.length) return null;
-          return (
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', margin: '3px 0 5px' }}>
-              {chips.slice(0, 3).map((chip, idx) => (
-                <span
-                  key={`${chip}-${idx}`}
-                  style={{
-                    fontSize: '10.5px',
-                    fontWeight: '600',
-                    padding: '1px 6px',
-                    borderRadius: '4px',
-                    background: '#f1f5f9',
-                    color: '#334155',
-                    border: '1px solid #e2e8f0',
-                  }}
-                >
-                  {chip}
-                </span>
-              ))}
-            </div>
-          );
-        })()}
 
-
-        {/* Price row */}
+        {/* Price row (MRP strikethrough + Current Price) */}
         <div className="store-product-price-slot">
           {hasFixedPrice ? (
             <div className="store-product-price">
-              {Number(product.compare_at_price) > price && <del>₹{Number(product.compare_at_price).toLocaleString('en-IN')}</del>}
-              <strong>₹{price.toLocaleString('en-IN')} / {displayUnit(product.unit)}</strong>
+              {Number(product.compare_at_price) > price && (
+                <del>₹{Number(product.compare_at_price).toLocaleString('en-IN')}</del>
+              )}
+              <strong>₹{price.toLocaleString('en-IN')}</strong>
             </div>
           ) : null}
         </div>
 
-        {/* Promotion Strip(s) (HomeRun Image 2 style - supports ANY active promotion) */}
-        {activePromos.slice(0, 2).map((promo) => {
-          const isFreeShipping = promo.promo_type === 'free_shipping';
-          const isFlat = promo.promo_type === 'flat';
-          const isPercent = promo.promo_type === 'percentage';
-
-          const stickerLabel = isFreeShipping ? 'FREE' : isFlat ? 'FLAT' : 'Special';
-          const stickerVal = isFreeShipping ? 'SHIP' : isPercent ? `${promo.discount_value}%` : `₹${Number(promo.discount_value).toLocaleString('en-IN')}`;
-          const promoTitle = isFreeShipping ? 'Free Delivery' : 'Discount';
-          const promoSpendText = promo.min_cart_value > 0 ? `on orders above ${formatPromoSpend(promo.min_cart_value)}` : 'on all orders';
-
-          return (
-            <div
-              key={promo.id || promo.name}
-              className={`store-homerun-promo-strip ${isFreeShipping ? 'store-homerun-promo-shipping' : ''}`}
-              title={promo.description || promo.name}
-            >
-              <div className={`store-promo-sticker ${isFreeShipping ? 'store-promo-sticker-shipping' : ''}`}>
-                <span className="store-promo-sticker-label">{stickerLabel}</span>
-                <span className="store-promo-sticker-pct">{stickerVal}</span>
-              </div>
-              <div className="store-promo-text">
-                <strong className="store-promo-title">{promoTitle}</strong>
-                <span className="store-promo-sub">{promoSpendText}</span>
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Bulk Prices link (Image 2 style: Unlock Bulk Prices of ₹335) */}
+        {/* Bulk Prices link (Image 2 style: Unlock Bulk Prices of ₹...) */}
         {lowestBulkPrice ? (
           <button
             type="button"
@@ -417,22 +383,47 @@ function ProductCard({ product, quantity, canAdd, onAdd, onChangeQty, onQuote, o
         <div className="store-product-footer">
           {cityUnavailable && <span className="store-stock-note store-stock-note-red">Out of stock in {selectedCity}</span>}
           {outOfStock && !cityUnavailable && <span className="store-stock-note store-stock-note-red">Currently out of stock</span>}
-          <div className="store-product-actions store-product-actions-single">
-            <button type="button" className={`store-buy-btn ${!canOrder ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={!canOrder} onClick={() => onBuy(product)}>
-              {canOrder ? 'Buy Now' : 'Out of Stock'}
+
+          <div className="store-product-actions">
+            <button
+              type="button"
+              className={`store-buy-btn ${!canOrder ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={!canOrder}
+              onClick={() => onBuy(product)}
+            >
+              Buy Now
             </button>
+
+            {quantity ? (
+              <div className="store-quantity-control" aria-label={`${product.name} quantity in cart`}>
+                <button
+                  type="button"
+                  onClick={() => onChangeQty(product.id, -1)}
+                  aria-label={`Remove one ${product.name}`}
+                >
+                  <Minus size={14} />
+                </button>
+                <span style={{ fontWeight: 800 }}>{quantity}</span>
+                <button
+                  type="button"
+                  disabled={!canOrder}
+                  onClick={() => onChangeQty(product.id, 1)}
+                  aria-label={`Add one ${product.name}`}
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className={`store-add-btn ${!canOrder ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={!canAdd || !canOrder}
+                onClick={(e) => onAdd(product, e)}
+              >
+                {!canOrder ? 'Out of Stock' : 'Add'}
+              </button>
+            )}
           </div>
-          {quantity ? (
-            <div className="store-quantity-control" aria-label={`${product.name} quantity in cart`}>
-              <button type="button" onClick={() => onChangeQty(product.id, -1)} aria-label={`Remove one ${product.name}`}><Minus size={15} /></button>
-              <span>{quantity} in cart</span>
-              <button type="button" disabled={!canOrder} onClick={() => onChangeQty(product.id, 1)} aria-label={`Add one ${product.name}`}><Plus size={15} /></button>
-            </div>
-          ) : (
-            <button type="button" className={`store-add-btn ${!canOrder ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={!canAdd || !canOrder} onClick={(e) => onAdd(product, e)}>
-              <Plus size={15} /> {!canOrder ? 'Out of Stock' : canAdd ? "Add to cart" : "Cart limit reached"}
-            </button>
-          )}
         </div>
       </div>
     </article>
@@ -639,6 +630,28 @@ export default function Storefront({ categories, products, offers = [], content,
       setPlaceholderIndex((prev) => (prev + 1) % SEARCH_PLACEHOLDERS.length);
     }, 2800);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const updateHeaderHeight = () => {
+      if (storeHeaderRef.current) {
+        const height = storeHeaderRef.current.offsetHeight;
+        if (height > 0) {
+          document.documentElement.style.setProperty('--shop-header-height', `${height}px`);
+        }
+      }
+    };
+    updateHeaderHeight();
+    window.addEventListener('resize', updateHeaderHeight);
+    let observer = null;
+    if (typeof ResizeObserver !== 'undefined' && storeHeaderRef.current) {
+      observer = new ResizeObserver(updateHeaderHeight);
+      observer.observe(storeHeaderRef.current);
+    }
+    return () => {
+      window.removeEventListener('resize', updateHeaderHeight);
+      if (observer) observer.disconnect();
+    };
   }, []);
 
   const activeCatObj = useMemo(() => {
@@ -1118,7 +1131,7 @@ export default function Storefront({ categories, products, offers = [], content,
         if (timeB !== timeA) return timeB - timeA;
         return (Number(b.product_id || b.id) || 0) - (Number(a.product_id || a.id) || 0);
       })
-  ).slice(0, 8);
+  );
   
   // Options calculation for HomeRun popovers
   const baseHierarchyProducts = useMemo(() => {
@@ -1354,6 +1367,8 @@ export default function Storefront({ categories, products, offers = [], content,
             </Link>
             <Link
               href="/ShopNow/cart"
+              id="desktop-store-cart-btn"
+              data-cart-target="desktop-cart"
               className="store-cart-button"
               aria-label="Shopping Cart"
             >
