@@ -353,66 +353,20 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     if (!importRows.length) return;
     setImporting(true); setNotice('');
     try {
-      if (isSeller) {
-        const toList = (value, maximum = 100) => String(value || '').split('|').map((item) => item.trim()).filter(Boolean).slice(0, maximum);
-        const toSpecifications = (value) => Object.fromEntries(toList(value, 20).map((item) => {
-          const divider = item.indexOf(':');
-          return divider < 0 ? [item, 'Yes'] : [item.slice(0, divider).trim(), item.slice(divider + 1).trim()];
-        }).filter(([key, value]) => key && value));
-        const toBulkPricing = (value) => toList(value, 10).map((item) => {
-          const [min, price] = item.split(/[:=-]/).map((part) => Number(part.replace(/[₹,\s]/g, '')));
-          return Number.isInteger(min) && min >= 2 && Number.isFinite(price) && price > 0 ? { min_quantity: min, price } : null;
-        }).filter(Boolean);
-        const toFaqs = (value) => toList(value, 20).map((item) => {
-          const divider = item.indexOf('::');
-          return divider < 0 ? null : { q: item.slice(0, divider).trim(), a: item.slice(divider + 2).trim() };
-        }).filter((item) => item?.q && item?.a);
-        const vendorSpecifications = (row) => {
-          const attributes = {
-            Grade: row.grade, Type: row.type, PackSize: row.pack_size, Thickness: row.thickness,
-            Size: row.size, Material: row.material, Colors: row.color,
-          };
-          return Object.fromEntries(Object.entries({ ...toSpecifications(row.specifications), ...attributes })
-            .map(([key, value]) => [key, String(value || '').trim()]).filter(([, value]) => value));
-        };
-        const responses = await Promise.all(importRows.map(async (row) => {
-          const images = toList(row.images || row.image_urls || row.image_url, 8);
-          const response = await fetch(productEndpoint, {
-            method: 'POST', headers: shopHeaders(ownerRole), body: JSON.stringify({
-              ...row,
-              name: row.name || row.product_name,
-              price: row.price || row.selling_price,
-              compare_at_price: row.compare_at_price || row.mrp || row.original_price,
-              quantity: row.quantity || row.stock || 0,
-              image_url: images[0] || '', images,
-              specifications: vendorSpecifications(row),
-              highlights: toList(row.highlights, 20),
-              faqs: toFaqs(row.faqs),
-              returns_policy: row.returns_policy || row.return_policy || '',
-              bulk_pricing: toBulkPricing(row.bulk_pricing || row.bulk_prices),
-              available_cities: toList(row.available_cities || row.cities),
-              is_featured_deal: ['true', 'yes', '1'].includes(String(row.is_featured_deal || row.featured || '').toLowerCase()),
-              quality_tier: row.quality_tier || row.quality || 'all',
-            }),
-          });
-          const data = await readApiJson(response);
-          return response.ok ? { success: true } : { success: false, error: data.error || 'Could not add product' };
-        }));
-        const added = responses.filter((item) => item.success).length;
-        const failed = responses.length - added;
-        setNotice(`${added} product(s) submitted for admin approval.${failed ? ` ${failed} row(s) could not be added.` : ''}`);
-        setImportRows([]); setImportFileName(''); notifyShopProductsUpdated();
-        await load();
-        return;
-      }
-      const response = await fetch('/api/admin/shop-products/import', {
-        method: 'POST', headers: shopHeaders('admin'), body: JSON.stringify({ products: importRows, mode: importMode }),
+      const response = await fetch(`${productEndpoint}/import`, {
+        method: 'POST',
+        headers: shopHeaders(ownerRole),
+        body: JSON.stringify({ products: importRows, mode: importMode }),
       });
       const data = await readApiJson(response);
       if (!response.ok) throw new Error(data.error || 'Could not import products');
-      const result = data.data;
+      const result = data.data || {};
       const errorSummary = result.errors?.length ? ` ${result.errors.length} row(s) skipped.` : '';
-      setNotice(`Import complete: ${result.created} added, ${result.updated} updated.${errorSummary}`);
+      if (isSeller) {
+        setNotice(`Bulk upload complete: ${result.created || 0} product(s) submitted for admin approval${result.updated ? `, ${result.updated} updated` : ''}.${errorSummary}`);
+      } else {
+        setNotice(`Import complete: ${result.created || 0} added, ${result.updated || 0} updated.${errorSummary}`);
+      }
       setImportRows([]); setImportFileName(''); notifyShopProductsUpdated();
       await Promise.all([load(), loadReferenceData()]);
     } catch (error) { setNotice(error.message); }
@@ -1570,7 +1524,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                 </div>
                 {importRows.length > 5 && <small className="shop-import-preview-note">Showing first 5 of {importRows.length} products. All {importRows.length} products will be imported.</small>}
                 <div className="shop-import-actions">
-                  {!isSeller && <label className="shop-admin-tier-filter">Duplicate products<select value={importMode} onChange={(event) => setImportMode(event.target.value)}><option value="create">Skip duplicates</option><option value="update">Update matching products</option></select></label>}
+                  <label className="shop-admin-tier-filter">Duplicate products<select value={importMode} onChange={(event) => setImportMode(event.target.value)}><option value="create">Skip duplicates</option><option value="update">Update matching products</option></select></label>
                   <button type="button" className="shop-import-confirm" onClick={importProducts} disabled={importing}>{importing ? 'Importing…' : isSeller ? `✓ Submit ${importRows.length} products for approval` : `✓ Import all ${importRows.length} products`}</button>
                   <button type="button" className="shop-import-clear" onClick={() => { setImportRows([]); setImportFileName(''); }}>Clear file</button>
                 </div>
@@ -1597,7 +1551,26 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     );
   }
   return <span className="shop-approval-badge badge-approved" title="Approved by admin">✓ Approved {product.is_available ? '' : '(Hidden)'}</span>;
-})() : (product.is_available ? 'Visible' : 'Hidden')}</td><td><div className="shop-admin-actions"><button type="button" onClick={() => edit(product)}>Edit</button>{(!isSeller || !product.specifications?.__approval__?.status || product.specifications.__approval__.status === 'approved') && <button type="button" onClick={() => toggle(product)}>{product.is_available ? 'Hide' : 'Show'}</button>}<button type="button" onClick={() => remove(product)}>Delete</button></div></td></tr>; })}</tbody></table></div>}
+})() : (() => {
+  const approval = product.specifications?.__approval__;
+  const status = approval?.status;
+  if (status === 'pending') {
+    return <span className="shop-approval-badge badge-pending" title="Awaiting admin approval in Product Approvals">⏳ Pending approval</span>;
+  }
+  if (status === 'rejected') {
+    return (
+      <div className="shop-approval-rejected-wrap">
+        <span className="shop-approval-badge badge-rejected" title={approval?.rejection_reason || 'Rejected by admin'}>✕ Rejected</span>
+        {approval?.rejection_reason && (
+          <small className="shop-approval-reason" title={approval.rejection_reason}>
+            Reason: {approval.rejection_reason}
+          </small>
+        )}
+      </div>
+    );
+  }
+  return product.is_available ? 'Visible' : 'Hidden';
+})()}</td><td><div className="shop-admin-actions"><button type="button" onClick={() => edit(product)}>Edit</button>{(!isSeller || !product.specifications?.__approval__?.status || product.specifications.__approval__.status === 'approved') && <button type="button" onClick={() => toggle(product)}>{product.is_available ? 'Hide' : 'Show'}</button>}<button type="button" onClick={() => remove(product)}>Delete</button></div></td></tr>; })}</tbody></table></div>}
     {!isSeller && !loading && productPagination.pages > 1 ? (
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>Page {productPagination.page} of {productPagination.pages}</span>
