@@ -7056,5 +7056,292 @@ img[src*=".PNG"],
   color: #7dd3fc;
 }
 
+/* ── IMAGE 2 PRODUCT CARD STYLING (CLEAN MINIMAL CARD) ──────────────── */
+.store-card-promo-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.store-delivery-trust-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.dark-mode .store-delivery-trust-row {
+  color: #94a3b8;
+}
+
+.store-trust-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.store-card-blue-promo,
+.store-card-green-promo {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 2px;
+  line-height: 1.2;
+}
+
+.dark-mode .store-card-blue-promo,
+.dark-mode .store-card-green-promo {
+  background: rgba(56, 189, 248, 0.16) !important;
+  color: #38bdf8 !important;
+  border: 1px solid rgba(56, 189, 248, 0.35) !important;
+}
+
+.store-product-price {
+  display: flex !important;
+  align-items: baseline !important;
+  gap: 6px !important;
+  min-height: 24px;
+  line-height: 1.3;
+}
+
+.store-product-price del {
+  font-size: 11.5px !important;
+  color: #94a3b8 !important;
+  text-decoration: line-through !important;
+  font-weight: 500;
+  margin: 0 !important;
+}
+
+.store-product-price strong {
+  display: inline-block !important;
+  font-size: 15px !important;
+  font-weight: 800 !important;
+  color: #0f172a !important;
+  line-height: 1.2;
+}
+
+.dark-mode .store-product-price strong {
+  color: #f8fafc !important;
+}
+
+.store-unit-tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.dark-mode .store-unit-tag {
+  color: #94a3b8;
+}
+
+/* ── ACTION BUTTONS: BUY NOW & ADD (BLUE THEME) ───────────────────── */
+.store-product-actions {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 6px !important;
+  width: 100% !important;
+  margin-top: auto !important;
+}
+
+.shop-page .store-buy-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 35px !important;
+  border: none !important;
+  border-radius: 6px !important;
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+  color: #ffffff !important;
+  background: #2563eb !important;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.25);
+}
+
+.shop-page .store-buy-btn:hover:not(:disabled) {
+  background: #1d4ed8 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(37, 99, 235, 0.35);
+}
+
+.dark-mode .shop-page .store-buy-btn {
+  background: #0284c7 !important;
+  color: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(2, 132, 199, 0.3);
+}
+
+.dark-mode .shop-page .store-buy-btn:hover:not(:disabled) {
+  background: #0369a1 !important;
+}
+
+.shop-page .store-add-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 35px !important;
+  border: 1.5px solid #2563eb !important;
+  border-radius: 6px !important;
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+  color: #1d4ed8 !important;
+  background: #eff6ff !important;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shop-page .store-add-btn:hover:not(:disabled) {
+  background: #dbeafe !important;
+  color: #1e40af !important;
+  transform: translateY(-1px);
+}
+
+.dark-mode .shop-page .store-add-btn {
+  background: rgba(56, 189, 248, 0.12) !important;
+  color: #38bdf8 !important;
+  border: 1.5px solid #38bdf8 !important;
+}
+
+.dark-mode .shop-page .store-add-btn:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.22) !important;
+  color: #7dd3fc !important;
+}
+
+.store-quantity-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 35px !important;
+  border-radius: 6px;
+  background: #ffffff;
+  border: 1.5px solid #2563eb !important;
+  color: #2563eb !important;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 0 3px;
+  box-sizing: border-box;
+}
+
+.dark-mode .store-quantity-control {
+  background: #18181b;
+  border-color: #38bdf8 !important;
+  color: #38bdf8 !important;
+}
+
+.shop-page .store-quantity-control button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: #2563eb !important;
+  background: transparent !important;
+  border: none !important;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 4px;
+  transition: background-color 0.15s ease;
+}
+
+.shop-page .store-quantity-control button:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.1) !important;
+}
+
+.dark-mode .shop-page .store-quantity-control button {
+  color: #38bdf8 !important;
+}
+
+.dark-mode .shop-page .store-quantity-control button:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.2) !important;
+}
+
+.mobile-buy-btn {
+  width: 100%;
+  min-height: 31px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dark-mode .mobile-buy-btn {
+  background: #0284c7;
+  color: #ffffff;
+}
+
+.mobile-add-btn {
+  width: 100%;
+  min-height: 31px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1.5px solid #2563eb;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dark-mode .mobile-add-btn {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1.5px solid #38bdf8;
+}
+
+.mobile-card-actions .mobile-stepper {
+  min-height: 31px !important;
+  background: #eff6ff !important;
+  border: 1.5px solid #2563eb !important;
+  border-radius: 6px !important;
+}
+
+.dark-mode .mobile-card-actions .mobile-stepper,
+.mobile-store-root.is-dark .mobile-card-actions .mobile-stepper {
+  background: rgba(56, 189, 248, 0.12) !important;
+  border: 1.5px solid #38bdf8 !important;
+}
+
+.mobile-card-actions .mobile-stepper button {
+  color: #2563eb !important;
+}
+
+.dark-mode .mobile-card-actions .mobile-stepper button,
+.mobile-store-root.is-dark .mobile-card-actions .mobile-stepper button {
+  color: #38bdf8 !important;
+}
+
+.mobile-card-actions .mobile-stepper-count {
+  color: #1d4ed8 !important;
+  font-weight: 800;
+}
+
+.dark-mode .mobile-card-actions .mobile-stepper-count,
+.mobile-store-root.is-dark .mobile-card-actions .mobile-stepper-count {
+  color: #38bdf8 !important;
+}
+
+
+
 
 
