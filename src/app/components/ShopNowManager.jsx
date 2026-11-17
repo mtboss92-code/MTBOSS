@@ -164,6 +164,10 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
 
   // Resolve admin commission rate whenever category or editing product changes
   useEffect(() => {
+    if (!isVendor) {
+      setCommissionInfo({ rate: 0, rateSource: 'default', loaded: false, loading: false });
+      return undefined;
+    }
     let isCancelled = false;
     async function fetchCommissionRate() {
       if (!form.category) {
@@ -195,7 +199,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     return () => {
       isCancelled = true;
     };
-  }, [form.category, editingId]);
+  }, [form.category, editingId, isVendor]);
 
   useEffect(() => {
     setIsDark(isDarkMode);
@@ -349,6 +353,43 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     if (!importRows.length) return;
     setImporting(true); setNotice('');
     try {
+      if (isVendor) {
+        const toList = (value, maximum = 100) => String(value || '').split('|').map((item) => item.trim()).filter(Boolean).slice(0, maximum);
+        const toSpecifications = (value) => Object.fromEntries(toList(value, 20).map((item) => {
+          const divider = item.indexOf(':');
+          return divider < 0 ? [item, 'Yes'] : [item.slice(0, divider).trim(), item.slice(divider + 1).trim()];
+        }).filter(([key, value]) => key && value));
+        const toBulkPricing = (value) => toList(value, 10).map((item) => {
+          const [min, price] = item.split(/[:=-]/).map((part) => Number(part.replace(/[₹,\s]/g, '')));
+          return Number.isInteger(min) && min >= 2 && Number.isFinite(price) && price > 0 ? { min_quantity: min, price } : null;
+        }).filter(Boolean);
+        const responses = await Promise.all(importRows.map(async (row) => {
+          const images = toList(row.images || row.image_urls || row.image_url, 8);
+          const response = await fetch(productEndpoint, {
+            method: 'POST', headers: shopHeaders(ownerRole), body: JSON.stringify({
+              ...row,
+              name: row.name || row.product_name,
+              price: row.price || row.selling_price,
+              compare_at_price: row.compare_at_price || row.mrp || row.original_price,
+              quantity: row.quantity || row.stock || 0,
+              image_url: images[0] || '', images,
+              specifications: toSpecifications(row.specifications),
+              bulk_pricing: toBulkPricing(row.bulk_pricing || row.bulk_prices),
+              available_cities: toList(row.available_cities || row.cities),
+              is_featured_deal: ['true', 'yes', '1'].includes(String(row.is_featured_deal || row.featured || '').toLowerCase()),
+              quality_tier: row.quality_tier || row.quality || 'all',
+            }),
+          });
+          const data = await readApiJson(response);
+          return response.ok ? { success: true } : { success: false, error: data.error || 'Could not add product' };
+        }));
+        const added = responses.filter((item) => item.success).length;
+        const failed = responses.length - added;
+        setNotice(`${added} product(s) submitted for admin approval.${failed ? ` ${failed} row(s) could not be added.` : ''}`);
+        setImportRows([]); setImportFileName(''); notifyShopProductsUpdated();
+        await load();
+        return;
+      }
       const response = await fetch('/api/admin/shop-products/import', {
         method: 'POST', headers: shopHeaders('admin'), body: JSON.stringify({ products: importRows, mode: importMode }),
       });
@@ -997,8 +1038,8 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
           <small>A discount badge is calculated automatically when this is above the Buy Now price.</small>
         </label>
 
-        {/* Live Platform Fee & Admin Commission Breakdown */}
-        {(() => {
+        {/* Vendors see the applicable commission; admin-owned products do not have a vendor payout. */}
+        {isVendor && (() => {
           const numPrice = Number(form.price) > 0 && Number.isFinite(Number(form.price)) ? Number(form.price) : 0;
           const currentRate = Number(commissionInfo?.rate ?? 0);
           const adminFee = Math.round((numPrice * (currentRate / 100)) * 100) / 100;
@@ -1488,12 +1529,12 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
           </div>
         </div>
         {notice && <p className="shop-admin-notice" role="status">{notice}</p>}
-        {!isSeller && (
+        {(!isSeller || isVendor) && (
           <section className="shop-admin-card" style={{ marginBottom: 16, border: '1px dashed var(--border, #cbd5e1)' }}>
             <div className="shop-admin-list-head" style={{ gap: 12 }}>
               <div>
                 <h3 style={{ marginBottom: 4 }}>Bulk product import</h3>
-                <p style={{ margin: 0, fontSize: 13 }}>Upload up to 200 products at once. Missing subcategories are automatically placed under the related main category.</p>
+                <p style={{ margin: 0, fontSize: 13 }}>{isVendor ? 'Upload up to 200 products at once. Products are sent to Admin for approval.' : 'Upload up to 200 products at once. Missing subcategories are automatically placed under the related main category.'}</p>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <button type="button" className="shop-import-button secondary" onClick={downloadImportTemplate}><FileText size={15} /> Download template</button>
@@ -1501,7 +1542,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                   <UploadCloud size={15} /> Choose CSV
                 </label>
                 <input id="shop-products-import-file" className="shop-import-file-input" type="file" accept=".csv,text/csv" onChange={selectImportFile} />
-                <button type="button" className="shop-import-button secondary" onClick={fixExistingProductCategories} disabled={normalizingCategories}>{normalizingCategories ? 'Fixing…' : 'Fix existing categories'}</button>
+                {!isVendor && <button type="button" className="shop-import-button secondary" onClick={fixExistingProductCategories} disabled={normalizingCategories}>{normalizingCategories ? 'Fixing…' : 'Fix existing categories'}</button>}
               </div>
             </div>
             {importRows.length > 0 && (
@@ -1514,8 +1555,8 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                 </div>
                 {importRows.length > 5 && <small className="shop-import-preview-note">Showing first 5 of {importRows.length} products. All {importRows.length} products will be imported.</small>}
                 <div className="shop-import-actions">
-                  <label className="shop-admin-tier-filter">Duplicate products<select value={importMode} onChange={(event) => setImportMode(event.target.value)}><option value="create">Skip duplicates</option><option value="update">Update matching products</option></select></label>
-                  <button type="button" className="shop-import-confirm" onClick={importProducts} disabled={importing}>{importing ? 'Importing…' : `✓ Import all ${importRows.length} products`}</button>
+                  {!isVendor && <label className="shop-admin-tier-filter">Duplicate products<select value={importMode} onChange={(event) => setImportMode(event.target.value)}><option value="create">Skip duplicates</option><option value="update">Update matching products</option></select></label>}
+                  <button type="button" className="shop-import-confirm" onClick={importProducts} disabled={importing}>{importing ? 'Importing…' : isVendor ? `✓ Submit ${importRows.length} products for approval` : `✓ Import all ${importRows.length} products`}</button>
                   <button type="button" className="shop-import-clear" onClick={() => { setImportRows([]); setImportFileName(''); }}>Clear file</button>
                 </div>
               </div>
