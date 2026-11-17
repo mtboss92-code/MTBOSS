@@ -340,8 +340,8 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
 
   const downloadImportTemplate = () => {
     const template = [
-      'name,category,subcategory,brand,price,mrp,unit,quantity,description,image_urls,specifications,bulk_pricing,quality_tier,available_cities,is_available,is_featured_deal',
-      'Ultratech PPC Cement 50 Kg Bag,Building Materials,Cement,Ultratech,420,450,bag,100,High strength PPC cement,https://example.com/cement.jpg,Grade: PPC|Pack Size: 50 Kg,10:410|30:400,standard,Bareilly|Rampur,true,true'
+      'name,category,subcategory,brand,price,mrp,quote_price_range,unit,quantity,description,image_urls,highlights,faqs,returns_policy,grade,type,pack_size,thickness,size,material,color,specifications,bulk_pricing,quality_tier,available_cities,is_available,is_featured_deal',
+      'Ultratech PPC Cement 50 Kg Bag,Building Materials,Cement,Ultratech,420,450,400-450,bag,100,High strength PPC cement,https://example.com/cement.jpg,High strength|Genuine product,How should I store it?::Store in a dry covered area|Is GST invoice available?::Yes,Unopened bags may be returned within 48 hours,OPC 53,PPC Cement,50 Kg Bag,,,Cement,Grey,Manufacturer: UltraTech|Origin: India,10:410|30:400,standard,Bareilly|Rampur,true,true'
     ].join('\n');
     const url = URL.createObjectURL(new Blob([template], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a');
@@ -363,6 +363,18 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
           const [min, price] = item.split(/[:=-]/).map((part) => Number(part.replace(/[₹,\s]/g, '')));
           return Number.isInteger(min) && min >= 2 && Number.isFinite(price) && price > 0 ? { min_quantity: min, price } : null;
         }).filter(Boolean);
+        const toFaqs = (value) => toList(value, 20).map((item) => {
+          const divider = item.indexOf('::');
+          return divider < 0 ? null : { q: item.slice(0, divider).trim(), a: item.slice(divider + 2).trim() };
+        }).filter((item) => item?.q && item?.a);
+        const vendorSpecifications = (row) => {
+          const attributes = {
+            Grade: row.grade, Type: row.type, PackSize: row.pack_size, Thickness: row.thickness,
+            Size: row.size, Material: row.material, Colors: row.color,
+          };
+          return Object.fromEntries(Object.entries({ ...toSpecifications(row.specifications), ...attributes })
+            .map(([key, value]) => [key, String(value || '').trim()]).filter(([, value]) => value));
+        };
         const responses = await Promise.all(importRows.map(async (row) => {
           const images = toList(row.images || row.image_urls || row.image_url, 8);
           const response = await fetch(productEndpoint, {
@@ -373,7 +385,10 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
               compare_at_price: row.compare_at_price || row.mrp || row.original_price,
               quantity: row.quantity || row.stock || 0,
               image_url: images[0] || '', images,
-              specifications: toSpecifications(row.specifications),
+              specifications: vendorSpecifications(row),
+              highlights: toList(row.highlights, 20),
+              faqs: toFaqs(row.faqs),
+              returns_policy: row.returns_policy || row.return_policy || '',
               bulk_pricing: toBulkPricing(row.bulk_pricing || row.bulk_prices),
               available_cities: toList(row.available_cities || row.cities),
               is_featured_deal: ['true', 'yes', '1'].includes(String(row.is_featured_deal || row.featured || '').toLowerCase()),

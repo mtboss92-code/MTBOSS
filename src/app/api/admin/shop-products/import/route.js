@@ -66,11 +66,39 @@ function specifications(value) {
   }).filter(([key, value]) => key && value));
 }
 
+function productSpecifications(row) {
+  const result = { ...specifications(row.specifications) };
+  const attributeColumns = [
+    ['grade', 'Grade'], ['type', 'Type'], ['pack_size', 'PackSize'], ['thickness', 'Thickness'],
+    ['size', 'Size'], ['material', 'Material'], ['color', 'Colors'],
+  ];
+  attributeColumns.forEach(([column, label]) => {
+    const value = text(row[column], 500);
+    if (value) result[label] = value;
+  });
+  return result;
+}
+
 function bulkPricing(value) {
   return pipeList(value, 10).map((item) => {
     const [minimum, price] = item.split(/[:=-]/).map((part) => number(part));
     return Number.isInteger(minimum) && minimum >= 2 && price > 0 ? { min_quantity: minimum, price } : null;
   }).filter(Boolean).sort((a, b) => a.min_quantity - b.min_quantity);
+}
+
+function faqs(value) {
+  const input = text(value, 20000);
+  if (!input) return [];
+  try {
+    const parsed = JSON.parse(input);
+    if (Array.isArray(parsed)) return parsed
+      .map((item) => ({ q: text(item?.q || item?.question, 500), a: text(item?.a || item?.answer, 2000) }))
+      .filter((item) => item.q && item.a).slice(0, 20);
+  } catch { /* Q::A | Q::A is friendlier to edit in Excel. */ }
+  return pipeList(input, 20).map((item) => {
+    const divider = item.indexOf('::');
+    return divider < 0 ? null : { q: text(item.slice(0, divider), 500), a: text(item.slice(divider + 2), 2000) };
+  }).filter((item) => item?.q && item?.a);
 }
 
 function resolveCatalogPlacement(rawCategory, rawSubcategory, productName) {
@@ -172,9 +200,10 @@ export async function POST(req) {
           name, text(row.description, 2000), text(row.quote_price_range, 100) || null, price,
           text(row.unit, 100) || category.unit || 'pcs', quantity, images[0] || '', category.name,
           placement.subcategory, text(row.brand, 120), compareAt && compareAt >= 0 ? compareAt : null,
-          bool(row.is_featured_deal || row.featured), JSON.stringify(images), JSON.stringify(specifications(row.specifications)),
+          bool(row.is_featured_deal || row.featured), JSON.stringify(images), JSON.stringify(productSpecifications(row)),
           JSON.stringify(bulkPricing(row.bulk_pricing || row.bulk_prices)), JSON.stringify(pipeList(row.available_cities || row.cities)),
           row.is_available === undefined || row.is_available === '' ? true : bool(row.is_available), tier,
+          JSON.stringify(faqs(row.faqs)), text(row.returns_policy || row.return_policy, 3000), JSON.stringify(pipeList(row.highlights, 20)),
         ];
         const duplicate = await client.query(
           `SELECT id FROM supplier_materials
@@ -191,15 +220,16 @@ export async function POST(req) {
           await client.query(`UPDATE supplier_materials SET name=$1, description=$2, quote_price_range=$3, price=$4,
             unit=$5, quantity=$6, image_url=$7, category=$8, subcategory=$9, brand=$10, compare_at_price=$11,
             is_featured_deal=$12, images=$13::jsonb, specifications=$14::jsonb, bulk_pricing=$15::jsonb,
-            available_cities=$16::jsonb, is_available=$17, quality_tier=$18, updated_at=NOW() WHERE id=$19`,
+            available_cities=$16::jsonb, is_available=$17, quality_tier=$18, faqs=$19::jsonb, returns_policy=$20,
+            highlights=$21::jsonb, updated_at=NOW() WHERE id=$22`,
           [...fields, duplicate.rows[0].id]);
           result.updated += 1;
         } else {
           await client.query(`INSERT INTO supplier_materials (supplier_id, name, description, quote_price_range, price,
             unit, quantity, image_url, category, subcategory, brand, compare_at_price, is_featured_deal, images,
-            specifications, bulk_pricing, available_cities, is_available, quality_tier)
+            specifications, bulk_pricing, available_cities, is_available, quality_tier, faqs, returns_policy, highlights)
             VALUES (0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb,
-            $15::jsonb, $16::jsonb, $17, $18)`, fields);
+            $15::jsonb, $16::jsonb, $17, $18, $19::jsonb, $20, $21::jsonb)`, fields);
           result.created += 1;
         }
       }
