@@ -290,7 +290,19 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       const productRes = await fetch(productUrl, { headers: shopHeaders(ownerRole) });
       const productData = await readApiJson(productRes);
       if (!productRes.ok) throw new Error(productData.error || 'Could not load shop data');
-      setProducts(productData.data || []);
+      // Normalize images & specifications — pg JSONB may arrive as a string in some Next.js/edge environments
+      const normalizeProduct = (p) => {
+        const imgs = (() => {
+          if (Array.isArray(p.images)) return p.images;
+          try { const parsed = JSON.parse(p.images); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+        })();
+        const specs = (() => {
+          if (p.specifications && typeof p.specifications === 'object') return p.specifications;
+          try { return JSON.parse(p.specifications) || {}; } catch { return {}; }
+        })();
+        return { ...p, images: imgs, specifications: specs };
+      };
+      setProducts((productData.data || []).map(normalizeProduct));
       setProductPagination(productData.pagination || { page: 1, limit: 25, total: (productData.data || []).length, pages: 1 });
     } catch (error) { setNotice(error.message); }
     finally { setLoading(false); }
@@ -397,11 +409,21 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
         if (res.ok && data.data) full = data.data;
       } catch { /* use list row */ }
     }
+    // Normalize images & specs in case they arrive as strings (edge/pg serialization)
+    const fullImages = (() => {
+      if (Array.isArray(full.images)) return full.images;
+      try { const p = JSON.parse(full.images); return Array.isArray(p) ? p : []; } catch { return []; }
+    })();
+    const fullSpecs = (() => {
+      if (full.specifications && typeof full.specifications === 'object') return full.specifications;
+      try { return JSON.parse(full.specifications) || {}; } catch { return {}; }
+    })();
+    full = { ...full, images: fullImages, specifications: fullSpecs };
     setEditingId(full.id);
     setShowProductForm(true);
     const existingImgs = Array.from(new Set([
       full.image_url,
-      ...(Array.isArray(full.images) ? full.images : [])
+      ...fullImages
     ].filter(Boolean)));
     setImagesList(existingImgs);
     const extractedAttrs = extractProductAttributes(full);
@@ -1518,8 +1540,29 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
               <div style={{ marginTop: 12 }}>
                 <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 13 }}>{importFileName}: {importRows.length} product(s) ready</p>
                 <div className="shop-admin-table-wrap shop-import-preview">
-                  <table><thead><tr><th>Name</th><th>Category</th><th>Subcategory</th><th>Brand</th><th>Price</th><th>Stock</th></tr></thead>
-                    <tbody>{importRows.slice(0, 5).map((item, index) => <tr key={index}><td>{item.name || item.product_name || '—'}</td><td>{item.category || item.main_category || '—'}</td><td>{item.subcategory || item.sub_category || item.sub_cat || '—'}</td><td>{item.brand || '—'}</td><td>{item.price || item.selling_price || '—'}</td><td>{item.quantity || item.stock || '0'}</td></tr>)}</tbody>
+                  <table><thead><tr><th>Product</th><th>Category</th><th>Subcategory</th><th>Brand</th><th>Price</th><th>Stock</th></tr></thead>
+                    <tbody>{importRows.slice(0, 5).map((item, index) => {
+                      const rawImgs = Array.isArray(item.images) ? item.images : String(item.images || item.image_urls || item.image_url || '').split('|').map((s) => s.trim()).filter(Boolean);
+                      const img = item.image_url || item.image || rawImgs[0] || '';
+                      return (
+                        <tr key={index}>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <div style={{ width: 36, height: 36, minWidth: 36, borderRadius: 6, overflow: 'hidden', background: 'rgba(255, 255, 255, 0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border, rgba(255,255,255,0.12))', flexShrink: 0 }}>
+                                {img ? <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; if (e.currentTarget.nextSibling) e.currentTarget.nextSibling.style.display = 'block'; }} /> : null}
+                                <span style={{ fontSize: 16, opacity: 0.5, display: img ? 'none' : 'block' }}>📦</span>
+                              </div>
+                              <span>{item.name || item.product_name || '—'}</span>
+                            </div>
+                          </td>
+                          <td>{item.category || item.main_category || '—'}</td>
+                          <td>{item.subcategory || item.sub_category || item.sub_cat || '—'}</td>
+                          <td>{item.brand || '—'}</td>
+                          <td>{item.price || item.selling_price || '—'}</td>
+                          <td>{item.quantity || item.stock || '0'}</td>
+                        </tr>
+                      );
+                    })}</tbody>
                   </table>
                 </div>
                 {importRows.length > 5 && <small className="shop-import-preview-note">Showing first 5 of {importRows.length} products. All {importRows.length} products will be imported.</small>}
@@ -1532,7 +1575,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
             )}
           </section>
         )}
-        <div className="shop-admin-card"><div className="shop-admin-list-head"><h3>{isSeller ? 'My products' : 'All products'} ({isSeller ? products.length : productPagination.total})</h3><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>{!isSeller && <input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Search products…" style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', minWidth: 180 }} />}<label className="shop-admin-tier-filter">Quality Tier<select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)}><option value="any">All products</option><option value="none">No Quality Tier set</option>{QUALITY_TIER_OPTIONS.map((tier) => <option key={tier.value} value={tier.value}>{tier.value === 'all' ? 'All tiers' : tier.label}</option>)}</select></label></div></div>{loading ? <p>Loading products...</p> : !products.length ? <p>No products yet. Add the first product above.</p> : !visibleProducts.length ? <p>No products match this Quality Tier filter.</p> : <div className="shop-admin-table-wrap"><table><thead><tr><th>Product</th><th>Category</th><th>Subcategory</th><th>Quality</th><th>Get Quote range</th><th>Buy Now price / unit</th>{!isSeller && <th>Discount</th>}{!isSeller && <th>Source</th>}<th>Status</th><th>Actions</th></tr></thead><tbody>{visibleProducts.map((product) => { const price = Number(product.price); const originalPrice = Number(product.compare_at_price); const discountPercent = originalPrice > price && price > 0 ? Math.round(((originalPrice - price) / originalPrice) * 100) : null; return <tr key={product.id}><td><strong>{product.name}</strong>{product.description && <small>{product.description}</small>}</td><td>{product.category || 'Unassigned'}</td><td>{product.subcategory || '—'}</td><td>{qualityTierLabel(product.quality_tier) || <span className="shop-admin-tier-missing">Not set</span>}</td><td>{product.quote_price_range ? `₹${product.quote_price_range}` : '—'}</td><td>{price > 0 ? `₹${price.toLocaleString('en-IN')} / ${product.unit || 'unit'}` : <span style={{ color: '#d97706', fontWeight: 600 }}>Price on request</span>}</td>{!isSeller && <td>{discountPercent === null ? '—' : `${discountPercent}% OFF`}</td>}{!isSeller && <td>{product.vendor_id ? `Vendor #${product.vendor_id}` : product.supplier_id === 0 ? 'Admin' : `Supplier #${product.supplier_id}`}</td>}<td>{isSeller ? (() => {
+        <div className="shop-admin-card"><div className="shop-admin-list-head"><h3>{isSeller ? 'My products' : 'All products'} ({isSeller ? products.length : productPagination.total})</h3><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>{!isSeller && <input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Search products…" style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', minWidth: 180 }} />}<label className="shop-admin-tier-filter">Quality Tier<select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)}><option value="any">All products</option><option value="none">No Quality Tier set</option>{QUALITY_TIER_OPTIONS.map((tier) => <option key={tier.value} value={tier.value}>{tier.value === 'all' ? 'All tiers' : tier.label}</option>)}</select></label></div></div>{loading ? <p>Loading products...</p> : !products.length ? <p>No products yet. Add the first product above.</p> : !visibleProducts.length ? <p>No products match this Quality Tier filter.</p> : <div className="shop-admin-table-wrap"><table><thead><tr><th>Product</th><th>Category</th><th>Subcategory</th><th>Quality</th><th>Get Quote range</th><th>Buy Now price / unit</th>{!isSeller && <th>Discount</th>}{!isSeller && <th>Source</th>}<th>Status</th><th>Actions</th></tr></thead><tbody>{visibleProducts.map((product) => { const price = Number(product.price); const originalPrice = Number(product.compare_at_price); const discountPercent = originalPrice > price && price > 0 ? Math.round(((originalPrice - price) / originalPrice) * 100) : null; return <tr key={product.id}><td><div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><div style={{ width: 44, height: 44, minWidth: 44, borderRadius: 8, overflow: 'hidden', background: 'rgba(255, 255, 255, 0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border, rgba(255,255,255,0.12))', flexShrink: 0, cursor: (product.image_url || (Array.isArray(product.images) && product.images[0])) ? 'pointer' : 'default' }} onClick={() => { const rawImages = Array.isArray(product.images) ? product.images : []; const img = product.image_url || rawImages[0] || ''; if (img) window.open(img, '_blank'); }} title={(product.image_url || (Array.isArray(product.images) && product.images[0])) ? 'Click to view full image' : ''}>{(() => { const rawImages = Array.isArray(product.images) ? product.images : []; const img = product.image_url || rawImages[0] || ''; return img ? <img src={img} alt={product.name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; if (e.currentTarget.nextSibling) e.currentTarget.nextSibling.style.display = 'block'; }} /> : null; })()}<span style={{ fontSize: 18, opacity: 0.6, display: (product.image_url || (Array.isArray(product.images) && product.images[0])) ? 'none' : 'block' }}>📦</span></div><div style={{ minWidth: 0 }}><strong>{product.name}</strong>{product.description && <small>{product.description}</small>}</div></div></td><td>{product.category || 'Unassigned'}</td><td>{product.subcategory || '—'}</td><td>{qualityTierLabel(product.quality_tier) || <span className="shop-admin-tier-missing">Not set</span>}</td><td>{product.quote_price_range ? `₹${product.quote_price_range}` : '—'}</td><td>{price > 0 ? `₹${price.toLocaleString('en-IN')} / ${product.unit || 'unit'}` : <span style={{ color: '#d97706', fontWeight: 600 }}>Price on request</span>}</td>{!isSeller && <td>{discountPercent === null ? '—' : `${discountPercent}% OFF`}</td>}{!isSeller && <td>{product.vendor_id ? `Vendor #${product.vendor_id}` : product.supplier_id === 0 ? 'Admin' : `Supplier #${product.supplier_id}`}</td>}<td>{isSeller ? (() => {
   const approval = product.specifications?.__approval__;
   const status = approval?.status || 'approved';
   if (status === 'pending') {

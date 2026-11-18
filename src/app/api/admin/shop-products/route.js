@@ -185,8 +185,8 @@ export async function GET(req) {
          images, specifications, bulk_pricing, available_cities, is_available, quality_tier,
          COALESCE(faqs, '[]'::jsonb) AS faqs, returns_policy, COALESCE(highlights, '[]'::jsonb) AS highlights,
          created_at`
-      : `id, supplier_id, vendor_id, name, quote_price_range, price, unit, quantity, image_url,
-         category, subcategory, brand, compare_at_price, is_featured_deal, is_available, quality_tier, created_at`;
+      : `id, supplier_id, vendor_id, name, description, quote_price_range, price, unit, quantity, image_url,
+         images, specifications, category, subcategory, brand, compare_at_price, is_featured_deal, is_available, quality_tier, created_at`;
 
     params.push(limit, offset);
     const result = await pool.query(
