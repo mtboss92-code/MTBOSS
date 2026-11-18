@@ -234,6 +234,8 @@ export async function executeBulkProductImport({
       continue;
     }
 
+    await client.query('SAVEPOINT import_product_row');
+    try {
     const price = rawSellingPrice;
     const mrp = rawMrp && rawMrp >= price ? rawMrp : price;
     const quantity = Math.max(0, Math.floor(rawStock ?? 0));
@@ -242,8 +244,13 @@ export async function executeBulkProductImport({
     const pricing = calculatePricingAndGst({ mrp, sellingPrice: price, gstPercent, isTaxInclusive: true });
 
     // Inventory status & Weight
-    const weightSizeUnit = text(row['Weight Size Unit'] || row.unit || 'pcs', 100);
-    const stockStatus = text(row['Stock Status'] || row.stock_status) || computeStockStatus(quantity);
+    // Production uses VARCHAR(50) for measurement_unit. Marketplace files
+    // can put a long packaging description in this field.
+    const weightSizeUnit = text(row['Weight Size Unit'] || row.unit || 'pcs', 50) || 'pcs';
+    const providedStockStatus = text(row['Stock Status'] || row.stock_status, 32).toLowerCase();
+    const stockStatus = ['in_stock', 'low_stock', 'out_of_stock'].includes(providedStockStatus)
+      ? providedStockStatus
+      : computeStockStatus(quantity);
 
     // Identifiers
     const externalProductId = text(row['Product ID'] || row.product_code || row.product_id, 50);
@@ -394,6 +401,13 @@ export async function executeBulkProductImport({
       }
 
       result.created += 1;
+    }
+      await client.query('RELEASE SAVEPOINT import_product_row');
+    } catch (error) {
+      // Keep importing valid rows even when one source row cannot be saved.
+      await client.query('ROLLBACK TO SAVEPOINT import_product_row');
+      result.skipped += 1;
+      result.errors.push({ row: rowNum, message: error.message || 'Could not import this product row' });
     }
   }
 
