@@ -71,17 +71,73 @@
 .shop-admin-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 20px}
 .shop-admin-fields label{display:flex;flex-direction:column;gap:7px;color:var(--shop-admin-text);font-size:12.5px;font-weight:700}
 .shop-admin-fields label>small{color:var(--shop-admin-muted);font-size:11px;font-weight:500;line-height:1.4;margin-top:2px}
-.shop-admin-fields input,.shop-admin-fields select,.shop-admin-fields textarea{width:100%;min-height:40px;border:1px solid var(--shop-admin-input-border, var(--shop-admin-border));border-radius:8px;background:var(--shop-admin-input);color:var(--shop-admin-text);padding:9px 13px;font:13.5px Arial,sans-serif;transition:border-color 0.15s ease,box-shadow 0.15s ease;box-sizing:border-box}
-.shop-admin-fields input:focus,.shop-admin-fields select:focus,.shop-admin-fields textarea:focus{outline:none;border-color:var(--brand-blue);box-shadow:0 0 0 3px rgba(37,99,235,0.18)}
-.shop-admin-fields input::placeholder,.shop-admin-fields textarea::placeholder{color:var(--shop-admin-muted);opacity:0.7}
+.shop-admin-fields input,
+.shop-admin-fields select,
+.shop-admin-fields textarea {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--shop-admin-input-border, rgba(255, 255, 255, 0.12));
+  border-radius: 9px;
+  background: var(--shop-admin-input, rgba(255, 255, 255, 0.04));
+  color: var(--shop-admin-text, #f4f4f5);
+  padding: 10px 14px;
+  font: 13.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  transition: all 0.18s ease;
+  box-sizing: border-box;
+}
+:is(html:not(.dark-mode):not(.dark)) .shop-admin-fields input,
+:is(html:not(.dark-mode):not(.dark)) .shop-admin-fields select,
+:is(html:not(.dark-mode):not(.dark)) .shop-admin-fields textarea {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+.shop-admin-fields input:focus,
+.shop-admin-fields select:focus,
+.shop-admin-fields textarea:focus {
+  outline: none;
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+}
+:is(html:not(.dark-mode):not(.dark)) .shop-admin-fields input:focus,
+:is(html:not(.dark-mode):not(.dark)) .shop-admin-fields select:focus,
+:is(html:not(.dark-mode):not(.dark)) .shop-admin-fields textarea:focus {
+  background: #ffffff;
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+}
+.shop-admin-fields input::placeholder,
+.shop-admin-fields textarea::placeholder {
+  color: var(--shop-admin-muted, #71717a);
+  opacity: 0.8;
+}
 .shop-admin-root select option{background:var(--shop-admin-input);color:var(--shop-admin-text)}
 :is(html.dark-mode, html.dark, .dark-mode, .dark) .shop-admin-root select option{background:#18181b;color:#f4f4f5}
 .shop-admin-fields textarea{resize:vertical}
 .shop-admin-wide{grid-column:1/-1}
 
 /* Back button and Subcategory button */
-.shop-admin-back-btn{display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border:1px solid var(--shop-admin-border);border-radius:8px;background:var(--shop-admin-card-bg);color:var(--shop-admin-text);cursor:pointer;font-weight:700;font-size:12.5px;transition:all 0.15s ease}
-.shop-admin-back-btn:hover{background:var(--shop-admin-bg-hover);border-color:var(--brand-blue);color:var(--brand-blue)}
+.shop-admin-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 1px solid var(--shop-admin-border, rgba(255, 255, 255, 0.1));
+  border-radius: 9px;
+  background: var(--shop-admin-card-bg, #18181b);
+  color: var(--shop-admin-text, #f4f4f5);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+  transition: all 0.18s ease;
+}
+.shop-admin-back-btn:hover {
+  background: var(--shop-admin-bg-hover, rgba(255, 255, 255, 0.08));
+  border-color: #0ea5e9;
+  color: #fff;
+  transform: translateX(-2px);
+}
 .shop-admin-subcat-btn{font-size:12px;padding:8px 12px;background:var(--shop-admin-pill-bg);border:1px solid var(--shop-admin-border);color:var(--shop-admin-text);border-radius:6px;cursor:pointer;white-space:nowrap;font-weight:600;transition:all 0.15s ease}
 .shop-admin-subcat-btn:hover{background:var(--shop-admin-pill-hover);border-color:var(--brand-blue)}
 
@@ -855,3 +911,449 @@
 }
 
 
+
+/* ==============================================================================
+   Complete Product Management System Upgrades: Tabs, Identifiers, Variants & Stats
+   ============================================================================== */
+
+/* Dashboard Summary Cards */
+.shop-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.shop-stat-card {
+  background: var(--shop-admin-card-bg);
+  border: 1px solid var(--shop-admin-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+}
+.shop-stat-card .stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--shop-admin-muted);
+}
+.shop-stat-card .stat-val {
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--shop-admin-text);
+}
+.shop-stat-card.stat-green .stat-val { color: #16a34a; }
+.shop-stat-card.stat-amber .stat-val { color: #d97706; }
+.shop-stat-card.stat-red .stat-val { color: #dc2626; }
+.shop-stat-card.stat-blue .stat-val { color: var(--brand-blue); }
+
+/* ─────────────────────────────────────────────────────────────
+   Form Header & Tabs Navigation (Modern Responsive Pill Strip)
+   ───────────────────────────────────────────────────────────── */
+.shop-form-header-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+.shop-form-header-title-wrap h2 {
+  font-size: 24px;
+  font-weight: 800;
+  margin: 0;
+  color: var(--shop-admin-text);
+  letter-spacing: -0.02em;
+}
+.shop-form-header-title-wrap p {
+  font-size: 13px;
+  color: var(--shop-admin-muted);
+  margin: 4px 0 0;
+}
+
+.shop-form-tabs-bar {
+  margin-bottom: 24px;
+  position: relative;
+}
+.shop-form-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: var(--shop-admin-subtle, rgba(255, 255, 255, 0.025));
+  border: 1px solid var(--shop-admin-border, rgba(255, 255, 255, 0.08));
+  border-radius: 14px;
+  /* Completely prevent and hide any native horizontal scrollbar */
+  overflow: visible !important;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+.shop-form-tabs::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+:is(html:not(.dark-mode):not(.dark)) .shop-form-tabs {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+/* Modern Segmented Pill Tab Button */
+.shop-form-tab-btn {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--shop-admin-muted, #94a3b8);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+:is(html:not(.dark-mode):not(.dark)) .shop-form-tab-btn {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+
+.shop-form-tab-btn:hover {
+  color: var(--shop-admin-text, #f8fafc);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+}
+:is(html:not(.dark-mode):not(.dark)) .shop-form-tab-btn:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.shop-form-tab-btn.active {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
+  border-color: #38bdf8 !important;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.38) !important;
+  font-weight: 700;
+  transform: translateY(-1px);
+}
+
+.shop-tab-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+.shop-tab-label {
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+}
+.shop-tab-counter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  margin-left: 2px;
+}
+.shop-form-tab-btn.active .shop-tab-counter {
+  background: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+}
+
+/* Footer Action Buttons */
+.shop-admin-form-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--shop-admin-border, rgba(255, 255, 255, 0.08));
+  flex-wrap: wrap;
+}
+.shop-tab-nav-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--shop-admin-text, #f4f4f5);
+  border-radius: 8px;
+  padding: 9px 15px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+:is(html:not(.dark-mode):not(.dark)) .shop-tab-nav-btn {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+.shop-tab-nav-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: #0ea5e9;
+  color: #fff;
+  transform: translateY(-1px);
+}
+.shop-tab-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.shop-form-cancel-btn {
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--shop-admin-border, rgba(255, 255, 255, 0.1));
+  background: transparent;
+  color: var(--shop-admin-muted, #a1a1aa);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.shop-form-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+:is(html:not(.dark-mode):not(.dark)) .shop-form-cancel-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.shop-form-save-btn {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: #ffffff;
+  border: 1px solid #38bdf8;
+  border-radius: 8px;
+  padding: 10px 24px;
+  font-weight: 800;
+  font-size: 13.5px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35);
+  transition: all 0.18s ease;
+}
+.shop-form-save-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(2, 132, 199, 0.45);
+}
+.shop-form-save-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Tab Section Body */
+.shop-tab-pane {
+  animation: fadeInPane 0.2s ease-in-out;
+}
+@keyframes fadeInPane {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Inline Action Input Wrapper */
+.shop-inline-input-action {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.shop-inline-input-action input {
+  flex: 1;
+}
+.shop-action-btn-sm {
+  background: var(--shop-admin-subtle);
+  border: 1px solid var(--shop-admin-border);
+  color: var(--shop-admin-text);
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+.shop-action-btn-sm:hover {
+  background: var(--brand-blue);
+  color: #fff;
+  border-color: var(--brand-blue);
+}
+
+/* Stock Status Pills */
+.shop-stock-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+.shop-stock-pill.in_stock {
+  background: #dcfce7;
+  color: #15803d;
+}
+.shop-stock-pill.low_stock {
+  background: #fef3c7;
+  color: #b45309;
+}
+.shop-stock-pill.out_of_stock {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+:is(html.dark-mode, html.dark, .dark-mode, .dark) .shop-stock-pill.in_stock {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+:is(html.dark-mode, html.dark, .dark-mode, .dark) .shop-stock-pill.low_stock {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+:is(html.dark-mode, html.dark, .dark-mode, .dark) .shop-stock-pill.out_of_stock {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+/* Pricing Breakdown Grid */
+.shop-price-breakdown-card {
+  background: var(--shop-admin-spec-box-bg);
+  border: 1px solid var(--shop-admin-border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+}
+.shop-price-breakdown-card .breakdown-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.shop-price-breakdown-card .breakdown-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--shop-admin-muted);
+}
+.shop-price-breakdown-card .breakdown-val {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--shop-admin-text);
+}
+
+/* Variant Matrix Table */
+.shop-variant-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  font-size: 12.5px;
+}
+.shop-variant-table th {
+  background: var(--shop-admin-subtle, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--shop-admin-border, rgba(255, 255, 255, 0.08));
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 700;
+  font-size: 11.5px;
+  color: var(--shop-admin-text);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.shop-variant-table td {
+  border: 1px solid var(--shop-admin-border, rgba(255, 255, 255, 0.08));
+  padding: 8px 10px;
+  vertical-align: middle;
+}
+.shop-variant-table input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--shop-admin-border, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  background: var(--shop-admin-input, rgba(255, 255, 255, 0.04));
+  color: var(--shop-admin-text, #f4f4f5);
+  font-size: 12.5px;
+  box-sizing: border-box;
+}
+.shop-variant-table input:focus {
+  outline: none;
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2);
+}
+.shop-variant-del-btn {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  padding: 5px 9px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+.shop-variant-del-btn:hover {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+/* Stock Movement History Table */
+.shop-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  backdrop-filter: blur(2px);
+  padding: 16px;
+}
+.shop-modal-container {
+  background: var(--shop-admin-card-bg);
+  border: 1px solid var(--shop-admin-border);
+  border-radius: 12px;
+  max-width: 750px;
+  width: 100%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+  overflow: hidden;
+}
+.shop-modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--shop-admin-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.shop-modal-header h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--shop-admin-text);
+}
+.shop-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+.shop-modal-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--shop-admin-border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}

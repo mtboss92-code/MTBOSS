@@ -499,6 +499,73 @@ export async function POST(req) {
           actorName: cleanName,
         });
 
+        // Deduct inventory and record stock movement on order placement
+        if (item.product_id && orderIntent === 'buy') {
+          try {
+            const orderQty = Math.max(1, Math.round(Number(item.quantity) || Number.parseFloat(String(quantity_text || '')) || 1));
+            const prodRow = await client.query(
+              `SELECT id, quantity, low_stock_threshold, stock_status FROM supplier_materials WHERE id = $1 FOR UPDATE`,
+              [item.product_id]
+            );
+            if (prodRow.rows.length > 0) {
+              const currentStock = Number(prodRow.rows[0].quantity) || 0;
+              const newStock = Math.max(0, currentStock - orderQty);
+              const threshold = Number(prodRow.rows[0].low_stock_threshold) || 10;
+              const newStatus = newStock <= 0 ? 'out_of_stock' : (newStock <= threshold ? 'low_stock' : 'in_stock');
+
+              await client.query(
+                `UPDATE supplier_materials
+                 SET quantity = $1, stock_status = $2, updated_at = NOW()
+                 WHERE id = $3`,
+                [newStock, newStatus, item.product_id]
+              );
+
+              await client.query(
+                `INSERT INTO stock_movements (
+                  product_id, variant_id, movement_type, quantity,
+                  previous_stock, new_stock, reference_type, reference_id,
+                  reason, performed_by, performed_by_role, notes, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())`,
+                [
+                  item.product_id,
+                  item.variant_id ? Number(item.variant_id) : null,
+                  'sale',
+                  -orderQty,
+                  currentStock,
+                  newStock,
+                  'order',
+                  String(result.rows[0].id),
+                  `Order #${result.rows[0].order_reference || result.rows[0].id} placed`,
+                  user.id || 0,
+                  'customer',
+                  `Customer checkout: ${cleanName}`,
+                ]
+              );
+
+              // Deduct from variant if variant_id was specified
+              if (item.variant_id) {
+                const varRow = await client.query(
+                  `SELECT id, stock_quantity, stock_status FROM product_variants WHERE id = $1 FOR UPDATE`,
+                  [Number(item.variant_id)]
+                );
+                if (varRow.rows.length > 0) {
+                  const varCurrent = Number(varRow.rows[0].stock_quantity) || 0;
+                  const varNew = Math.max(0, varCurrent - orderQty);
+                  const varStatus = varNew <= 0 ? 'out_of_stock' : (varNew <= 5 ? 'low_stock' : 'in_stock');
+                  await client.query(
+                    `UPDATE product_variants
+                     SET stock_quantity = $1, stock_status = $2, updated_at = NOW()
+                     WHERE id = $3`,
+                    [varNew, varStatus, Number(item.variant_id)]
+                  );
+                }
+              }
+            }
+          } catch (invErr) {
+            console.warn('Inventory deduction warning on order placement:', invErr.message);
+          }
+        }
+
         // Step 3: Check product source - apply fee calculation on vendor- and supplier-sourced products (skip Admin direct products)
         let vendorId = product?.vendor_id ? Number(product.vendor_id) : null;
         const supplierId = product?.supplier_id ? Number(product.supplier_id) : null;

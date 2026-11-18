@@ -1,8 +1,48 @@
 import pool from '@/lib/db';
 import { createInitializationGuard } from '@/lib/api-utils';
 import { QUALITY_TIER_COLUMN_SQL, normalizeQualityTier } from '@/lib/quality-tier';
+import {
+  generateNextProductCode,
+  generateSku,
+  isSkuUnique,
+  validateBarcode,
+  generateInternalBarcode,
+  calculatePricingAndGst,
+  computeStockStatus,
+} from '@/lib/product-identifiers';
+import { recordStockMovement } from '@/lib/stock-movements';
 
-export const MAX_IMPORT_ROWS = 200;
+export const MAX_IMPORT_ROWS = 500;
+
+export const CSV_27_COLUMNS = [
+  'Product Name',
+  'Product ID',
+  'SKU',
+  'Barcode',
+  'Brand',
+  'Category',
+  'Subcategory',
+  'MRP',
+  'Selling Price',
+  'Discount',
+  'Available Quantity Stock',
+  'Stock Status',
+  'Product Description',
+  'Product Image URL',
+  'Additional Image URLs',
+  'Weight Size Unit',
+  'GST Tax',
+  'Product Specifications',
+  'Product Variants',
+  'Bulk Prices',
+  'Keywords',
+  'Product URL',
+  'Currency',
+  'MPN',
+  'Variant ID',
+  'HTTP Status',
+  'Extraction Notes',
+];
 
 export const RELATED_CATEGORY_RULES = [
   { parent: 'Building Materials', match: /cement|brick|block|sand|aggregate|barjri|steel|iron|tile|marble|glass|pop|gypsum/ },
@@ -15,48 +55,15 @@ export const RELATED_CATEGORY_RULES = [
 ];
 
 export const ensureImportTables = createInitializationGuard(async () => {
-  await pool.query(`CREATE TABLE IF NOT EXISTS shop_categories (
-    id SERIAL PRIMARY KEY, name VARCHAR(200) NOT NULL, image TEXT,
-    emoji VARCHAR(20) DEFAULT '🛒', label VARCHAR(100) DEFAULT '',
-    label_color VARCHAR(50) DEFAULT 'yellow', price_range VARCHAR(100) DEFAULT '',
-    unit VARCHAR(100) DEFAULT 'pcs', sort_order INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT TRUE, subcategories JSONB DEFAULT '[]'::jsonb,
-    created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
-  )`);
-  await pool.query(`ALTER TABLE shop_categories ADD COLUMN IF NOT EXISTS subcategories JSONB DEFAULT '[]'::jsonb`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS supplier_materials (
-    id SERIAL PRIMARY KEY, supplier_id INTEGER NOT NULL, vendor_id INTEGER,
-    name VARCHAR(255) NOT NULL, description TEXT, quote_price_range VARCHAR(100),
-    price NUMERIC(10,2), unit VARCHAR(100), quantity INTEGER DEFAULT 0,
-    image_url TEXT, category VARCHAR(255), subcategory VARCHAR(255), brand VARCHAR(120),
-    compare_at_price NUMERIC(10,2), is_featured_deal BOOLEAN DEFAULT FALSE,
-    images JSONB DEFAULT '[]'::jsonb, specifications JSONB DEFAULT '{}'::jsonb,
-    bulk_pricing JSONB DEFAULT '[]'::jsonb, available_cities JSONB DEFAULT '[]'::jsonb,
-    is_available BOOLEAN DEFAULT TRUE, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
-  )`);
-  await pool.query(`ALTER TABLE supplier_materials
-    ADD COLUMN IF NOT EXISTS vendor_id INTEGER,
-    ADD COLUMN IF NOT EXISTS subcategory VARCHAR(255),
-    ADD COLUMN IF NOT EXISTS brand VARCHAR(120),
-    ADD COLUMN IF NOT EXISTS quote_price_range VARCHAR(100),
-    ADD COLUMN IF NOT EXISTS compare_at_price NUMERIC(10,2),
-    ADD COLUMN IF NOT EXISTS is_featured_deal BOOLEAN DEFAULT FALSE,
-    ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'::jsonb,
-    ADD COLUMN IF NOT EXISTS specifications JSONB DEFAULT '{}'::jsonb,
-    ADD COLUMN IF NOT EXISTS bulk_pricing JSONB DEFAULT '[]'::jsonb,
-    ADD COLUMN IF NOT EXISTS available_cities JSONB DEFAULT '[]'::jsonb,
-    ADD COLUMN IF NOT EXISTS faqs JSONB DEFAULT '[]'::jsonb,
-    ADD COLUMN IF NOT EXISTS returns_policy TEXT,
-    ADD COLUMN IF NOT EXISTS highlights JSONB DEFAULT '[]'::jsonb`);
+  await pool.query(`CREATE SEQUENCE IF NOT EXISTS shop_product_code_seq START WITH 1;`);
   await pool.query(QUALITY_TIER_COLUMN_SQL);
-  await pool.query('CREATE INDEX IF NOT EXISTS supplier_materials_vendor_id_idx ON supplier_materials(vendor_id)');
-  await pool.query('CREATE INDEX IF NOT EXISTS supplier_materials_supplier_id_idx ON supplier_materials(supplier_id)');
 });
 
 export const text = (value, max = 1000) => String(value ?? '').trim().slice(0, max);
 
 export const number = (value) => {
-  const parsed = Number(String(value ?? '').replace(/[₹,\s]/g, ''));
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(String(value).replace(/[₹,\s]/g, ''));
   return Number.isFinite(parsed) ? parsed : null;
 };
 
@@ -71,23 +78,10 @@ export function specifications(value) {
     const parsed = JSON.parse(input);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
   } catch { /* Key: Value syntax accepted */ }
-  return Object.fromEntries(pipeList(input, 20).map((item) => {
+  return Object.fromEntries(pipeList(input, 40).map((item) => {
     const divider = item.indexOf(':');
     return divider < 0 ? [item.slice(0, 100), 'Yes'] : [item.slice(0, divider).trim().slice(0, 100), item.slice(divider + 1).trim().slice(0, 500)];
   }).filter(([key, value]) => key && value));
-}
-
-export function productSpecifications(row) {
-  const result = { ...specifications(row.specifications) };
-  const attributeColumns = [
-    ['grade', 'Grade'], ['type', 'Type'], ['pack_size', 'PackSize'], ['thickness', 'Thickness'],
-    ['size', 'Size'], ['material', 'Material'], ['color', 'Colors'],
-  ];
-  attributeColumns.forEach(([column, label]) => {
-    const value = text(row[column], 500);
-    if (value) result[label] = value;
-  });
-  return result;
 }
 
 export function bulkPricing(value) {
@@ -97,19 +91,21 @@ export function bulkPricing(value) {
   }).filter(Boolean).sort((a, b) => a.min_quantity - b.min_quantity);
 }
 
-export function faqs(value) {
-  const input = text(value, 20000);
+export function parseVariantsList(value) {
+  const input = text(value, 10000);
   if (!input) return [];
   try {
     const parsed = JSON.parse(input);
-    if (Array.isArray(parsed)) return parsed
-      .map((item) => ({ q: text(item?.q || item?.question, 500), a: text(item?.a || item?.answer, 2000) }))
-      .filter((item) => item.q && item.a).slice(0, 20);
-  } catch { /* Q::A format supported */ }
-  return pipeList(input, 20).map((item) => {
-    const divider = item.indexOf('::');
-    return divider < 0 ? null : { q: text(item.slice(0, divider), 500), a: text(item.slice(divider + 2), 2000) };
-  }).filter((item) => item?.q && item?.a);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {}
+  // Pipe separated format: Red / XL : 500 : 10 | Blue / L : 450 : 5
+  return pipeList(input, 20).map((item, idx) => {
+    const parts = item.split(':').map((s) => s.trim());
+    const name = parts[0] || `Variant ${idx + 1}`;
+    const price = number(parts[1]) || 0;
+    const qty = Math.max(0, Math.floor(number(parts[2]) || 0));
+    return { name, price, quantity: qty };
+  });
 }
 
 export function resolveCatalogPlacement(rawCategory, rawSubcategory, productName) {
@@ -152,158 +148,249 @@ export async function findOrCreateCategory(client, name, unit, subcategory = '')
 }
 
 /**
+ * Generate standard CSV template string with 27 headers and sample row
+ */
+export function generateCsvTemplate() {
+  const header = CSV_27_COLUMNS.join(',');
+  const sample = [
+    '"Ultratech Super Cement"',
+    '""', // Product ID (leave empty for auto-generation)
+    '"MTB-CEM-0101"',
+    '"8901234567890"',
+    '"Ultratech"',
+    '"Building Materials"',
+    '"Cement"',
+    '450.00',
+    '390.00',
+    '13.33',
+    '500',
+    '"in_stock"',
+    '"High performance OPC 53 Grade Cement for robust construction."',
+    '"https://images.unsplash.com/photo-1518709268805-4e9042af9f23"',
+    '""',
+    '"50 kg"',
+    '18.00',
+    '"Grade: OPC 53 | Pack: 50 Kg Bag"',
+    '""',
+    '"50:380 | 100:365"',
+    '"cement, ultratech, opc53"',
+    '""',
+    '"INR"',
+    '"UT-53-01"',
+    '""',
+    '"200"',
+    '""',
+  ].join(',');
+  return `${header}\n${sample}\n`;
+}
+
+/**
  * Process a batch of product import rows.
- * @param {Object} options
- * @param {import('pg').PoolClient} options.client Database client in a transaction
- * @param {Array<Object>} options.rows Raw product rows from CSV
- * @param {'create'|'update'} options.mode Duplicate mode
- * @param {'admin'|'supplier'|'vendor'} options.role Uploader role
- * @param {number} [options.supplierId=0] Supplier ID (if role === 'supplier')
- * @param {number|null} [options.vendorId=null] Vendor ID (if vendor or linked vendor)
+ * Concurrency-safe, transactional, supports full 27-column standard.
  */
 export async function executeBulkProductImport({
   client,
   rows,
-  mode = 'create',
+  mode = 'create', // 'create' | 'update' | 'skip'
   role = 'admin',
   supplierId = 0,
   vendorId = null,
+  userId = null,
+  userName = 'Admin',
 }) {
   const isSeller = role === 'vendor' || role === 'supplier';
-  const result = { created: 0, updated: 0, skipped: 0, errors: [] };
+  const result = { total: rows.length, created: 0, updated: 0, skipped: 0, errors: [] };
 
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index] || {};
-    const name = text(row.name || row.product_name, 255);
-    const categoryName = text(row.category || row.main_category || row.category_name, 200);
-    const rawSubcategory = text(
-      row.subcategory || row.sub_category || row.sub_cat || row['sub category'] || row['sub-category'] || row['subcategory_name'] || '',
-      255
-    );
-    const price = number(row.price || row.selling_price);
+    const rowNum = index + 2;
 
-    if (!name || !categoryName || !(price > 0)) {
+    // Normalizing column names from 27-column standard
+    const name = text(row['Product Name'] || row.name || row.product_name, 255);
+    const categoryName = text(row['Category'] || row.category || row.main_category, 200);
+    const rawSubcategory = text(row['Subcategory'] || row.subcategory || row.sub_category || '', 255);
+    const brand = text(row['Brand'] || row.brand, 120);
+
+    const rawSellingPrice = number(row['Selling Price'] || row.selling_price || row.price);
+    const rawMrp = number(row['MRP'] || row.mrp || row.compare_at_price || rawSellingPrice);
+    const rawStock = number(row['Available Quantity Stock'] || row.quantity || row.stock || 0);
+
+    // Row-level validations
+    if (!name) {
       result.skipped += 1;
-      result.errors.push({
-        row: index + 2,
-        message: 'Product name, category and a positive price are required',
-      });
+      result.errors.push({ row: rowNum, message: 'Product Name is missing' });
+      continue;
+    }
+    if (!categoryName) {
+      result.skipped += 1;
+      result.errors.push({ row: rowNum, message: `Category missing for product '${name}'` });
+      continue;
+    }
+    if (!(rawSellingPrice > 0)) {
+      result.skipped += 1;
+      result.errors.push({ row: rowNum, message: `Valid Selling Price (>0) required for '${name}'` });
       continue;
     }
 
-    const quantity = Math.max(0, Math.floor(number(row.quantity ?? row.stock) ?? 0));
+    const price = rawSellingPrice;
+    const mrp = rawMrp && rawMrp >= price ? rawMrp : price;
+    const quantity = Math.max(0, Math.floor(rawStock ?? 0));
+    const gstPercent = number(row['GST Tax'] || row.gst_percent) ?? 18.00;
+
+    const pricing = calculatePricingAndGst({ mrp, sellingPrice: price, gstPercent, isTaxInclusive: true });
+
+    // Inventory status & Weight
+    const weightSizeUnit = text(row['Weight Size Unit'] || row.unit || 'pcs', 100);
+    const stockStatus = text(row['Stock Status'] || row.stock_status) || computeStockStatus(quantity);
+
+    // Identifiers
+    const externalProductId = text(row['Product ID'] || row.product_code || row.product_id, 50);
+    let sku = text(row['SKU'] || row.sku, 100);
+    const barcode = text(row['Barcode'] || row.barcode, 100);
+    const mpn = text(row['MPN'] || row.mpn, 100);
+    const variantId = text(row['Variant ID'] || row.variant_id, 50);
+
+    // Media
+    const mainImg = text(row['Product Image URL'] || row.image_url, 1000);
+    const addlImgs = pipeList(row['Additional Image URLs'] || row.images || '', 10);
+    const images = Array.from(new Set([mainImg, ...addlImgs].filter(Boolean)));
+
+    // Content
+    const description = text(row['Product Description'] || row.description, 5000);
+    const specs = { ...specifications(row['Product Specifications'] || row.specifications) };
+    const bulkPricingTiers = bulkPricing(row['Bulk Prices'] || row.bulk_pricing);
+    const keywords = text(row['Keywords'] || row.keywords, 1000);
+    const productUrl = text(row['Product URL'] || row.product_url, 255);
+    const httpStatus = text(row['HTTP Status'] || row.http_status || '200', 20);
+    const extractionNotes = role === 'admin' ? text(row['Extraction Notes'] || row.extraction_notes, 2000) : '';
+
     const placement = resolveCatalogPlacement(categoryName, rawSubcategory, name);
-    const category = await findOrCreateCategory(client, placement.categoryName, text(row.unit, 100) || 'pcs', placement.subcategory);
-    const tier = normalizeQualityTier(row.quality_tier || row.quality || 'all') || 'all';
-    const images = pipeList(row.images || row.image_urls || row.image_url, 8).filter((url) => url.length <= 1000);
-    const compareAt = number(row.compare_at_price || row.mrp || row.original_price);
-    const brand = text(row.brand, 120);
+    const category = await findOrCreateCategory(client, placement.categoryName, weightSizeUnit, placement.subcategory);
 
-    // Vendor and Supplier products ALWAYS require admin approval (is_available = false)
-    let isAvailable = false;
-    const specs = productSpecifications(row);
-
+    // Seller vs Admin Approval logic
+    let isAvailable = true;
     if (isSeller) {
       delete specs.__approval__;
-      specs.__approval__ = {
-        status: 'pending',
-        created_at: new Date().toISOString(),
-      };
+      specs.__approval__ = { status: 'pending', created_at: new Date().toISOString() };
       isAvailable = false;
     } else {
       isAvailable = row.is_available === undefined || row.is_available === '' ? true : bool(row.is_available);
     }
 
-    const fields = [
-      name,
-      text(row.description, 2000),
-      text(row.quote_price_range, 100) || null,
-      price,
-      text(row.unit, 100) || category.unit || 'pcs',
-      quantity,
-      images[0] || '',
-      category.name,
-      placement.subcategory,
-      brand,
-      compareAt && compareAt >= 0 ? compareAt : null,
-      bool(row.is_featured_deal || row.featured),
-      JSON.stringify(images),
-      JSON.stringify(specs),
-      JSON.stringify(bulkPricing(row.bulk_pricing || row.bulk_prices)),
-      JSON.stringify(pipeList(row.available_cities || row.cities)),
-      isAvailable,
-      tier,
-      JSON.stringify(faqs(row.faqs)),
-      text(row.returns_policy || row.return_policy, 3000),
-      JSON.stringify(pipeList(row.highlights, 20)),
-    ];
+    // Match existing product safely by SKU or Product ID or (Name + Brand)
+    let matchSql = '';
+    let matchParams = [];
 
-    // Check duplicate strictly scoped to this owner
-    let duplicateQuery = '';
-    let duplicateParams = [];
-
-    if (role === 'supplier') {
-      duplicateQuery = `
-        SELECT id FROM supplier_materials
-        WHERE supplier_id = $1
-          AND LOWER(TRIM(name)) = LOWER(TRIM($2))
-          AND LOWER(TRIM(COALESCE(brand, ''))) = LOWER(TRIM($3))
-        LIMIT 1`;
-      duplicateParams = [supplierId, name, brand];
-    } else if (role === 'vendor') {
-      duplicateQuery = `
-        SELECT id FROM supplier_materials
-        WHERE vendor_id = $1
-          AND LOWER(TRIM(name)) = LOWER(TRIM($2))
-          AND LOWER(TRIM(COALESCE(brand, ''))) = LOWER(TRIM($3))
-        LIMIT 1`;
-      duplicateParams = [vendorId, name, brand];
+    if (sku) {
+      matchSql = `SELECT id, product_code, sku, quantity FROM supplier_materials WHERE LOWER(TRIM(sku)) = LOWER(TRIM($1)) AND is_deleted=FALSE LIMIT 1`;
+      matchParams = [sku];
+    } else if (externalProductId && externalProductId.startsWith('MTB-PROD-')) {
+      matchSql = `SELECT id, product_code, sku, quantity FROM supplier_materials WHERE product_code = $1 AND is_deleted=FALSE LIMIT 1`;
+      matchParams = [externalProductId];
     } else {
-      // Admin owns products where supplier_id = 0 AND vendor_id IS NULL
-      duplicateQuery = `
-        SELECT id FROM supplier_materials
-        WHERE supplier_id = 0 AND (vendor_id IS NULL OR vendor_id = 0)
-          AND LOWER(TRIM(name)) = LOWER(TRIM($1))
-          AND LOWER(TRIM(COALESCE(brand, ''))) = LOWER(TRIM($2))
-        LIMIT 1`;
-      duplicateParams = [name, brand];
+      matchSql = `SELECT id, product_code, sku, quantity FROM supplier_materials WHERE LOWER(TRIM(name)) = LOWER(TRIM($1)) AND LOWER(TRIM(COALESCE(brand,''))) = LOWER(TRIM($2)) AND is_deleted=FALSE LIMIT 1`;
+      matchParams = [name, brand];
     }
 
-    const duplicate = await client.query(duplicateQuery, duplicateParams);
+    const matched = await client.query(matchSql, matchParams);
 
-    if (duplicate.rows[0] && mode !== 'update') {
-      result.skipped += 1;
-      result.errors.push({ row: index + 2, message: `Duplicate: ${name} (already exists)` });
-      continue;
-    }
+    // If product exists
+    if (matched.rows.length > 0) {
+      const existingProd = matched.rows[0];
+      if (mode === 'skip') {
+        result.skipped += 1;
+        continue;
+      }
 
-    if (duplicate.rows[0]) {
-      await client.query(
-        `UPDATE supplier_materials SET
-          name=$1, description=$2, quote_price_range=$3, price=$4,
-          unit=$5, quantity=$6, image_url=$7, category=$8, subcategory=$9, brand=$10, compare_at_price=$11,
-          is_featured_deal=$12, images=$13::jsonb, specifications=$14::jsonb, bulk_pricing=$15::jsonb,
-          available_cities=$16::jsonb, is_available=$17, quality_tier=$18, faqs=$19::jsonb, returns_policy=$20,
-          highlights=$21::jsonb, updated_at=NOW()
-         WHERE id=$22`,
-        [...fields, duplicate.rows[0].id]
-      );
+      // Update existing product
+      const oldQty = Number(existingProd.quantity || 0);
+      await client.query(`
+        UPDATE supplier_materials SET
+          name=$1, description=$2, price=$3, mrp=$4, compare_at_price=$4,
+          discount_percent=$5, discount_amount=$6, gst_percent=$7, quantity=$8,
+          unit=$9, measurement_unit=$9, image_url=$10, images=$11::jsonb,
+          category=$12, subcategory=$13, brand=$14, specifications=$15::jsonb,
+          bulk_pricing=$16::jsonb, keywords=$17, barcode=COALESCE(NULLIF($18,''), barcode),
+          mpn=COALESCE(NULLIF($19,''), mpn), extraction_notes=COALESCE(NULLIF($20,''), extraction_notes),
+          http_status=$21, stock_status=$22, is_available=$23, updated_at=NOW()
+        WHERE id=$24
+      `, [
+        name, description, price, mrp, pricing.discountPercent, pricing.discountAmount, gstPercent, quantity,
+        weightSizeUnit, images[0] || '', JSON.stringify(images), category.name, placement.subcategory, brand,
+        JSON.stringify(specs), JSON.stringify(bulkPricingTiers), keywords, barcode, mpn, extractionNotes,
+        httpStatus, stockStatus, isAvailable, existingProd.id,
+      ]);
+
+      if (oldQty !== quantity) {
+        await recordStockMovement({
+          clientOrPool: client,
+          productId: existingProd.id,
+          changeType: quantity > oldQty ? 'adjustment_addition' : 'adjustment_reduction',
+          quantityChange: quantity - oldQty,
+          quantityBefore: oldQty,
+          quantityAfter: quantity,
+          reason: 'CSV Bulk Import Update',
+          userId,
+          userRole: role,
+          userName,
+        });
+      }
+
       result.updated += 1;
     } else {
-      const insertSupplierId = role === 'supplier' ? supplierId : 0;
-      const insertVendorId = role === 'vendor' ? vendorId : role === 'supplier' ? vendorId : null;
+      // Create new product
+      const productCode = await generateNextProductCode(client);
+      if (!sku) {
+        const seqNum = Number(productCode.replace(/\D/g, '')) || Math.floor(Math.random() * 9000 + 1000);
+        sku = generateSku(category.name, seqNum);
+      }
+      const finalBarcode = barcode || generateInternalBarcode(productCode);
 
-      await client.query(
-        `INSERT INTO supplier_materials (
-          supplier_id, vendor_id, name, description, quote_price_range, price,
-          unit, quantity, image_url, category, subcategory, brand, compare_at_price, is_featured_deal, images,
-          specifications, bulk_pricing, available_cities, is_available, quality_tier, faqs, returns_policy, highlights
+      const insertSupplierId = role === 'supplier' ? supplierId : 0;
+      const insertVendorId = role === 'vendor' ? vendorId : null;
+
+      const newInsert = await client.query(`
+        INSERT INTO supplier_materials (
+          supplier_id, vendor_id, name, description, price, mrp, compare_at_price,
+          discount_percent, discount_amount, gst_percent, is_tax_inclusive, currency,
+          quantity, unit, measurement_unit, image_url, images, category, subcategory,
+          brand, specifications, bulk_pricing, keywords, product_code, sku, barcode,
+          mpn, variant_id, extraction_notes, http_status, stock_status, is_available,
+          product_url_slug, status
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb,
-          $16::jsonb, $17::jsonb, $18::jsonb, $19, $20, $21::jsonb, $22, $23::jsonb
-        )`,
-        [insertSupplierId, insertVendorId, ...fields]
-      );
+          $1, $2, $3, $4, $5, $6, $6,
+          $7, $8, $9, TRUE, 'INR',
+          $10, $11, $11, $12, $13::jsonb, $14, $15,
+          $16, $17::jsonb, $18::jsonb, $19, $20, $21, $22,
+          $23, $24, $25, $26, $27, $28,
+          $29, $30
+        ) RETURNING id
+      `, [
+        insertSupplierId, insertVendorId, name, description, price, mrp,
+        pricing.discountPercent, pricing.discountAmount, gstPercent,
+        quantity, weightSizeUnit, images[0] || '', JSON.stringify(images), category.name, placement.subcategory,
+        brand, JSON.stringify(specs), JSON.stringify(bulkPricingTiers), keywords, productCode, sku, finalBarcode,
+        mpn, variantId, extractionNotes, httpStatus, stockStatus, isAvailable,
+        `${sku.toLowerCase()}-${Date.now()}`, isSeller ? 'pending_approval' : 'active',
+      ]);
+
+      const newId = newInsert.rows[0].id;
+
+      if (quantity > 0) {
+        await recordStockMovement({
+          clientOrPool: client,
+          productId: newId,
+          changeType: 'initial_stock',
+          quantityChange: quantity,
+          quantityBefore: 0,
+          quantityAfter: quantity,
+          reason: 'CSV Bulk Import Initial Stock',
+          userId,
+          userRole: role,
+          userName,
+        });
+      }
+
       result.created += 1;
     }
   }
@@ -311,3 +398,65 @@ export async function executeBulkProductImport({
   return result;
 }
 
+/**
+ * Export products to 27-column CSV string
+ */
+export function exportProductsToCsv(products = []) {
+  const header = CSV_27_COLUMNS.join(',');
+  const escapeCsv = (val) => {
+    if (val === null || val === undefined) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+
+  const rows = products.map((p) => {
+    const images = Array.isArray(p.images) ? p.images : [];
+    const mainImg = p.image_url || images[0] || '';
+    const addlImgs = images.filter((img) => img !== mainImg).join(' | ');
+
+    let specsStr = '';
+    if (p.specifications && typeof p.specifications === 'object') {
+      specsStr = Object.entries(p.specifications)
+        .filter(([k]) => k !== '__approval__')
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(' | ');
+    }
+
+    let bulkStr = '';
+    if (Array.isArray(p.bulk_pricing)) {
+      bulkStr = p.bulk_pricing.map((b) => `${b.min_quantity}:${b.price}`).join(' | ');
+    }
+
+    return [
+      escapeCsv(p.name),
+      escapeCsv(p.product_code),
+      escapeCsv(p.sku),
+      escapeCsv(p.barcode),
+      escapeCsv(p.brand),
+      escapeCsv(p.category),
+      escapeCsv(p.subcategory),
+      Number(p.mrp || p.compare_at_price || p.price || 0).toFixed(2),
+      Number(p.price || 0).toFixed(2),
+      Number(p.discount_percent || 0).toFixed(2),
+      p.quantity || 0,
+      escapeCsv(p.stock_status || 'in_stock'),
+      escapeCsv(p.description),
+      escapeCsv(mainImg),
+      escapeCsv(addlImgs),
+      escapeCsv(p.measurement_unit || p.unit || 'pcs'),
+      Number(p.gst_percent || 18.00).toFixed(2),
+      escapeCsv(specsStr),
+      escapeCsv(''), // variants
+      escapeCsv(bulkStr),
+      escapeCsv(p.keywords),
+      escapeCsv(p.product_url_slug),
+      escapeCsv(p.currency || 'INR'),
+      escapeCsv(p.mpn),
+      escapeCsv(p.variant_id),
+      escapeCsv(p.http_status || '200'),
+      escapeCsv(p.extraction_notes),
+    ].join(',');
+  });
+
+  return [header, ...rows].join('\n');
+}

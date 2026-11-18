@@ -387,7 +387,13 @@ export default function CartView() {
                           >
                             {p.name}
                           </Link>
+                          {p.variant_title && (
+                            <span className="inline-block text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.5 rounded mt-0.5">
+                              {p.variant_title}
+                            </span>
+                          )}
                           <p className={`text-xs mt-0.5 truncate ${muted}`}>
+                            {p.sku ? <span className="font-mono font-medium text-slate-500 mr-2">SKU: {p.sku}</span> : null}
                             {(typeof p.category === 'object' ? p.category?.name : p.category) || 'Material'}
                             {p.unit ? ` · ${displayUnit(p.unit)}` : ''}
                           </p>

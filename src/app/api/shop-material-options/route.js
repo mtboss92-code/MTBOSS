@@ -112,69 +112,116 @@ export async function GET(req) {
             }
 
             const numId = parseInt(rawId, 10);
-            if (!isNaN(numId)) {
-                const singleRes = await pool.query(
-                    `SELECT m.id, m.supplier_id, m.vendor_id, m.name, m.description, m.quote_price_range, m.price, m.unit, m.quantity, m.image_url, m.category, m.subcategory,
-                      m.brand, m.compare_at_price, m.is_featured_deal, m.images, m.specifications, m.bulk_pricing,
-                      COALESCE(m.faqs, '[]'::jsonb) AS faqs, m.returns_policy, COALESCE(m.highlights, '[]'::jsonb) AS highlights,
-                      c.image AS category_image, c.images AS category_images,
-                      CASE
-                        WHEN jsonb_array_length(COALESCE(m.available_cities, '[]'::jsonb)) > 0 THEN m.available_cities
-                        WHEN m.vendor_id IS NOT NULL AND v.city IS NOT NULL THEN jsonb_build_array(v.city)
-                        WHEN m.supplier_id <> 0 AND s.city IS NOT NULL THEN jsonb_build_array(s.city)
-                        ELSE '[]'::jsonb
-                      END AS available_cities,
-                      m.created_at
-               FROM supplier_materials m
-               LEFT JOIN suppliers s ON s.id = m.supplier_id
-               LEFT JOIN vendors v ON v.id = m.vendor_id
-               LEFT JOIN shop_categories c ON LOWER(TRIM(c.name)) = LOWER(TRIM(m.category))
-               WHERE m.id = $1`, [numId]
-                );
+            const lookupRes = await pool.query(
+                `SELECT m.id, m.product_code, m.sku, m.barcode, m.barcode_type, m.mpn, m.variant_id,
+                  m.keywords, m.product_url_slug, m.supplier_id, m.vendor_id, m.name, m.description,
+                  m.quote_price_range, m.price, m.mrp, m.discount_percent, m.discount_amount,
+                  m.gst_percent, m.is_tax_inclusive, m.currency, m.unit, m.quantity, m.image_url,
+                  m.category, m.subcategory, m.brand, m.compare_at_price, m.weight, m.weight_unit,
+                  m.dimensions, m.measurement_unit, m.low_stock_threshold, m.stock_status,
+                  m.has_variants, m.status, m.is_archived, m.is_deleted, m.is_featured_deal,
+                  m.images, m.specifications, m.bulk_pricing,
+                  COALESCE(m.faqs, '[]'::jsonb) AS faqs, m.returns_policy, COALESCE(m.highlights, '[]'::jsonb) AS highlights,
+                  c.image AS category_image, c.images AS category_images,
+                  CASE
+                    WHEN jsonb_array_length(COALESCE(m.available_cities, '[]'::jsonb)) > 0 THEN m.available_cities
+                    WHEN m.vendor_id IS NOT NULL AND v.city IS NOT NULL THEN jsonb_build_array(v.city)
+                    WHEN m.supplier_id <> 0 AND s.city IS NOT NULL THEN jsonb_build_array(s.city)
+                    ELSE '[]'::jsonb
+                  END AS available_cities,
+                  m.created_at
+           FROM supplier_materials m
+           LEFT JOIN suppliers s ON s.id = m.supplier_id
+           LEFT JOIN vendors v ON v.id = m.vendor_id
+           LEFT JOIN shop_categories c ON LOWER(TRIM(c.name)) = LOWER(TRIM(m.category))
+           WHERE (m.id = $1 OR m.product_code = $2 OR m.product_url_slug = $2)
+             AND COALESCE(m.is_deleted, FALSE) = FALSE`,
+                [isNaN(numId) ? -1 : numId, rawId]
+            );
 
-                if (singleRes.rows.length === 0) {
-                    return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
-                }
-
-                const row = singleRes.rows[0];
-                const specifications = { ...(row.specifications || {}) };
-                delete specifications.__approval__;
-
-                const fallbackImage = row.category_image || '';
-                const rawImages = Array.isArray(row.images) ? row.images.filter(Boolean) : [];
-                const resolvedImageUrl = row.image_url || fallbackImage || '';
-                const productImages = rawImages.length > 0 ? rawImages : (resolvedImageUrl ? [resolvedImageUrl] : []);
-
-                const product = {
-                    id: row.id,
-                    product_id: row.id,
-                    supplier_id: row.supplier_id,
-                    vendor_id: row.vendor_id,
-                    name: row.name,
-                    description: row.description || '',
-                    quote_price_range: row.quote_price_range || '',
-                    price: row.price,
-                    unit: row.unit || '',
-                    quantity: row.quantity,
-                    image_url: resolvedImageUrl,
-                    category_image: fallbackImage,
-                    category: row.category || '',
-                    subcategory: row.subcategory || '',
-                    brand: row.brand || '',
-                    compare_at_price: row.compare_at_price,
-                    is_featured_deal: row.is_featured_deal === true,
-                    images: productImages,
-                    specifications,
-                    bulk_pricing: Array.isArray(row.bulk_pricing) ? row.bulk_pricing : [],
-                    available_cities: Array.isArray(row.available_cities) ? row.available_cities : [],
-                    faqs: Array.isArray(row.faqs) ? row.faqs : [],
-                    returns_policy: row.returns_policy || '',
-                    highlights: Array.isArray(row.highlights) ? row.highlights : [],
-                    created_at: row.created_at,
-                };
-
-                return NextResponse.json({ success: true, data: { product } });
+            if (lookupRes.rows.length === 0) {
+                return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
             }
+
+            const row = lookupRes.rows[0];
+            const specifications = { ...(row.specifications || {}) };
+            delete specifications.__approval__;
+
+            const fallbackImage = row.category_image || '';
+            const rawImages = Array.isArray(row.images) ? row.images.filter(Boolean) : [];
+            const resolvedImageUrl = row.image_url || fallbackImage || '';
+            const productImages = rawImages.length > 0 ? rawImages : (resolvedImageUrl ? [resolvedImageUrl] : []);
+
+            // Fetch variants if available
+            let variants = [];
+            try {
+                const varRes = await pool.query(
+                    `SELECT id, variant_code, sku, barcode, size, color, material, style,
+                            mrp, selling_price, stock_quantity, stock_status, image_url, attributes, is_active
+                     FROM product_variants
+                     WHERE product_id = $1 AND is_active = TRUE
+                     ORDER BY id ASC`,
+                    [row.id]
+                );
+                variants = varRes.rows || [];
+            } catch (err) {
+                console.warn('Could not load product variants for', row.id, err.message);
+            }
+
+            const effectiveMrp = row.mrp !== null ? Number(row.mrp) : (row.compare_at_price !== null ? Number(row.compare_at_price) : null);
+            const effectiveSellingPrice = row.price !== null ? Number(row.price) : (effectiveMrp || 0);
+
+            const product = {
+                id: row.id,
+                product_id: row.id,
+                product_code: row.product_code,
+                sku: row.sku,
+                barcode: row.barcode,
+                barcode_type: row.barcode_type,
+                mpn: row.mpn,
+                variant_id: row.variant_id,
+                keywords: row.keywords,
+                product_url_slug: row.product_url_slug,
+                supplier_id: row.supplier_id,
+                vendor_id: row.vendor_id,
+                name: row.name,
+                description: row.description || '',
+                quote_price_range: row.quote_price_range || '',
+                price: effectiveSellingPrice,
+                mrp: effectiveMrp,
+                compare_at_price: effectiveMrp,
+                discount_percent: row.discount_percent,
+                discount_amount: row.discount_amount,
+                gst_percent: row.gst_percent !== null ? Number(row.gst_percent) : 18,
+                is_tax_inclusive: row.is_tax_inclusive !== false,
+                currency: row.currency || 'INR',
+                unit: row.unit || '',
+                quantity: row.quantity,
+                stock_status: row.stock_status || (Number(row.quantity) > 0 ? 'in_stock' : 'out_of_stock'),
+                low_stock_threshold: row.low_stock_threshold || 10,
+                weight: row.weight,
+                weight_unit: row.weight_unit || 'kg',
+                dimensions: row.dimensions,
+                measurement_unit: row.measurement_unit,
+                has_variants: row.has_variants === true || variants.length > 0,
+                variants,
+                image_url: resolvedImageUrl,
+                category_image: fallbackImage,
+                category: row.category || '',
+                subcategory: row.subcategory || '',
+                brand: row.brand || '',
+                is_featured_deal: row.is_featured_deal === true,
+                images: productImages,
+                specifications,
+                bulk_pricing: Array.isArray(row.bulk_pricing) ? row.bulk_pricing : [],
+                available_cities: Array.isArray(row.available_cities) ? row.available_cities : [],
+                faqs: Array.isArray(row.faqs) ? row.faqs : [],
+                returns_policy: row.returns_policy || '',
+                highlights: Array.isArray(row.highlights) ? row.highlights : [],
+                created_at: row.created_at,
+            };
+
+            return NextResponse.json({ success: true, data: { product } });
         }
 
         const category = String(searchParams.get('category') || '').trim();
@@ -189,7 +236,10 @@ export async function GET(req) {
         }
 
         const result = await pool.query(
-            `SELECT m.id, m.supplier_id, m.vendor_id, m.name, m.description, m.quote_price_range, m.price, m.unit, m.quantity, m.image_url, m.category, m.subcategory,
+            `SELECT m.id, m.product_code, m.sku, m.barcode, m.mpn, m.keywords, m.product_url_slug,
+              m.supplier_id, m.vendor_id, m.name, m.description, m.quote_price_range, m.price,
+              m.mrp, m.discount_percent, m.gst_percent, m.is_tax_inclusive, m.unit, m.quantity,
+              m.stock_status, m.has_variants, m.image_url, m.category, m.subcategory,
               m.brand, m.compare_at_price, m.is_featured_deal, m.images, m.specifications, m.bulk_pricing,
               c.image AS category_image, c.images AS category_images,
               CASE
@@ -204,6 +254,9 @@ export async function GET(req) {
        LEFT JOIN vendors v ON v.id = m.vendor_id
        LEFT JOIN shop_categories c ON LOWER(TRIM(c.name)) = LOWER(TRIM(m.category))
        WHERE m.is_available = TRUE
+         AND COALESCE(m.is_deleted, FALSE) = FALSE
+         AND COALESCE(m.is_archived, FALSE) = FALSE
+         AND COALESCE(m.status, 'active') = 'active'
          AND (m.vendor_id IS NULL OR COALESCE(m.specifications->'__approval__'->>'status', 'approved') = 'approved')
          AND (
            (m.vendor_id IS NOT NULL AND v.is_approved = TRUE AND v.status = 'active')
@@ -223,22 +276,38 @@ export async function GET(req) {
             const fallbackImages = rawImages.length > 0 ? rawImages : (categoryImages.length > 0 ? categoryImages : (fallbackImage ? [fallbackImage] : []));
             const resolvedImageUrl = row.image_url || fallbackImage || (fallbackImages[0] || '');
 
+            const effectiveMrp = row.mrp !== null ? Number(row.mrp) : (row.compare_at_price !== null ? Number(row.compare_at_price) : null);
+            const effectiveSellingPrice = row.price !== null ? Number(row.price) : (effectiveMrp || 0);
+
             return {
                 id: row.id,
+                product_id: row.id,
+                product_code: row.product_code,
+                sku: row.sku,
+                barcode: row.barcode,
+                mpn: row.mpn,
+                keywords: row.keywords,
+                product_url_slug: row.product_url_slug,
                 supplier_id: row.supplier_id,
                 vendor_id: row.vendor_id,
                 name: row.name,
                 description: row.description || '',
                 quote_price_range: row.quote_price_range || '',
-                price: row.price,
+                price: effectiveSellingPrice,
+                mrp: effectiveMrp,
+                compare_at_price: effectiveMrp,
+                discount_percent: row.discount_percent,
+                gst_percent: row.gst_percent !== null ? Number(row.gst_percent) : 18,
+                is_tax_inclusive: row.is_tax_inclusive !== false,
                 unit: row.unit || '',
                 quantity: row.quantity,
+                stock_status: row.stock_status || (Number(row.quantity) > 0 ? 'in_stock' : 'out_of_stock'),
+                has_variants: row.has_variants === true,
                 image_url: resolvedImageUrl,
                 category_image: fallbackImage,
                 category: row.category || '',
                 subcategory: row.subcategory || '',
                 brand: row.brand || '',
-                compare_at_price: row.compare_at_price,
                 is_featured_deal: row.is_featured_deal === true,
                 images: fallbackImages,
                 specifications,

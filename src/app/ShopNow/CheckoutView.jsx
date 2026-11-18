@@ -586,8 +586,10 @@ export default function CheckoutView({ productId: initialProductId }) {
 
       if (product) {
         payload.product_id = product.id;
+        payload.variant_id = product.variant_id || null;
+        payload.sku = product.sku || null;
         payload.category_name = product.category;
-        payload.material_type = product.name;
+        payload.material_type = product.variant_title ? `${product.name} (${product.variant_title})` : product.name;
         payload.subcategory_name = product.subcategory || null;
         payload.brand_company = product.brand || null;
         payload.quantity_text = `${qty} ${displayUnit(product.unit)}`;
@@ -595,8 +597,10 @@ export default function CheckoutView({ productId: initialProductId }) {
       } else {
         payload.items = cartItems.map((ci) => ({
           product_id: ci.product?.product_id || ci.product?.id || null,
+          variant_id: ci.product?.variant_id || null,
+          sku: ci.product?.sku || null,
           category_name: ci.product?.category?.name || ci.product?.category || "Materials",
-          material_type: ci.product?.name,
+          material_type: ci.product?.variant_title ? `${ci.product?.name} (${ci.product.variant_title})` : ci.product?.name,
           quantity: ci.quantity,
           order_unit: ci.product?.unit || "unit",
         }));
