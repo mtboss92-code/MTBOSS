@@ -66,8 +66,9 @@ export async function POST(req) {
   if (!admin) return unauthorized();
 
   try {
-    const body = await req.json();
-    const rows = Array.isArray(body.rows) ? body.rows : [];
+    let body = {};
+    try { body = await req.json(); } catch { body = {}; }
+    const rows = Array.isArray(body.rows || body.products) ? (body.rows || body.products) : [];
     const mode = body.mode === 'update' ? 'update' : 'skip';
 
     if (!rows.length) {

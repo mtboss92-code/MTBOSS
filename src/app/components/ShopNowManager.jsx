@@ -148,11 +148,28 @@ const shopHeaders = (ownerRole = 'admin') => ({
 });
 
 async function readApiJson(response) {
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.toLowerCase().includes('application/json')) {
-    throw new Error(`Shop product service returned an invalid response (${response.status}). Please refresh after restarting the development server.`);
+  let text = '';
+  try {
+    text = await response.text();
+  } catch {
+    return { success: false, error: 'Could not read server response' };
   }
-  return response.json();
+
+  if (!text || !text.trim()) {
+    if (!response.ok) {
+      throw new Error(`Shop product service returned status ${response.status}.`);
+    }
+    return { success: true, data: null };
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (!response.ok) {
+      throw new Error(`Shop product service returned an error (${response.status}): ${text.slice(0, 150)}`);
+    }
+    return { success: false, error: 'Invalid JSON response from server' };
+  }
 }
 
 function notifyShopProductsUpdated() {
@@ -169,8 +186,8 @@ async function uploadImage(file) {
   body.append('file', file);
   body.append('upload_preset', preset);
   const response = await fetch(`https://api.cloudinary.com/v1_1/${cloud}/image/upload`, { method: 'POST', body });
-  const data = await response.json();
-  if (!response.ok || !data.secure_url) throw new Error(data.error?.message || 'Image upload failed');
+  const data = await readApiJson(response);
+  if (!response.ok || !data?.secure_url) throw new Error(data?.error?.message || data?.error || 'Image upload failed');
   return data.secure_url;
 }
 
@@ -220,7 +237,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
         const params = new URLSearchParams({ category: form.category });
         if (editingId) params.set('product_id', String(editingId));
         const res = await fetch(`/api/shop-commissions/resolve?${params}`);
-        const data = await res.json();
+        const data = await readApiJson(res);
         if (!isCancelled && data?.success && data?.data) {
           setCommissionInfo({
             rate: Number(data.data.rate || 0),
@@ -386,8 +403,17 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     }
     row.push(cell); if (row.some((value) => value.trim())) rows.push(row);
     if (rows.length < 2) throw new Error('CSV needs a header row and at least one product.');
-    const headers = rows[0].map((header) => header.replace(/^\uFEFF/, '').trim().toLowerCase().replace(/[\s-]+/g, '_'));
-    return rows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, (values[index] || '').trim()])));
+    const rawHeaders = rows[0].map((header) => header.replace(/^\uFEFF/, '').trim());
+    return rows.slice(1).map((values) => {
+      const rowObj = {};
+      rawHeaders.forEach((header, index) => {
+        const val = (values[index] || '').trim();
+        rowObj[header] = val;
+        const normKey = header.toLowerCase().replace(/[\s-]+/g, '_');
+        rowObj[normKey] = val;
+      });
+      return rowObj;
+    });
   };
 
   const selectImportFile = async (event) => {
@@ -413,6 +439,70 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
 
   const exportCatalogCsv = () => {
     window.open(`${productEndpoint}/import?format=export`, '_blank');
+  };
+
+  const importProducts = async () => {
+    if (!importRows.length || importing) return;
+    setImporting(true);
+    setNotice('');
+    try {
+      const response = await fetch(`${productEndpoint}/import`, {
+        method: 'POST',
+        headers: {
+          ...shopHeaders(ownerRole),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          rows: importRows,
+          products: importRows,
+          mode: importMode === 'update' ? 'update' : 'create',
+        }),
+      });
+      const data = await readApiJson(response);
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to import products.');
+      }
+
+      const res = data.data || {};
+      const created = Number(res.created || 0);
+      const updated = Number(res.updated || 0);
+      const skipped = Number(res.skipped || 0);
+      const total = Number(res.total || importRows.length);
+      const errorList = Array.isArray(res.errors) ? res.errors : [];
+
+      let msg = isSeller
+        ? `Successfully submitted ${created + updated} product(s) for approval!`
+        : `Import completed: ${created} created, ${updated} updated, ${skipped} skipped (out of ${total}).`;
+
+      if (errorList.length > 0) {
+        const sample = errorList.slice(0, 3).map((e) => `Row ${e.row}: ${e.message}`).join('; ');
+        msg += ` Note: ${errorList.length} row(s) had warnings (${sample}${errorList.length > 3 ? '...' : ''}).`;
+      }
+
+      setNotice(msg);
+      setImportRows([]);
+      setImportFileName('');
+      notifyShopProductsUpdated();
+      await load();
+      if (!isSeller) await loadStats();
+    } catch (err) {
+      setNotice(err.message || 'Error processing product import.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const fixExistingProductCategories = async () => {
+    setNormalizingCategories(true);
+    try {
+      await loadReferenceData();
+      await load();
+      setNotice('Categories and catalog refreshed and verified.');
+    } catch (err) {
+      setNotice(err.message || 'Failed to refresh categories.');
+    } finally {
+      setNormalizingCategories(false);
+    }
   };
 
   const duplicateProduct = async (product) => {
@@ -2270,7 +2360,15 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                   </thead>
                   <tbody>
                     {importRows.slice(0, 5).map((item, index) => {
-                      const img = item['Product Image URL'] || item.image_url || '';
+                      const img = item['Product Image URL'] || item.product_image_url || item.image_url || '';
+                      const name = item['Product Name'] || item.product_name || item.name || '—';
+                      const pId = item['Product ID'] || item.product_id || item.product_code || '(Auto)';
+                      const sku = item['SKU'] || item.sku || '(Auto)';
+                      const cat = item['Category'] || item.category || item.main_category || '—';
+                      const subcat = item['Subcategory'] || item.subcategory || item.sub_category || '—';
+                      const brand = item['Brand'] || item.brand || '—';
+                      const price = item['Selling Price'] || item.selling_price || item.price || '—';
+                      const stock = item['Available Quantity Stock'] || item.available_quantity_stock || item.quantity || item.stock || '0';
                       return (
                         <tr key={index}>
                           <td>
@@ -2279,16 +2377,16 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                                 {img ? <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : null}
                                 <span style={{ fontSize: 16, opacity: 0.5 }}>📦</span>
                               </div>
-                              <span>{item['Product Name'] || item.name || '—'}</span>
+                              <span>{name}</span>
                             </div>
                           </td>
-                          <td><code style={{ fontSize: 11 }}>{item['Product ID'] || item.product_code || '(Auto)'}</code></td>
-                          <td><code style={{ fontSize: 11 }}>{item['SKU'] || item.sku || '(Auto)'}</code></td>
-                          <td>{item['Category'] || item.category || '—'}</td>
-                          <td>{item['Subcategory'] || item.subcategory || '—'}</td>
-                          <td>{item['Brand'] || item.brand || '—'}</td>
-                          <td>₹{item['Selling Price'] || item.price || '—'}</td>
-                          <td>{item['Available Quantity Stock'] || item.quantity || '0'}</td>
+                          <td><code style={{ fontSize: 11 }}>{pId}</code></td>
+                          <td><code style={{ fontSize: 11 }}>{sku}</code></td>
+                          <td>{cat}</td>
+                          <td>{subcat}</td>
+                          <td>{brand}</td>
+                          <td>₹{price}</td>
+                          <td>{stock}</td>
                         </tr>
                       );
                     })}

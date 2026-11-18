@@ -78,7 +78,8 @@ export async function POST(req) {
     const vendor = await getActiveVendor(req);
     if (!vendor) return unauthorized();
 
-    const body = await req.json();
+    let body = {};
+    try { body = await req.json(); } catch { body = {}; }
     const rows = Array.isArray(body.products || body.rows) ? (body.products || body.rows) : [];
     const mode = body.mode === 'update' ? 'update' : 'create';
 

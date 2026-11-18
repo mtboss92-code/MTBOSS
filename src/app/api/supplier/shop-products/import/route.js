@@ -5,6 +5,8 @@ import { ensureVendorForSupplier } from '@/lib/shop-commissions';
 import {
   ensureImportTables,
   executeBulkProductImport,
+  exportProductsToCsv,
+  generateCsvTemplate,
   MAX_IMPORT_ROWS,
 } from '@/lib/bulk-product-import';
 
@@ -24,14 +26,63 @@ async function getActiveSupplier(req) {
   return supplier;
 }
 
+export async function GET(req) {
+  try {
+    const supplier = await getActiveSupplier(req);
+    if (!supplier) return unauthorized();
+
+    const { searchParams } = new URL(req.url);
+    const format = searchParams.get('format') || 'template';
+
+    if (format === 'template') {
+      const csv = generateCsvTemplate();
+      return new NextResponse(csv, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': 'attachment; filename="Supplier-Product-Import-Template-27-Columns.csv"',
+        },
+      });
+    }
+
+    if (format === 'export') {
+      const result = await pool.query(`
+        SELECT id, name, product_code, sku, barcode, brand, category, subcategory,
+               mrp, price, discount_percent, quantity, stock_status, description,
+               image_url, images, measurement_unit, unit, gst_percent, specifications,
+               bulk_pricing, keywords, product_url_slug, currency, mpn, variant_id,
+               http_status
+        FROM supplier_materials
+        WHERE supplier_id = $1 AND is_deleted = FALSE
+        ORDER BY id ASC
+      `, [supplier.id]);
+
+      const csv = exportProductsToCsv(result.rows);
+      return new NextResponse(csv, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="Supplier-Products-Export-${Date.now()}.csv"`,
+        },
+      });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error('GET supplier import route error:', err);
+    return NextResponse.json({ success: false, error: 'Could not process request' }, { status: 500 });
+  }
+}
+
 export async function POST(req) {
   try {
     await ensureImportTables();
     const supplier = await getActiveSupplier(req);
     if (!supplier) return unauthorized();
 
-    const body = await req.json();
-    const rows = Array.isArray(body.products) ? body.products : [];
+    let body = {};
+    try { body = await req.json(); } catch { body = {}; }
+    const rows = Array.isArray(body.products || body.rows) ? (body.products || body.rows) : [];
     const mode = body.mode === 'update' ? 'update' : 'create';
 
     if (!rows.length) {

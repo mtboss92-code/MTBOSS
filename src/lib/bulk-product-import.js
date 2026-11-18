@@ -297,7 +297,7 @@ export async function executeBulkProductImport({
     // If product exists
     if (matched.rows.length > 0) {
       const existingProd = matched.rows[0];
-      if (mode === 'skip') {
+      if (mode === 'skip' || mode === 'create') {
         result.skipped += 1;
         continue;
       }

@@ -216,7 +216,9 @@ export async function POST(req) {
     await ensureTable();
     const supplier = await getActiveSupplier(req);
     if (!supplier) return unauthorized();
-    const parsed = await validProduct(await req.json());
+    let raw = {};
+    try { raw = await req.json(); } catch { raw = {}; }
+    const parsed = await validProduct(raw);
     if (parsed.error) return NextResponse.json({ success: false, error: parsed.error }, { status: 400 });
     const p = parsed.value;
 
@@ -264,7 +266,8 @@ export async function PUT(req) {
     const supplier = await getActiveSupplier(req);
     if (!supplier) return unauthorized();
 
-    const body = await req.json();
+    let body = {};
+    try { body = await req.json(); } catch { body = {}; }
     const id = Number(body.id);
     if (!Number.isInteger(id) || id < 1) return NextResponse.json({ success: false, error: 'Valid product ID required' }, { status: 400 });
 
