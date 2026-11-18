@@ -516,26 +516,43 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       // Keep every request comfortably below serverless timeouts. The server
       // still validates and commits each batch atomically; a completed batch
       // remains saved if a later batch needs attention.
-      const batchSize = 50;
+      // Hosted functions have a short execution window. Ten products keeps a
+      // request well below that limit while the user still uploads one file
+      // and clicks Import only once for all 200 products.
+      const batchSize = 10;
       const totals = { created: 0, updated: 0, skipped: 0, total: 0, errors: [] };
       for (let start = 0; start < importRows.length; start += batchSize) {
         const batch = importRows.slice(start, start + batchSize);
         setNotice(`Importing all ${importRows.length} products… currently saving ${start + 1}-${start + batch.length}. Please keep this page open.`);
-        const response = await fetch(`${productEndpoint}/import`, {
-          method: 'POST',
-          headers: {
-            ...shopHeaders(ownerRole),
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            rows: batch,
-            products: batch,
-            mode: importMode === 'update' ? 'update' : 'create',
-          }),
-        });
-        const data = await readApiJson(response);
-        if (!response.ok) {
-          throw new Error(`Import stopped at row ${start + 1}: ${data.error || 'Failed to import products.'}`);
+        let data;
+        let response;
+        let lastError;
+        // A transient gateway timeout must not force the user to start the
+        // entire 200-row upload again. Retry the small, idempotent-safe batch.
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          try {
+            response = await fetch(`${productEndpoint}/import`, {
+              method: 'POST',
+              headers: {
+                ...shopHeaders(ownerRole),
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                rows: batch,
+                products: batch,
+                mode: importMode === 'update' ? 'update' : 'create',
+              }),
+            });
+            data = await readApiJson(response);
+            if (response.ok) break;
+            lastError = new Error(data?.error || `Import service returned status ${response.status}.`);
+          } catch (error) {
+            lastError = error;
+          }
+          if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        if (!response?.ok) {
+          throw new Error(`Import stopped at row ${start + 1}: ${lastError?.message || 'Failed to import products.'}`);
         }
         const res = data.data || {};
         totals.created += Number(res.created || 0);
