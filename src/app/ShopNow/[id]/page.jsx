@@ -175,6 +175,7 @@ export default function ProductDetailPage({ params }) {
 
   // ── Product and Page State ──────────────────────────────────────────────────
   const [product, setProduct] = useState(null);
+  const [selectedVariant, setSelectedVariant] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [relatedProducts, setRelatedProducts] = useState([]);
@@ -236,6 +237,9 @@ export default function ProductDetailPage({ params }) {
         if (isCancelled) return;
 
         setProduct(prod);
+        if (Array.isArray(prod.variants) && prod.variants.length > 0) {
+          setSelectedVariant(prod.variants[0]);
+        }
         setSelectedQuantity(getCartStep(prod) || 1);
 
         // Fetch and filter related products strictly matching subcategory or relevance
@@ -263,15 +267,24 @@ export default function ProductDetailPage({ params }) {
     };
   }, [productId]);
 
-  // Derived product pricing and discount
-  const basePrice = Number(product?.price) || 0;
-  const compareAtPrice = Number(product?.compare_at_price) || 0;
+  // Derived product pricing and discount (variant-aware)
+  const activeVariant = selectedVariant;
+  const basePrice = activeVariant
+    ? (Number(activeVariant.selling_price) || Number(activeVariant.price) || Number(product?.price) || 0)
+    : (Number(product?.price) || 0);
+  const compareAtPrice = activeVariant
+    ? (Number(activeVariant.mrp) || Number(product?.compare_at_price) || 0)
+    : (Number(product?.mrp) || Number(product?.compare_at_price) || 0);
   const discountPercent =
     compareAtPrice > basePrice && basePrice > 0
       ? Math.round(((compareAtPrice - basePrice) / compareAtPrice) * 100)
-      : compareAtPrice > 0
-      ? 7
-      : 7;
+      : (product?.discount_percent ? Number(product.discount_percent) : 0);
+
+  const currentStock = activeVariant
+    ? Number(activeVariant.stock_quantity ?? 0)
+    : Number(product?.quantity ?? 0);
+  const isAvailable = currentStock > 0 && (activeVariant ? activeVariant.stock_status !== 'out_of_stock' : product?.stock_status !== 'out_of_stock');
+  const isLowStock = currentStock > 0 && currentStock <= (product?.low_stock_threshold || 10);
 
   const bulkPrice = useMemo(() => {
     if (Array.isArray(product?.bulk_pricing) && product.bulk_pricing.length > 0) {
@@ -281,9 +294,7 @@ export default function ProductDetailPage({ params }) {
     return Math.round(basePrice * 0.92);
   }, [product, basePrice]);
 
-  const isAvailable = product ? Number(product.quantity ?? 1) > 0 : true;
-
-  // Add to cart handler
+  // Add to cart handler (variant-aware)
   const handleAddToCart = (e, targetProduct = product, qty = selectedQuantity) => {
     const prod = targetProduct || product;
     if (!prod) return;
@@ -295,20 +306,32 @@ export default function ProductDetailPage({ params }) {
       const currentCart = JSON.parse(raw);
       const step = getCartStep(prod);
 
-      const existingIndex = currentCart.findIndex(
-        (item) => String(item.product?.product_id || item.product?.id) === String(prod.id)
-      );
+      const itemKey = activeVariant ? `${prod.id}__v${activeVariant.id}` : String(prod.id);
+      const existingIndex = currentCart.findIndex((item) => {
+        const iKey = item.product?.variant_id
+          ? `${item.product?.product_id || item.product?.id}__v${item.product.variant_id}`
+          : String(item.product?.product_id || item.product?.id);
+        return iKey === itemKey;
+      });
 
       let updatedCart = [...currentCart];
       if (existingIndex > -1) {
         const curQty = updatedCart[existingIndex].quantity || step;
         updatedCart[existingIndex].quantity = curQty + qty;
       } else {
+        const vTitle = activeVariant
+          ? [activeVariant.size, activeVariant.color, activeVariant.material, activeVariant.style].filter(Boolean).join(" / ") || activeVariant.variant_code || `Variant #${activeVariant.id}`
+          : null;
         updatedCart.push({
           product: {
             ...prod,
             product_id: prod.id,
             fromSupplier: true,
+            variant_id: activeVariant?.id || null,
+            variant_title: vTitle,
+            sku: activeVariant?.sku || prod.sku,
+            price: basePrice,
+            compare_at_price: compareAtPrice,
           },
           quantity: qty,
         });
@@ -435,11 +458,54 @@ export default function ProductDetailPage({ params }) {
           {/* ─────────────────────────────────────────────────────────────
               RIGHT COLUMN: SCROLLABLE PRODUCT DETAILS & ACCORDIONS
              ───────────────────────────────────────────────────────────── */}
-          <div className="md:col-span-6 max-h-[520px] overflow-y-auto pr-2 sm:pr-3 space-y-4 product-side-scroll">
+          <div className="md:col-span-6 max-h-[560px] overflow-y-auto pr-2 sm:pr-3 space-y-4 product-side-scroll">
             {/* Product Title */}
-            <h1 className="text-2xl sm:text-[28px] font-bold text-slate-900 dark:text-white tracking-tight leading-snug">
-              {product.name}
-            </h1>
+            <div>
+              <h1 className="text-2xl sm:text-[28px] font-bold text-slate-900 dark:text-white tracking-tight leading-snug">
+                {product.name}
+              </h1>
+
+              {/* Product Identifiers Bar (Product ID, SKU, Brand, Barcode) */}
+              <div className="flex flex-wrap items-center gap-2 text-xs pt-2">
+                {product.product_code && (
+                  <span className="inline-flex items-center gap-1 font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-semibold border border-slate-200 dark:border-zinc-700">
+                    ID: {product.product_code}
+                  </span>
+                )}
+                {(activeVariant?.sku || product.sku) && (
+                  <span className="inline-flex items-center gap-1 font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700">
+                    SKU: {activeVariant?.sku || product.sku}
+                  </span>
+                )}
+                {product.brand && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-medium">
+                    Brand: {product.brand}
+                  </span>
+                )}
+                {(activeVariant?.barcode || product.barcode) && (
+                  <span className="inline-flex items-center gap-1 font-mono text-[11px] px-2 py-0.5 rounded bg-zinc-50 dark:bg-zinc-800 text-zinc-500">
+                    Barcode: {activeVariant?.barcode || product.barcode}
+                  </span>
+                )}
+              </div>
+
+              {/* Stock Status Pill */}
+              <div className="pt-2">
+                {!isAvailable ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300">
+                    ✕ Out of Stock
+                  </span>
+                ) : isLowStock ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+                    ⚠️ Only {currentStock} left in stock - order soon!
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
+                    ✓ In Stock ({currentStock} available)
+                  </span>
+                )}
+              </div>
+            </div>
 
             {/* Pricing Row */}
             <div className="flex items-baseline gap-2.5">
@@ -451,7 +517,53 @@ export default function ProductDetailPage({ params }) {
               <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white">
                 ₹{basePrice.toLocaleString("en-IN")}
               </span>
+              {discountPercent > 0 && (
+                <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950 px-2 py-0.5 rounded">
+                  {discountPercent}% OFF
+                </span>
+              )}
             </div>
+
+            {/* Variant Selector (if product has variants) */}
+            {Array.isArray(product.variants) && product.variants.length > 0 && (
+              <div className="border border-slate-200 dark:border-zinc-800 rounded-lg p-3 bg-slate-50/50 dark:bg-zinc-900/50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400">
+                    Select Option / Variant:
+                  </label>
+                  {activeVariant && (
+                    <span className="text-xs text-slate-500 font-mono">
+                      {activeVariant.sku || activeVariant.variant_code}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {product.variants.map((v) => {
+                    const isSelected = activeVariant?.id === v.id;
+                    const vLabel = [v.size, v.color, v.material, v.style].filter(Boolean).join(" / ") || v.variant_code || `Option #${v.id}`;
+                    const vStock = Number(v.stock_quantity ?? 0);
+                    const vDisabled = vStock <= 0;
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => setSelectedVariant(v)}
+                        disabled={vDisabled}
+                        className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-all cursor-pointer ${
+                          isSelected
+                            ? "border-emerald-600 bg-emerald-50 text-emerald-900 dark:bg-emerald-950 dark:border-emerald-500 dark:text-emerald-200 shadow-xs ring-1 ring-emerald-600"
+                            : vDisabled
+                            ? "border-slate-200 dark:border-zinc-800 bg-slate-100 dark:bg-zinc-900 text-slate-400 line-through cursor-not-allowed opacity-50"
+                            : "border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:border-slate-400 text-slate-700 dark:text-zinc-300"
+                        }`}
+                      >
+                        {vLabel} {v.selling_price ? `(₹${Number(v.selling_price).toLocaleString("en-IN")})` : ""}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* 5% Discount Banner (Yellow Ribbon like reference image) */}
             <div className="bg-[#fef9c3] dark:bg-amber-950/30 border border-[#fef08a] dark:border-amber-900/50 rounded-sm p-2 sm:p-2.5 flex items-center gap-2.5">
@@ -466,7 +578,9 @@ export default function ProductDetailPage({ params }) {
 
             {/* GST / Shipping calculated at checkout */}
             <p className="text-xs text-slate-500 dark:text-zinc-400">
-              Incl GST{" "}
+              {product.is_tax_inclusive !== false
+                ? `Incl. of all taxes (GST ${product.gst_percent || 18}% included). `
+                : `+ GST ${product.gst_percent || 18}% extra. `}
               <span className="underline cursor-pointer text-slate-700 dark:text-zinc-300">
                 Shipping
               </span>{" "}

@@ -700,6 +700,42 @@ export async function updateAdminOrderStatus({
       } else if (['cancelled', 'returned'].includes(normalizedStatus)) {
         await reverseOrderCashback({ orderId: recordId, reason: `Order marked as ${normalizedStatus}`, client });
         await releaseWalletRedeem(recordId, client);
+
+        // Restore inventory if order was active and intent was 'buy'
+        if (oldData.product_id && oldData.order_intent === 'buy' && !['cancelled', 'returned'].includes(String(oldData.status || '').toLowerCase())) {
+          try {
+            const returnQty = Math.max(1, Math.round(Number.parseFloat(String(oldData.quantity_text || '1')) || 1));
+            const pRes = await client.query('SELECT id, quantity, low_stock_threshold FROM supplier_materials WHERE id = $1 FOR UPDATE', [oldData.product_id]);
+            if (pRes.rows.length > 0) {
+              const currentStock = Number(pRes.rows[0].quantity) || 0;
+              const newStock = currentStock + returnQty;
+              const threshold = Number(pRes.rows[0].low_stock_threshold) || 10;
+              const newStatus = newStock <= 0 ? 'out_of_stock' : (newStock <= threshold ? 'low_stock' : 'in_stock');
+              await client.query('UPDATE supplier_materials SET quantity = $1, stock_status = $2, updated_at = NOW() WHERE id = $3', [newStock, newStatus, oldData.product_id]);
+              await client.query(
+                `INSERT INTO stock_movements (
+                  product_id, movement_type, quantity, previous_stock, new_stock,
+                  reference_type, reference_id, reason, performed_by, performed_by_role, notes, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+                [
+                  oldData.product_id,
+                  'return',
+                  returnQty,
+                  currentStock,
+                  newStock,
+                  'order',
+                  String(recordId),
+                  `Order #${oldData.order_reference || recordId} marked as ${normalizedStatus}`,
+                  adminUser.id || 0,
+                  'admin',
+                  `Stock restored due to order ${normalizedStatus} by ${adminIdentifier}`,
+                ]
+              );
+            }
+          } catch (rErr) {
+            console.warn('Could not restore stock for cancelled order:', rErr.message);
+          }
+        }
       }
     }
 

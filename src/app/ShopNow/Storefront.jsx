@@ -861,21 +861,32 @@ export default function Storefront({ categories, products, offers = [], content,
       if (listed.length) return listed.map((product) => ({
         id: `supplier-${product.id}`,
         product_id: product.id,
+        product_code: product.product_code,
+        sku: product.sku,
+        barcode: product.barcode,
+        mpn: product.mpn,
+        keywords: product.keywords,
         name: product.name,
         category,
         subcategory: product.subcategory,
         unit: product.unit || category.unit || "unit",
         price: product.price,
+        mrp: product.mrp ?? product.compare_at_price,
         image: product.image_url || category?.image || "",
         description: product.description,
         quote_price_range: product.quote_price_range,
         brand: product.brand,
-        compare_at_price: product.compare_at_price,
+        compare_at_price: product.mrp ?? product.compare_at_price,
+        discount_percent: product.discount_percent,
+        gst_percent: product.gst_percent,
+        is_tax_inclusive: product.is_tax_inclusive,
         is_featured_deal: product.is_featured_deal === true,
         images: product.images,
         specifications: product.specifications,
         bulk_pricing: product.bulk_pricing,
         quantity: product.quantity,
+        stock_status: product.stock_status,
+        has_variants: product.has_variants === true,
         supplier_id: product.supplier_id,
         available_cities: product.available_cities,
         created_at: product.created_at,
@@ -905,21 +916,32 @@ export default function Storefront({ categories, products, offers = [], content,
         const item = {
           id: `supplier-${product.id}`,
           product_id: product.id,
+          product_code: product.product_code,
+          sku: product.sku,
+          barcode: product.barcode,
+          mpn: product.mpn,
+          keywords: product.keywords,
           name: product.name,
           category: syntheticCategory,
           subcategory: product.subcategory,
           unit: product.unit || "unit",
           price: product.price,
+          mrp: product.mrp ?? product.compare_at_price,
           image: product.image_url || "",
           description: product.description,
           quote_price_range: product.quote_price_range,
           brand: product.brand,
-          compare_at_price: product.compare_at_price,
+          compare_at_price: product.mrp ?? product.compare_at_price,
+          discount_percent: product.discount_percent,
+          gst_percent: product.gst_percent,
+          is_tax_inclusive: product.is_tax_inclusive,
           is_featured_deal: product.is_featured_deal === true,
           images: product.images,
           specifications: product.specifications,
           bulk_pricing: product.bulk_pricing,
           quantity: product.quantity,
+          stock_status: product.stock_status,
+          has_variants: product.has_variants === true,
           supplier_id: product.supplier_id,
           available_cities: product.available_cities,
           created_at: product.created_at,
@@ -1093,14 +1115,19 @@ export default function Storefront({ categories, products, offers = [], content,
         const subName = (product.subcategory || '').toLowerCase();
         const prodName = (product.name || '').toLowerCase();
         const brandName = (product.brand || '').toLowerCase();
+        const pCode = (product.product_code || '').toLowerCase();
+        const pSku = (product.sku || '').toLowerCase();
+        const pBarcode = (product.barcode || '').toLowerCase();
+        const pMpn = (product.mpn || '').toLowerCase();
+        const pKeywords = (product.keywords || '').toLowerCase();
         const attrs = extractProductAttributes(product);
         const attrText = `${attrs.thickness} ${attrs.size} ${attrs.type} ${attrs.color} ${attrs.material} ${attrs.grade || ''} ${attrs.pack_size || ''}`.toLowerCase();
-        const searchableText = `${prodName} ${catName} ${subName} ${brandName} ${attrText}`;
+        const searchableText = `${prodName} ${pCode} ${pSku} ${pBarcode} ${pMpn} ${pKeywords} ${catName} ${subName} ${brandName} ${attrText}`;
 
         if (searchableText.includes(searchTerm)) return true;
 
         const searchWords = searchTerm.split(/[\s,&/]+/).filter((w) => w.length > 2);
-        if (searchWords.length > 0 && searchWords.some((word) => subName.includes(word) || prodName.includes(word) || attrText.includes(word))) {
+        if (searchWords.length > 0 && searchWords.some((word) => subName.includes(word) || prodName.includes(word) || pSku.includes(word) || pCode.includes(word) || pBarcode.includes(word) || attrText.includes(word))) {
           return true;
         }
         if (subName && searchTerm.includes(subName)) return true;
