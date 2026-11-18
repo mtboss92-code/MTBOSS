@@ -75,6 +75,10 @@ const ensureTable = createInitializationGuard(async () => {
     ADD COLUMN IF NOT EXISTS dimensions VARCHAR(100),
     ADD COLUMN IF NOT EXISTS measurement_unit VARCHAR(50),
     ADD COLUMN IF NOT EXISTS low_stock_threshold INTEGER DEFAULT 5,
+    -- The catalog list, stock filter, and create/edit flows all read this
+    -- field. Existing production databases can predate it, so keep the
+    -- runtime schema upgrade complete as well as the SQL migration below.
+    ADD COLUMN IF NOT EXISTS stock_status VARCHAR(30) DEFAULT 'in_stock',
     ADD COLUMN IF NOT EXISTS has_variants BOOLEAN DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'active',
     ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT FALSE,
