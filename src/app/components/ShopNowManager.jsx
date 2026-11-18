@@ -629,13 +629,29 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
 
   const edit = async (product) => {
     let full = product;
-    if (!isSeller && (!Array.isArray(product.images) || product.specifications == null)) {
+    // The catalog endpoint intentionally returns a compact row for speed. It
+    // omits editor-only values such as bulk pricing, FAQs, delivery cities and
+    // policies. Never initialise an admin edit form from that partial row:
+    // saving it again would overwrite those stored values with empty defaults.
+    if (!isSeller) {
       try {
         const res = await fetch(`${productEndpoint}?id=${product.id}`, { headers: shopHeaders(ownerRole) });
         const data = await readApiJson(res);
-        if (res.ok && data.data) full = data.data;
-      } catch { /* use list row */ }
+        if (!res.ok || !data?.data) {
+          throw new Error(data?.error || 'Could not load the complete product details for editing.');
+        }
+        full = data.data;
+      } catch (error) {
+        // Failing closed prevents an incomplete list row from erasing details
+        // on the next save.
+        setNotice(error.message || 'Could not load complete product details. Please try again.');
+        return;
+      }
     }
+    const jsonArray = (value) => {
+      if (Array.isArray(value)) return value;
+      try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+    };
     const fullImages = (() => {
       if (Array.isArray(full.images)) return full.images;
       try { const p = JSON.parse(full.images); return Array.isArray(p) ? p : []; } catch { return []; }
@@ -699,18 +715,18 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       extraction_notes: full.extraction_notes || '',
       http_status: full.http_status || '200',
       image_url: existingImgs[0] || full.image_url || '',
-      available_cities: full.available_cities || [],
+      available_cities: jsonArray(full.available_cities),
       is_available: full.is_available !== false,
-      has_variants: full.has_variants === true || (Array.isArray(full.variants) && full.variants.length > 0),
-      variants: Array.isArray(full.variants) ? full.variants : [],
+      has_variants: full.has_variants === true || jsonArray(full.variants).length > 0,
+      variants: jsonArray(full.variants),
       adjustment_reason: '',
     });
     setGalleryText(existingImgs.join('\n'));
     setSpecsText(Object.entries(full.specifications || {}).map(([key, value]) => `${key}: ${value}`).join('\n'));
-    setBulkText((full.bulk_pricing || []).map((tier) => `${tier.min_quantity}: ${tier.price}`).join('\n'));
-    setHighlights(Array.isArray(full.highlights) ? full.highlights : []);
+    setBulkText(jsonArray(full.bulk_pricing).map((tier) => `${tier.min_quantity}: ${tier.price}`).join('\n'));
+    setHighlights(jsonArray(full.highlights));
     setNewHighlight('');
-    setFaqs(Array.isArray(full.faqs) ? full.faqs : []);
+    setFaqs(jsonArray(full.faqs));
     setReturnsPolicy(full.returns_policy || '');
     setNotice('');
     document.getElementById(formId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2265,9 +2281,9 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
             <button type="button" className="shop-action-btn-sm" onClick={downloadImportTemplate} title="Download 27-Column CSV Template">
               <Download size={14} /> 27-Col Template
             </button>
-            <button type="button" className="shop-action-btn-sm" onClick={exportCatalogCsv} title="Export Catalog to 27-Column CSV">
+            {/* <button type="button" className="shop-action-btn-sm" onClick={exportCatalogCsv} title="Export Catalog to 27-Column CSV">
               <FileText size={14} /> Export CSV
-            </button>
+            </button> */}
             <button type="button" className="shop-action-btn-sm" onClick={load}>
               <RefreshCw size={14} /> Refresh
             </button>
