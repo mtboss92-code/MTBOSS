@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import Link from 'next/link';
+import { strFromU8, unzipSync } from 'fflate';
 import { UploadCloud, Plus, X, Star, Sparkles, Image as ImageIcon, ArrowLeft, HelpCircle, ShieldCheck, CheckCircle2, RotateCcw, FileText, ListChecks, Barcode, Copy, History, Download, RefreshCw, Layers, Tag, DollarSign, Box, ShieldAlert, Check } from 'lucide-react';
 import VendorCommissionSummary from './VendorCommissionSummary';
 import { defaultShopStorefront } from '@/lib/shop-storefront-defaults';
@@ -416,17 +417,83 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     });
   };
 
+  const normalizeImportRows = (headers, rows, fileLabel) => {
+    const rawHeaders = headers.map((header) => String(header ?? '').replace(/^\uFEFF/, '').trim());
+    if (!rawHeaders.some(Boolean) || !rows.length) {
+      throw new Error(`${fileLabel} needs a header row and at least one product.`);
+    }
+    return rows
+      .filter((values) => values.some((value) => String(value ?? '').trim()))
+      .map((values) => {
+        const rowObj = {};
+        rawHeaders.forEach((header, index) => {
+          if (!header) return;
+          const val = String(values[index] ?? '').trim();
+          rowObj[header] = val;
+          rowObj[header.toLowerCase().replace(/[\s-]+/g, '_')] = val;
+        });
+        return rowObj;
+      });
+  };
+
+  const parseXlsx = async (file) => {
+    let files;
+    try {
+      files = unzipSync(new Uint8Array(await file.arrayBuffer()));
+    } catch {
+      throw new Error('This Excel file could not be read. Please upload a valid .xlsx file.');
+    }
+    const readXml = (name) => files[name] ? strFromU8(files[name]) : '';
+    const parser = new DOMParser();
+    const sharedStrings = [];
+    const sharedXml = readXml('xl/sharedStrings.xml');
+    if (sharedXml) {
+      parser.parseFromString(sharedXml, 'application/xml').querySelectorAll('si').forEach((item) => {
+        sharedStrings.push(Array.from(item.querySelectorAll('t')).map((node) => node.textContent || '').join(''));
+      });
+    }
+
+    const workbook = parser.parseFromString(readXml('xl/workbook.xml'), 'application/xml');
+    const firstSheet = workbook.querySelector('sheet');
+    const relationId = firstSheet?.getAttribute('r:id');
+    const relationships = parser.parseFromString(readXml('xl/_rels/workbook.xml.rels'), 'application/xml');
+    const target = Array.from(relationships.querySelectorAll('Relationship')).find((item) => item.getAttribute('Id') === relationId)?.getAttribute('Target');
+    const sheetName = target ? `xl/${target.replace(/^\//, '').replace(/^xl\//, '')}` : Object.keys(files).find((name) => /^xl\/worksheets\/[^/]+\.xml$/i.test(name));
+    const sheetXml = sheetName ? readXml(sheetName) : '';
+    if (!sheetXml) throw new Error('No worksheet was found in this Excel file.');
+
+    const sheet = parser.parseFromString(sheetXml, 'application/xml');
+    const matrix = Array.from(sheet.querySelectorAll('sheetData > row')).map((row) => {
+      const values = [];
+      row.querySelectorAll('c').forEach((cell) => {
+        const reference = cell.getAttribute('r') || '';
+        const letters = reference.match(/[A-Z]+/i)?.[0]?.toUpperCase() || '';
+        let column = 0;
+        for (let i = 0; i < letters.length; i += 1) column = (column * 26) + letters.charCodeAt(i) - 64;
+        const index = Math.max(0, column - 1);
+        const type = cell.getAttribute('t');
+        const raw = cell.querySelector('v')?.textContent || '';
+        const inline = Array.from(cell.querySelectorAll('is t')).map((node) => node.textContent || '').join('');
+        values[index] = type === 's' ? (sharedStrings[Number(raw)] || '') : type === 'inlineStr' ? inline : raw;
+      });
+      return values;
+    });
+    if (matrix.length < 2) throw new Error('Excel file needs a header row and at least one product.');
+    return normalizeImportRows(matrix[0], matrix.slice(1), 'Excel file');
+  };
+
   const selectImportFile = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      setNotice('Please upload a CSV file. Download the template first if needed.');
+    const lowerName = file.name.toLowerCase();
+    if (!/\.(csv|xlsx)$/i.test(lowerName)) {
+      setNotice('Please upload a CSV or Excel (.xlsx) file.');
       return;
     }
     try {
-      const rows = parseCsv(await file.text());
-      if (rows.length > 200) throw new Error('A maximum of 200 products can be imported at once.');
+      const rows = lowerName.endsWith('.xlsx') ? await parseXlsx(file) : parseCsv(await file.text());
+      if (rows.length > 500) throw new Error('A maximum of 500 products can be imported at once.');
       setImportRows(rows);
       setImportFileName(file.name);
       setNotice(`${rows.length} product row(s) ready for import. Review the preview, then click Import.`);
@@ -446,29 +513,41 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     setImporting(true);
     setNotice('');
     try {
-      const response = await fetch(`${productEndpoint}/import`, {
-        method: 'POST',
-        headers: {
-          ...shopHeaders(ownerRole),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          rows: importRows,
-          products: importRows,
-          mode: importMode === 'update' ? 'update' : 'create',
-        }),
-      });
-      const data = await readApiJson(response);
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to import products.');
+      // Keep every request comfortably below serverless timeouts. The server
+      // still validates and commits each batch atomically; a completed batch
+      // remains saved if a later batch needs attention.
+      const batchSize = 50;
+      const totals = { created: 0, updated: 0, skipped: 0, total: 0, errors: [] };
+      for (let start = 0; start < importRows.length; start += batchSize) {
+        const batch = importRows.slice(start, start + batchSize);
+        setNotice(`Importing all ${importRows.length} products… currently saving ${start + 1}-${start + batch.length}. Please keep this page open.`);
+        const response = await fetch(`${productEndpoint}/import`, {
+          method: 'POST',
+          headers: {
+            ...shopHeaders(ownerRole),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            rows: batch,
+            products: batch,
+            mode: importMode === 'update' ? 'update' : 'create',
+          }),
+        });
+        const data = await readApiJson(response);
+        if (!response.ok) {
+          throw new Error(`Import stopped at row ${start + 1}: ${data.error || 'Failed to import products.'}`);
+        }
+        const res = data.data || {};
+        totals.created += Number(res.created || 0);
+        totals.updated += Number(res.updated || 0);
+        totals.skipped += Number(res.skipped || 0);
+        totals.total += Number(res.total || batch.length);
+        if (Array.isArray(res.errors)) {
+          totals.errors.push(...res.errors.map((item) => ({ ...item, row: Number(item.row || 0) + start })));
+        }
       }
 
-      const res = data.data || {};
-      const created = Number(res.created || 0);
-      const updated = Number(res.updated || 0);
-      const skipped = Number(res.skipped || 0);
-      const total = Number(res.total || importRows.length);
-      const errorList = Array.isArray(res.errors) ? res.errors : [];
+      const { created, updated, skipped, total, errors: errorList } = totals;
 
       let msg = isSeller
         ? `Successfully submitted ${created + updated} product(s) for approval!`
@@ -2334,9 +2413,9 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
         <section className="shop-admin-card" style={{ marginBottom: 16, border: '1px dashed var(--border, #cbd5e1)' }}>
           <div className="shop-admin-list-head" style={{ gap: 12 }}>
             <div>
-              <h3 style={{ marginBottom: 4 }}>Complete 27-Column CSV Import &amp; Export</h3>
+              <h3 style={{ marginBottom: 4 }}>Complete 27-Column CSV &amp; Excel Import</h3>
               <p style={{ margin: 0, fontSize: 13 }}>
-                Upload CSV with all 27 standard columns (Product ID, SKU, Barcode, Brand, Category, Subcategory, MRP, Price, Stock, Specifications, Variants, Bulk Prices, etc.).
+                Upload CSV or Excel (.xlsx) with all 27 standard columns (Product ID, SKU, Barcode, Brand, Category, Subcategory, MRP, Price, Stock, Specifications, Variants, Bulk Prices, etc.).
               </p>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -2344,9 +2423,9 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                 <FileText size={15} /> 27-Col Template
               </button>
               <label htmlFor="shop-products-import-file" className="shop-import-button primary">
-                <UploadCloud size={15} /> Choose CSV File
+                <UploadCloud size={15} /> Choose CSV / Excel File
               </label>
-              <input id="shop-products-import-file" className="shop-import-file-input" type="file" accept=".csv,text/csv" onChange={selectImportFile} />
+              <input id="shop-products-import-file" className="shop-import-file-input" type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={selectImportFile} />
               {!isSeller && (
                 <button type="button" className="shop-import-button secondary" onClick={fixExistingProductCategories} disabled={normalizingCategories}>
                   {normalizingCategories ? 'Fixing…' : 'Fix Categories'}
@@ -2411,7 +2490,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
               </div>
               {importRows.length > 5 && (
                 <small className="shop-import-preview-note">
-                  Showing first 5 of {importRows.length} products. All {importRows.length} rows will be processed transactionally.
+                  Showing first 5 of {importRows.length} products. Click Import once to add all {importRows.length} products; processing continues automatically in the background.
                 </small>
               )}
               <div className="shop-import-actions" style={{ marginTop: 10 }}>

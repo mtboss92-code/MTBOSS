@@ -56,6 +56,8 @@ export const RELATED_CATEGORY_RULES = [
 
 export const ensureImportTables = createInitializationGuard(async () => {
   await pool.query(`CREATE SEQUENCE IF NOT EXISTS shop_product_code_seq START WITH 1;`);
+  await pool.query(`ALTER TABLE supplier_materials
+    ADD COLUMN IF NOT EXISTS stock_status VARCHAR(30) DEFAULT 'in_stock'`);
   await pool.query(QUALITY_TIER_COLUMN_SQL);
 });
 

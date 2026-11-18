@@ -10,6 +10,8 @@ import {
   MAX_IMPORT_ROWS,
 } from '@/lib/bulk-product-import';
 
+export const maxDuration = 60;
+
 const unauthorized = () =>
   NextResponse.json({ success: false, error: 'Supplier access required' }, { status: 401 });
 

@@ -7,7 +7,10 @@ import {
   generateCsvTemplate,
   executeBulkProductImport,
   exportProductsToCsv,
+  ensureImportTables,
 } from '@/lib/bulk-product-import';
+
+export const maxDuration = 60;
 
 const unauthorized = () => NextResponse.json({ success: false, error: 'Admin access required' }, { status: 401 });
 
@@ -66,6 +69,7 @@ export async function POST(req) {
   if (!admin) return unauthorized();
 
   try {
+    await ensureImportTables();
     let body = {};
     try { body = await req.json(); } catch { body = {}; }
     const rows = Array.isArray(body.rows || body.products) ? (body.rows || body.products) : [];
