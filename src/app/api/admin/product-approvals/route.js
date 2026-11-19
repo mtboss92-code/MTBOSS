@@ -240,6 +240,11 @@ export async function POST(req) {
       const result = await pool.query(
         `UPDATE supplier_materials
          SET is_available = TRUE,
+             -- Seller-created records remain in pending_approval until this
+             -- point. Mark the catalogue lifecycle active at the same time
+             -- as their product approval so no additional status filter can
+             -- hide an approved item from Shop Now.
+             status = 'active',
              specifications = jsonb_set(
                COALESCE(specifications, '{}'::jsonb),
                '{__approval__}',

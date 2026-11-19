@@ -253,15 +253,17 @@ export async function GET(req) {
        LEFT JOIN suppliers s ON s.id = m.supplier_id
        LEFT JOIN vendors v ON v.id = m.vendor_id
        LEFT JOIN shop_categories c ON LOWER(TRIM(c.name)) = LOWER(TRIM(m.category))
+       -- Product Approvals is the source of truth for public catalogue
+       -- visibility.  Previously this endpoint also required the related
+       -- supplier/vendor account to pass a second set of account-status
+       -- checks. That made products shown as "Approved" in the admin panel
+       -- disappear from Shop Now. Keep normal catalogue lifecycle safeguards,
+       -- but let every approved product through irrespective of its seller's
+       -- account flags.
        WHERE m.is_available = TRUE
          AND COALESCE(m.is_deleted, FALSE) = FALSE
          AND COALESCE(m.is_archived, FALSE) = FALSE
-         AND COALESCE(m.status, 'active') = 'active'
-         AND (m.vendor_id IS NULL OR COALESCE(m.specifications->'__approval__'->>'status', 'approved') = 'approved')
-         AND (
-           (m.vendor_id IS NOT NULL AND v.is_approved = TRUE AND v.status = 'active')
-           OR (m.vendor_id IS NULL AND (m.supplier_id = 0 OR (s.status = 'approved' AND s.is_active = TRUE)))
-         )
+         AND COALESCE(m.specifications->'__approval__'->>'status', 'approved') = 'approved'
          AND ($1 = '' OR LOWER(TRIM(m.category)) = LOWER(TRIM($1)))
          AND ($2 = '' OR LOWER(TRIM(m.subcategory)) = LOWER(TRIM($2)))
        ORDER BY m.name ASC, m.id ASC`, [category, subcategory]
