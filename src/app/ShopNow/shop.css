@@ -787,6 +787,27 @@
   gap: 14px
 }
 
+.store-load-more-wrap {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin: 28px 0 8px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.store-load-more-btn {
+  border: 1px solid #0b76c5;
+  border-radius: 8px;
+  background: #fff;
+  color: #006bb3;
+  cursor: pointer;
+  font-weight: 800;
+  padding: 11px 20px;
+}
+
+.store-load-more-btn:hover { background: #eaf6ff; }
+
 .store-product-card {
   display: flex;
   flex-direction: column;

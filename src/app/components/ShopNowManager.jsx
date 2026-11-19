@@ -186,6 +186,9 @@ async function uploadImage(file) {
   const body = new FormData();
   body.append('file', file);
   body.append('upload_preset', preset);
+  // Keep all Shop Now product media together in Cloudinary. Cloudinary will
+  // then serve the right compressed/resized version from its CDN.
+  body.append('folder', 'MTBOSS/shop-products');
   const response = await fetch(`https://api.cloudinary.com/v1_1/${cloud}/image/upload`, { method: 'POST', body });
   const data = await readApiJson(response);
   if (!response.ok || !data?.secure_url) throw new Error(data?.error?.message || data?.error || 'Image upload failed');
@@ -997,9 +1000,12 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     setNotice('');
     try {
       const uploadedUrls = [];
-      for (const file of files) {
-        const url = await uploadImage(file);
-        if (url) uploadedUrls.push(url);
+      // Upload a few files at a time. This is much faster than one-by-one,
+      // without flooding the browser or Cloudinary when a large gallery is
+      // selected.
+      for (let start = 0; start < files.length; start += 3) {
+        const batch = await Promise.all(files.slice(start, start + 3).map(uploadImage));
+        uploadedUrls.push(...batch.filter(Boolean));
       }
       if (uploadedUrls.length > 0) {
         const nextList = Array.from(new Set([...imagesList, ...uploadedUrls]));

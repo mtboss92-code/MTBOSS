@@ -43,6 +43,17 @@ const SEARCH_PLACEHOLDERS = [
   'Search "Tiles & Adhesives"',
 ];
 
+const PRODUCTS_PER_BATCH = 24;
+
+function cloudinaryCardImageUrl(value, width = 480) {
+  const src = normalizeShopImageUrl(value);
+  if (!/^https:\/\/res\.cloudinary\.com\//i.test(src)) return src;
+  // Do not download the original product upload for a small catalogue card.
+  // `f_auto` selects the best browser format and `q_auto` keeps the payload
+  // small while retaining useful product detail.
+  return src.replace('/image/upload/', `/image/upload/f_auto,q_auto,c_limit,w_${width}/`);
+}
+
 export function normalizeShopImageUrl(value) {
   const imageUrl = String(value || '').trim();
   if (!imageUrl) return '';
@@ -154,7 +165,7 @@ function ProductVisual({ image, category, name, compact = false }) {
     <div className={`store-visual store-visual-${tone}${compact ? " store-visual-compact" : ""}`}>
       {image || category?.image ? (
         <OptimizedImage
-          src={image || category.image}
+          src={cloudinaryCardImageUrl(image || category.image, compact ? 160 : 480)}
           alt={name}
           fill
           sizes={compact ? '68px' : '(max-width: 560px) 50vw, (max-width: 1100px) 25vw, 220px'}
@@ -572,6 +583,7 @@ export default function Storefront({ categories, products, offers = [], content,
   const [selectedPackSizes, setSelectedPackSizes] = useState([]);
   const [selectedPriceRanges, setSelectedPriceRanges] = useState([]);
   const [openFilterMenu, setOpenFilterMenu] = useState(null);
+  const [renderState, setRenderState] = useState({ key: '', limit: PRODUCTS_PER_BATCH });
 
   const toggleFilter = (setList, val) => {
     setList((prev) => (prev.includes(val) ? prev.filter((item) => item !== val) : [...prev, val]));
@@ -1146,6 +1158,28 @@ export default function Storefront({ categories, products, offers = [], content,
       : 0
   );
 
+  const catalogueFilterKey = [
+    searchTerm, activeCategory, selectedParentNav, selectedSubNav, sortBy,
+    selectedSubcategories.join('|'), selectedBrands.join('|'), selectedThicknesses.join('|'),
+    selectedSizes.join('|'), selectedTypes.join('|'), selectedColors.join('|'),
+    selectedMaterials.join('|'), selectedGrades.join('|'), selectedPackSizes.join('|'),
+    selectedPriceRanges.join('|'), visible.length,
+  ].join('::');
+
+  // Rendering hundreds of rich cards and images at once blocks the main
+  // thread. Products remain fully available, but only the first batch is
+  // mounted initially; visitors can reveal the rest without a new API call.
+  // A new filter/search gets a fresh first batch without scheduling an extra
+  // render from an effect.
+  const renderLimit = renderState.key === catalogueFilterKey
+    ? renderState.limit
+    : PRODUCTS_PER_BATCH;
+  const renderedProducts = visible.slice(0, renderLimit);
+  const remainingProducts = Math.max(0, visible.length - renderedProducts.length);
+  const loadMoreProducts = () => {
+    setRenderState({ key: catalogueFilterKey, limit: renderLimit + PRODUCTS_PER_BATCH });
+  };
+
   const brands = [...new Set(visible.map((product) => product.brand).filter(Boolean))].sort();
   const featured = dedupeProducts(categories.map((category) => catalog.find((product) => product.category?.id === category.id)).filter(Boolean)).slice(0, 8);
   const deals = dedupeProducts(catalog.filter((product) => product.is_featured_deal === true).sort((a, b) => discountPercent(b) - discountPercent(a))).slice(0, 6);
@@ -1158,7 +1192,7 @@ export default function Storefront({ categories, products, offers = [], content,
         if (timeB !== timeA) return timeB - timeA;
         return (Number(b.product_id || b.id) || 0) - (Number(a.product_id || a.id) || 0);
       })
-  );
+  ).slice(0, 12);
   
   // Options calculation for HomeRun popovers
   const baseHierarchyProducts = useMemo(() => {
@@ -1841,8 +1875,9 @@ export default function Storefront({ categories, products, offers = [], content,
               {loading ? (
                 <div className="store-loading">Loading materials...</div>
               ) : visible.length ? (
+                <>
                 <div className="store-product-grid">
-                  {visible.map((product) => (
+                  {renderedProducts.map((product) => (
                     <ProductCard
                       key={product.id}
                       product={product}
@@ -1858,6 +1893,19 @@ export default function Storefront({ categories, products, offers = [], content,
                     />
                   ))}
                 </div>
+                {remainingProducts > 0 && (
+                  <div className="store-load-more-wrap">
+                    <button
+                      type="button"
+                      className="store-load-more-btn"
+                      onClick={loadMoreProducts}
+                    >
+                      Load {Math.min(PRODUCTS_PER_BATCH, remainingProducts)} more products
+                    </button>
+                    <span>{renderedProducts.length} of {visible.length} products shown</span>
+                  </div>
+                )}
+                </>
               ) : (
                 <div className="store-empty">No materials found in this category.</div>
               )}
@@ -2065,8 +2113,9 @@ export default function Storefront({ categories, products, offers = [], content,
               {loading ? (
                 <div className="store-loading">Loading materials...</div>
               ) : visible.length ? (
+                <>
                 <div className="store-product-grid">
-                  {visible.map((product) => (
+                  {renderedProducts.map((product) => (
                     <ProductCard
                       key={product.id}
                       product={product}
@@ -2082,6 +2131,19 @@ export default function Storefront({ categories, products, offers = [], content,
                     />
                   ))}
                 </div>
+                {remainingProducts > 0 && (
+                  <div className="store-load-more-wrap">
+                    <button
+                      type="button"
+                      className="store-load-more-btn"
+                      onClick={loadMoreProducts}
+                    >
+                      Load {Math.min(PRODUCTS_PER_BATCH, remainingProducts)} more products
+                    </button>
+                    <span>{renderedProducts.length} of {visible.length} products shown</span>
+                  </div>
+                )}
+                </>
               ) : (
                 <div className="store-empty">No materials found in this subcategory. Try another filter or search.</div>
               )}
