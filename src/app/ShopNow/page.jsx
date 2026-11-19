@@ -104,11 +104,7 @@ export default function ShopPage() {
   // ── category list ──────────────────────────────────────────────────────────
   const [categories, setCategories] = useState([]);
   const [catsLoading, setCatsLoading] = useState(true);
-  const [allProducts, setAllProducts] = useState([]);
   const [offers, setOffers] = useState([]);
-  const [productsLoaded, setProductsLoaded] = useState(false);
-  const productsLastLoadedAtRef = useRef(0);
-  const productsRequestRef = useRef(null);
   const [storeContent, setStoreContent] = useState(defaultShopStorefront);
   const [cart, setCart] = useState([]);
   const [coupons, setCoupons] = useState([]);
@@ -142,34 +138,36 @@ export default function ShopPage() {
   }, []);
 
   useEffect(() => {
-    fetch('/api/shop-coupons')
-      .then(parseJsonResponse)
-      .then((data) => {
-        if (data?.success) setCoupons(data.data || []);
-      })
-      .catch(() => {});
-  }, []);
+    // Secondary commerce data — load after first paint so categories/storefront
+    // are not blocked by coupons/offers/promotions.
+    const controller = new AbortController();
+    const loadSecondary = () => {
+      Promise.all([
+        fetch('/api/shop-coupons', { signal: controller.signal, cache: 'default' }).then(parseJsonResponse),
+        fetch('/api/shop-offers', { signal: controller.signal, cache: 'default' }).then(parseJsonResponse),
+        fetch('/api/shop-promotions', { signal: controller.signal, cache: 'default' }).then(parseJsonResponse),
+      ]).then(([couponData, offerData, promoData]) => {
+        if (couponData?.success) setCoupons(couponData.data || []);
+        if (offerData?.success) setOffers(offerData.data || []);
+        if (promoData?.success) setPromotions(promoData.data || []);
+      }).catch(() => {});
+    };
 
-  useEffect(() => {
-    const loadPromos = () => {
-      fetch('/api/shop-promotions?t=' + Date.now())
-        .then(parseJsonResponse)
-        .then((data) => {
-          if (data?.success) setPromotions(data.data || []);
-        })
-        .catch(() => {});
-    };
-    loadPromos();
+    const idleId = typeof requestIdleCallback === 'function'
+      ? requestIdleCallback(loadSecondary, { timeout: 1200 })
+      : setTimeout(loadSecondary, 200);
+
     const handleStorage = (e) => {
-      if (e.key === 'MTBOSS-promotions-updated') loadPromos();
+      if (e.key === 'MTBOSS-promotions-updated') loadSecondary();
     };
-    window.addEventListener('promotionsUpdated', loadPromos);
+    window.addEventListener('promotionsUpdated', loadSecondary);
     window.addEventListener('storage', handleStorage);
-    window.addEventListener('focus', loadPromos);
     return () => {
-      window.removeEventListener('promotionsUpdated', loadPromos);
+      controller.abort();
+      if (typeof cancelIdleCallback === 'function' && typeof idleId === 'number') cancelIdleCallback(idleId);
+      else clearTimeout(idleId);
+      window.removeEventListener('promotionsUpdated', loadSecondary);
       window.removeEventListener('storage', handleStorage);
-      window.removeEventListener('focus', loadPromos);
     };
   }, []);
 
@@ -187,140 +185,73 @@ export default function ShopPage() {
       .finally(() => setCatsLoading(false));
   }, []);
 
+  // Refresh only cart line items (not the full catalogue) so stock/price stay
+  // accurate without downloading every shop product on mount.
+  const cartRef = useRef(cart);
+  cartRef.current = cart;
   useEffect(() => {
-    fetch('/api/shop-offers')
+    if (!cartReady || !categories.length) return undefined;
+    const productIds = [...new Set(
+      cartRef.current
+        .map((item) => item.product?.product_id || item.product?.id)
+        .map((id) => String(id || '').replace(/^supplier-/, ''))
+        .filter((id) => /^\d+$/.test(id)),
+    )];
+    if (!productIds.length) return undefined;
+
+    const controller = new AbortController();
+    fetch(`/api/shop-material-options?ids=${productIds.join(',')}&limit=${Math.min(48, productIds.length)}`, {
+      signal: controller.signal,
+      cache: 'no-store',
+    })
       .then(parseJsonResponse)
-      .then((data) => { if (data?.success) setOffers(data.data || []); })
-      .catch(console.error);
-  }, []);
+      .then((data) => {
+        if (!data?.success || !Array.isArray(data.data?.products)) return;
+        const byId = new Map(data.data.products.map((product) => [String(product.id), product]));
+        setCart((previous) => previous.map((item) => {
+          const rawId = String(item.product?.product_id || item.product?.id || '').replace(/^supplier-/, '');
+          const current = byId.get(rawId);
+          if (!current) return item;
+          const category = categories.find((entry) => entry.name.toLowerCase() === String(current.category || '').toLowerCase())
+            || item.product?.category
+            || null;
+          return {
+            ...item,
+            product: {
+              ...item.product,
+              ...current,
+              id: item.product?.id || `supplier-${current.id}`,
+              product_id: current.id,
+              category,
+              image: current.image_url,
+              fromSupplier: true,
+            },
+            quantity: Math.min(item.quantity, Number(current.quantity) || 10000, 10000),
+          };
+        }));
+      })
+      .catch(() => {});
 
-  const loadProducts = useCallback(async (force = false) => {
-    const now = Date.now();
-    if (!force && productsLastLoadedAtRef.current && now - productsLastLoadedAtRef.current < 30000) return;
-    if (productsRequestRef.current) return productsRequestRef.current;
-
-    const request = (async () => {
-      const endpoint = force ? "/api/shop-material-options?fresh=1" : "/api/shop-material-options";
-      try {
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          try {
-            const response = await fetch(endpoint, { cache: force ? "no-store" : "default" });
-            if (response.status === 503 && attempt === 0) {
-              await new Promise((resolve) => setTimeout(resolve, 500));
-              continue;
-            }
-            const data = await parseJsonResponse(response);
-            if (!response.ok || !data?.success) throw new Error(data?.error || "Could not load shop products");
-            setAllProducts(data.data?.products || []);
-            productsLastLoadedAtRef.current = Date.now();
-            return;
-          } catch (error) {
-            if (attempt === 0 && error instanceof TypeError) {
-              await new Promise((resolve) => setTimeout(resolve, 500));
-              continue;
-            }
-            console.error("Could not refresh Shop Now products:", error);
-          }
-        }
-      } finally {
-        setProductsLoaded(true);
-        productsRequestRef.current = null;
-      }
-    })();
-    productsRequestRef.current = request;
-    return request;
-  }, []);
-
-  useEffect(() => {
-    loadProducts();
-
-    const refreshVisibleShop = () => {
-      // Focus/visibility fires frequently on mobile. Let the short API cache
-      // serve these events instead of repeatedly forcing a full catalogue
-      // query and exhausting the DB connection pool.
-      if (document.visibilityState === "visible") loadProducts(false);
-    };
-    const refreshFromProductChange = (event) => {
-      if (event.type !== "storage" || event.key === "MTBOSS-shop-products-updated") loadProducts(true);
-    };
-
-    window.addEventListener("focus", refreshVisibleShop);
-    window.addEventListener("storage", refreshFromProductChange);
-    window.addEventListener("MTBOSSShopProductsUpdated", refreshFromProductChange);
-    document.addEventListener("visibilitychange", refreshVisibleShop);
-
-    return () => {
-      window.removeEventListener("focus", refreshVisibleShop);
-      window.removeEventListener("storage", refreshFromProductChange);
-      window.removeEventListener("MTBOSSShopProductsUpdated", refreshFromProductChange);
-      document.removeEventListener("visibilitychange", refreshVisibleShop);
-    };
-  }, [loadProducts]);
-
-  useEffect(() => {
-    if (!cartReady || !productsLoaded || !categories.length) return;
-    setCart((previous) => {
-      const merged = new Map();
-      for (const item of previous) {
-        if (!item.product?.product_id) {
-          const category = categories.find((entry) => String(entry.id) === String(item.product?.category?.id))
-            || categories.find((entry) => entry.name.toLowerCase() === item.product?.category?.name?.toLowerCase());
-          const validNames = Array.isArray(category?.types) && category.types.length ? category.types : [category?.name];
-          if (!category || !validNames.some((name) => name?.toLowerCase() === item.product?.name?.toLowerCase())) continue;
-          const key = item.product.id || item.product.name;
-          if (merged.has(key)) {
-            merged.get(key).quantity = Math.min(10000, merged.get(key).quantity + item.quantity);
-          } else {
-            merged.set(key, { product: { ...item.product, category }, quantity: Math.min(item.quantity, 10000) });
-          }
-        } else {
-          const current = allProducts.find((product) => product.id === item.product.product_id);
-          const category = categories.find((entry) => entry.name.toLowerCase() === current?.category?.toLowerCase())
-            || categories.find((entry) => current?.name?.toLowerCase().includes(entry.name.toLowerCase()));
-          if (!current || !category || Number(current.quantity) < 1) continue;
-          const key = item.product.id || `supplier-${current.id}`;
-          const resolvedProduct = { ...item.product, ...current, category, image: current.image_url, fromSupplier: true, product_id: current.id };
-          if (merged.has(key)) {
-            merged.get(key).quantity = Math.min(merged.get(key).quantity + item.quantity, Number(current.quantity) || 10000, 10000);
-          } else {
-            merged.set(key, { product: resolvedProduct, quantity: Math.min(item.quantity, Number(current.quantity) || 10000) });
-          }
-        }
-      }
-      return [...merged.values()];
-    });
-  }, [allProducts, cartReady, categories, productsLoaded]);
+    return () => controller.abort();
+  }, [cartReady, categories]);
 
   const [shippingSettings, setShippingSettings] = useState(null);
 
   useEffect(() => {
     const loadStoreContent = () => {
-      fetch("/api/shop-storefront")
+      fetch("/api/shop-storefront", { cache: 'force-cache' })
         .then(parseJsonResponse)
         .then((data) => { if (data?.success) setStoreContent(data.data); })
         .catch(console.error);
     };
-    loadStoreContent();
-
     const loadShipping = () => {
-      fetch("/api/shipping-settings")
+      fetch("/api/shipping-settings", { cache: 'default' })
         .then(parseJsonResponse)
         .then((data) => { if (data?.success && data.data) setShippingSettings(data.data); })
         .catch(console.error);
     };
+    loadStoreContent();
     loadShipping();
-
-    const handleRefresh = () => {
-      loadStoreContent();
-      loadShipping();
-    };
-
-    window.addEventListener("focus", handleRefresh);
-    window.addEventListener("MTBOSSShopProductsUpdated", handleRefresh);
-    return () => {
-      window.removeEventListener("focus", handleRefresh);
-      window.removeEventListener("MTBOSSShopProductsUpdated", handleRefresh);
-    };
   }, []);
 
   // ── modal state ────────────────────────────────────────────────────────────
@@ -544,7 +475,7 @@ export default function ShopPage() {
   useEffect(() => {
     if (!isModalOpen || !selectedCategory?.name) return;
     setLoadingProductOptions(true);
-    fetch(`/api/shop-material-options?category=${encodeURIComponent(selectedCategory.name)}`)
+    fetch(`/api/shop-material-options?category=${encodeURIComponent(selectedCategory.name)}&limit=48&page=1`)
       .then(parseJsonResponse)
       .then((data) => {
         if (data?.success) setProductOptions(data.data || { products: [], types: [], units: [] });
@@ -1041,7 +972,7 @@ export default function ShopPage() {
   return (
     <div className={`min-h-screen ${pageBg} transition-colors duration-300`}>
 
-      <Storefront categories={categories} products={allProducts} content={storeContent} loading={catsLoading} cities={supportedCities} selectedCity={selectedCity} setSelectedCity={setSelectedCity} cart={cart} onAdd={addToCart} onChangeQty={changeCartQuantity} onQuote={(product) => openModal(product.category, product, "quote")} onBuy={(product) => { const pId = product.product_id || (String(product.id).startsWith('supplier-') ? product.id.replace('supplier-', '') : product.id); router.push('/ShopNow/' + pId + '/checkout?from=shop'); }} onCheckout={() => router.push('/ShopNow/checkout?mode=cart&from=shop')} activeCoupon={activeCoupon} couponCalculation={couponCalculation} couponOffers={couponOffers} onApplyCoupon={applyCouponCode} onSelectCoupon={selectCoupon} onClearCoupon={clearCoupon} shippingSettings={shippingSettings} shippingQuote={shippingQuote} promotions={promotions} onOpenLocationModal={() => setShowCityModal(true)} />
+      <Storefront categories={categories} products={[]} offers={offers} content={storeContent} loading={catsLoading} cities={supportedCities} selectedCity={selectedCity} setSelectedCity={setSelectedCity} cart={cart} onAdd={addToCart} onChangeQty={changeCartQuantity} onQuote={(product) => openModal(product.category, product, "quote")} onBuy={(product) => { const pId = product.product_id || (String(product.id).startsWith('supplier-') ? product.id.replace('supplier-', '') : product.id); router.push('/ShopNow/' + pId + '/checkout?from=shop'); }} onCheckout={() => router.push('/ShopNow/checkout?mode=cart&from=shop')} activeCoupon={activeCoupon} couponCalculation={couponCalculation} couponOffers={couponOffers} onApplyCoupon={applyCouponCode} onSelectCoupon={selectCoupon} onClearCoupon={clearCoupon} shippingSettings={shippingSettings} shippingQuote={shippingQuote} promotions={promotions} onOpenLocationModal={() => setShowCityModal(true)} />
 
       {isModalOpen && mounted && createPortal(
         <div className="shop-checkout-modal fixed inset-0 flex items-center justify-center overflow-hidden bg-black/70 p-2 backdrop-blur-sm sm:p-4" style={{ zIndex: 99999 }}>

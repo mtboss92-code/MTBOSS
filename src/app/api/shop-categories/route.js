@@ -7,12 +7,15 @@ import { normalizeManagedCityList } from '@/lib/cities';
 
 let publicCategoriesCache = { expiresAt: 0, rows: null };
 let adminCategoriesCache = { expiresAt: 0, rows: null };
-const publicCacheHeaders = { 'Cache-Control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=300' };
+const publicCacheHeaders = { 'Cache-Control': 'public, max-age=120, s-maxage=300, stale-while-revalidate=900' };
+const PUBLIC_CATEGORIES_TTL_MS = 10 * 60 * 1000;
 const ADMIN_CATEGORIES_TTL_MS = 30 * 1000;
 
 function invalidatePublicCategoriesCache() {
   publicCategoriesCache = { expiresAt: 0, rows: null };
   adminCategoriesCache = { expiresAt: 0, rows: null };
+  // Category renames/visibility affect public catalogue filter results.
+  if (globalThis.__shopProductCache) globalThis.__shopProductCache.clear();
 }
 
 async function canonicalCityPrices(value) {
@@ -333,7 +336,7 @@ export async function GET(req) {
       : await pool.query(`${selectSql} FROM shop_categories WHERE is_active = TRUE ORDER BY sort_order ASC, id ASC`);
 
     if (!isAdmin) {
-      publicCategoriesCache = { expiresAt: Date.now() + 60000, rows: result.rows };
+      publicCategoriesCache = { expiresAt: Date.now() + PUBLIC_CATEGORIES_TTL_MS, rows: result.rows };
     } else if (!slim) {
       adminCategoriesCache = { expiresAt: Date.now() + ADMIN_CATEGORIES_TTL_MS, rows: result.rows };
     }

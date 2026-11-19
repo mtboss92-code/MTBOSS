@@ -7,7 +7,9 @@ import Autoplay from 'embla-carousel-autoplay';
 function cloudinaryCategoryUrl(value) {
   const src = String(value || '').trim();
   if (!/^https:\/\/res\.cloudinary\.com\//i.test(src)) return src;
-  return src.replace('/image/upload/', '/image/upload/f_auto,q_auto,c_fill,w_480/');
+  // Category tiles are small; avoid downloading 480px assets for ~120px thumbs.
+  if (/\/image\/upload\/[^/]+,[^/]+\//.test(src)) return src;
+  return src.replace('/image/upload/', '/image/upload/f_auto,q_auto,c_fill,w_240/');
 }
 
 /**

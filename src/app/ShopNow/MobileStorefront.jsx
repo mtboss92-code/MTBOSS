@@ -1,9 +1,11 @@
 "use client";
 
 import { getDashboardPath, resolveWebAuthUser, syncWebLogout } from "@/lib/client-session";
-import { useState, useMemo, useRef, useEffect } from "react";
+import { memo, useState, useMemo, useRef, useEffect, lazy, Suspense } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useShopCatalogue, useShopSections } from "@/hooks/useShopCatalogue";
+import { SHOP_LIST_DEFAULT_LIMIT } from "@/lib/shop-catalogue";
 import {
   ArrowLeft,
   ArrowRight,
@@ -37,7 +39,7 @@ import {
   Zap,
   Sparkles,
 } from "lucide-react";
-import { displayUnit, getProductImage, ShopImage, getLowestBulkPrice, getProductPromotion, getProductPromotions, getProductFreeShippingPromo, formatPromoSpend } from "./Storefront";
+import { displayUnit, getProductImage, ShopImage, cloudinaryCardImageUrl, getLowestBulkPrice, getProductPromotion, getProductPromotions, getProductFreeShippingPromo, formatPromoSpend } from "./Storefront";
 import AutoSwipeGallery from "./AutoSwipeGallery";
 import { getCartStep } from "@/lib/cart-step";
 import { extractProductAttributes, matchesAttribute, collectUniqueAttributes } from "@/lib/product-attributes";
@@ -49,8 +51,10 @@ import {
   namesMatch,
 } from "./categoryNavTree";
 import GlobalSearch from "../components/GlobalSearch";
-import QuickServices from "../components/QuickServices";
-import MaterialOrdersPanel from "../components/MaterialOrdersPanel";
+
+// Below-the-fold / secondary panes — keep them out of the initial mobile parse.
+const QuickServices = lazy(() => import("../components/QuickServices"));
+const MaterialOrdersPanel = lazy(() => import("../components/MaterialOrdersPanel"));
 
 function getCategoryIcon(name = "") {
   const val = name.toLowerCase();
@@ -211,11 +215,19 @@ export default function MobileStorefront({
   onClearCoupon = () => { },
   shippingQuote = null,
   promotions = [], onOpenLocationModal = null,
+  productsLoading: productsLoadingProp = false,
+  loadingMore: loadingMoreProp = false,
+  productsError: productsErrorProp = "",
+  onRetryProducts = null,
+  productTotal = 0,
+  onLoadMoreProducts = null,
+  hasMoreProducts = false,
 }) {
   const [mobileView, setMobileView] = useState("home"); // "home" | "listing" | "orders" | "account"
   const [activeCategoryId, setActiveCategoryId] = useState(null);
   const [activeSubcategory, setActiveSubcategory] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedMobileSearch, setDebouncedMobileSearch] = useState("");
   const [activeFilterChip, setActiveFilterChip] = useState("All");
   const [citySheetOpen, setCitySheetOpen] = useState(false);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
@@ -250,6 +262,12 @@ export default function MobileStorefront({
   const searchInputRef = useRef(null);
   const rightFeedRef = useRef(null);
   const activeCatBtnRef = useRef(null);
+  const mobileLoadMoreRef = useRef(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedMobileSearch(searchQuery.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -432,39 +450,81 @@ export default function MobileStorefront({
     return ["All", ...subcats];
   }, [activeCategory, parentSubcategories]);
 
-  // Products belonging to the active category
-  const categoryProducts = useMemo(() => {
-    if (!activeCategory) return [];
-    const currentParent = activeCategory.label || activeCategory.name;
-    const currentSub = activeFilterChip !== "All" ? activeFilterChip : (activeSubcategory !== "All" ? activeSubcategory : null);
-
-    let list = catalog.filter((product) => {
-      return productMatchesCategoryAndSub(product, currentParent, currentSub);
-    });
-
-    // Search filter
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      list = list.filter((p) => {
-        const attrs = extractProductAttributes(p);
-        const attrText = `${attrs.thickness} ${attrs.size} ${attrs.type} ${attrs.color} ${attrs.material}`.toLowerCase();
-        return `${p.name} ${p.brand || ""} ${p.category?.name || ""} ${attrText}`.toLowerCase().includes(q);
-      });
+  const mobileListingEnabled = mobileView === "listing" || Boolean(debouncedMobileSearch);
+  const mobileCatalogueFilters = useMemo(() => {
+    const params = {
+      sort: "featured",
+      q: debouncedMobileSearch || undefined,
+    };
+    if (mobileView === "listing" && activeCategory) {
+      const parent = activeCategory.label || activeCategory.name;
+      const currentSub = activeFilterChip !== "All"
+        ? activeFilterChip
+        : (activeSubcategory !== "All" ? activeSubcategory : null);
+      if (currentSub) {
+        const found = categories.find((entry) => namesMatch(entry.name, currentSub));
+        if (found) params.category = found.name;
+        else {
+          params.parent = parent;
+          params.subcategory = currentSub;
+        }
+      } else {
+        const children = parentSubcategories.map((entry) => entry.name).filter(Boolean);
+        params.parent = parent;
+        if (children.length) params.children = children;
+      }
     }
+    return params;
+  }, [
+    activeCategory,
+    activeFilterChip,
+    activeSubcategory,
+    categories,
+    debouncedMobileSearch,
+    mobileView,
+    parentSubcategories,
+  ]);
 
-    return list;
-  }, [catalog, activeCategory, activeSubcategory, activeFilterChip, searchQuery]);
+  const {
+    products: mobilePagedProducts,
+    pagination: mobilePagination,
+    loading: mobileProductsLoading,
+    loadingMore: mobileLoadingMore,
+    isRefreshing: mobileProductsRefreshing,
+    error: mobileProductsError,
+    loadMore: mobileLoadMore,
+    reload: mobileReloadProducts,
+  } = useShopCatalogue({
+    categories,
+    enabled: mobileListingEnabled,
+    pageSize: SHOP_LIST_DEFAULT_LIMIT,
+    filters: mobileCatalogueFilters,
+  });
 
-  // Global search results when searching from home header
-  const searchResults = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-    const q = searchQuery.trim().toLowerCase();
-    return catalog.filter((p) => {
-      const attrs = extractProductAttributes(p);
-      const attrText = `${attrs.thickness} ${attrs.size} ${attrs.type} ${attrs.color} ${attrs.material}`.toLowerCase();
-      return `${p.name} ${p.brand || ""} ${p.category?.name || ""} ${attrText}`.toLowerCase().includes(q);
-    });
-  }, [catalog, searchQuery]);
+  const { deals: mobileDeals, arrivals: mobileArrivals } = useShopSections(
+    categories,
+    mobileView === "home" && !debouncedMobileSearch,
+  );
+
+  // Products belonging to the active category / search (server-paginated)
+  const categoryProducts = mobilePagedProducts;
+  const searchResults = debouncedMobileSearch ? mobilePagedProducts : [];
+  const homeFeedProducts = catalog.length
+    ? catalog
+    : [...mobileDeals, ...mobileArrivals];
+
+  useEffect(() => {
+    const node = mobileLoadMoreRef.current;
+    if (!node || !mobilePagination.hasNextPage) return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) mobileLoadMore();
+      },
+      { rootMargin: "220px 0px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [mobileLoadMore, mobilePagination.hasNextPage, mobilePagedProducts.length]);
 
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -775,10 +835,21 @@ export default function MobileStorefront({
               <section className="mobile-search-results-section">
                 <div className="mobile-section-title-row">
                   <h2 className="mobile-section-heading">Results for “{searchQuery}”</h2>
-                  <span className="text-xs text-gray-500">{searchResults.length} found</span>
+                  <span className="text-xs text-gray-500">{mobilePagination.total || searchResults.length} found</span>
                 </div>
 
-                {searchResults.length === 0 ? (
+                {mobileProductsLoading && searchResults.length === 0 ? (
+                  <div className="mobile-product-feed" aria-busy="true" aria-label="Loading products">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <div key={`search-skel-${i}`} className="mobile-product-skeleton" aria-hidden="true" />
+                    ))}
+                  </div>
+                ) : mobileProductsError && searchResults.length === 0 ? (
+                  <div className="mobile-empty-feed" role="alert">
+                    <p>{mobileProductsError}</p>
+                    <button type="button" className="mobile-inquiry-btn" onClick={mobileReloadProducts}>Retry</button>
+                  </div>
+                ) : searchResults.length === 0 ? (
                   <div className="mobile-empty-feed">
                     <p>No materials matching “{searchQuery}”.</p>
                     <button
@@ -790,8 +861,11 @@ export default function MobileStorefront({
                     </button>
                   </div>
                 ) : (
-                  <div className="mobile-product-feed">
-                    {searchResults.map((product) => {
+                  <div className={`mobile-product-feed${mobileProductsRefreshing ? ' is-refreshing' : ''}`} aria-busy={mobileProductsRefreshing || mobileLoadingMore}>
+                    <div className="store-listing-status" aria-live="polite">
+                      {mobileProductsRefreshing ? 'Updating results…' : mobileLoadingMore ? 'Loading more products…' : ''}
+                    </div>
+                    {searchResults.map((product, index) => {
                       const cartItem = cart.find((item) => item.product.id === product.id);
                       const quantity = cartItem?.quantity || 0;
                       return (
@@ -808,6 +882,7 @@ export default function MobileStorefront({
                           categories={categories}
                           isDark={isDark}
                           promotions={promotions}
+                          priority={index < 3}
                           shippingSettings={activeShipping}
                         />
                       );
@@ -955,7 +1030,7 @@ export default function MobileStorefront({
                   </div>
 
                   <div className="mobile-product-feed">
-                    {catalog.slice(0, 5).map((product) => {
+                    {homeFeedProducts.slice(0, 5).map((product, index) => {
                       const cartItem = cart.find((item) => item.product.id === product.id);
                       const quantity = cartItem?.quantity || 0;
                       return (
@@ -974,6 +1049,7 @@ export default function MobileStorefront({
                           categories={categories}
                           isDark={isDark}
                           promotions={promotions}
+                          priority={index < 3}
                           shippingSettings={activeShipping}
                         />
                       );
@@ -982,7 +1058,9 @@ export default function MobileStorefront({
                 </section>
 
                 {/* Quick Home Services (At Your Doorstep) */}
-                <QuickServices className="pt-2 pb-8 px-3" />
+                <Suspense fallback={<div className="mobile-product-skeleton" style={{ margin: '12px 16px', minHeight: 160 }} aria-hidden="true" />}>
+                  <QuickServices className="pt-2 pb-8 px-3" />
+                </Suspense>
               </>
             )}
           </div>
@@ -1105,14 +1183,28 @@ export default function MobileStorefront({
               })()}
 
               {/* Product cards list */}
-              {categoryProducts.length === 0 ? (
+              <div className="store-listing-status" aria-live="polite">
+                {mobileProductsRefreshing ? 'Updating results…' : mobileLoadingMore ? 'Loading more products…' : ''}
+              </div>
+              {mobileProductsLoading && categoryProducts.length === 0 ? (
+                <div className="mobile-feed-cards" aria-busy="true" aria-label="Loading products">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={`list-skel-${i}`} className="mobile-product-skeleton" aria-hidden="true" />
+                  ))}
+                </div>
+              ) : mobileProductsError && categoryProducts.length === 0 ? (
+                <div className="mobile-empty-category" role="alert">
+                  <p className={`font-bold text-sm ${isDark ? 'text-white' : 'text-[#12283F]'}`}>{mobileProductsError}</p>
+                  <button type="button" className="mobile-inquiry-btn" onClick={mobileReloadProducts}>Retry</button>
+                </div>
+              ) : categoryProducts.length === 0 ? (
                 <div className="mobile-empty-category">
                   <Package size={40} className="text-gray-300 mx-auto mb-2" />
                   <p className={`font-bold text-sm ${isDark ? 'text-white' : 'text-[#12283F]'}`}>
                     No materials listed under this category.
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
-                    Request an immediate custom quote from our verified supplier network.
+                    Try another subcategory, clear filters, or request a custom quote.
                   </p>
                   <button
                     type="button"
@@ -1123,8 +1215,8 @@ export default function MobileStorefront({
                   </button>
                 </div>
               ) : (
-                <div className="mobile-feed-cards">
-                  {categoryProducts.map((product) => {
+                <div className={`mobile-feed-cards${mobileProductsRefreshing ? ' is-refreshing' : ''}`} aria-busy={mobileProductsRefreshing || mobileLoadingMore}>
+                  {categoryProducts.map((product, index) => {
                     const cartItem = cart.find((item) => item.product.id === product.id);
                     const quantity = cartItem?.quantity || 0;
                     return (
@@ -1144,9 +1236,24 @@ export default function MobileStorefront({
                         isDark={isDark}
                         promotions={promotions}
                         shippingSettings={activeShipping}
+                        priority={index < 4}
                       />
                     );
                   })}
+                  {mobilePagination.hasNextPage && (
+                    <div ref={mobileLoadMoreRef} className="store-load-more-wrap" style={{ paddingBottom: 24 }}>
+                      <button
+                        type="button"
+                        className="store-load-more-btn"
+                        onClick={mobileLoadMore}
+                        disabled={mobileLoadingMore}
+                        aria-busy={mobileLoadingMore}
+                      >
+                        {mobileLoadingMore ? 'Loading…' : 'Load more products'}
+                      </button>
+                      <span>{categoryProducts.length} of {mobilePagination.total} shown</span>
+                    </div>
+                  )}
                 </div>
               )}
             </section>
@@ -1173,7 +1280,9 @@ export default function MobileStorefront({
             </div>
 
             <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-gray-200 dark:border-zinc-800 p-2 sm:p-4 shadow-sm">
-              <MaterialOrdersPanel role="user" embedded={true} />
+              <Suspense fallback={<div className="mobile-product-skeleton" style={{ minHeight: 180 }} aria-hidden="true" />}>
+                <MaterialOrdersPanel role="user" embedded={true} />
+              </Suspense>
             </div>
 
             <div className="mt-4 p-3.5 bg-sky-50 dark:bg-sky-950/40 rounded-xl border border-sky-100 dark:border-sky-900/40 flex items-center justify-between text-xs">
@@ -2140,7 +2249,7 @@ export default function MobileStorefront({
 // ─────────────────────────────────────────────────────────────
 // MOBILE PRODUCT CARD (SINGLE-COLUMN FEED ITEM)
 // ─────────────────────────────────────────────────────────────
-function MobileProductCard({
+const MobileProductCard = memo(function MobileProductCard({
   product,
   quantity = 0,
   onAdd,
@@ -2155,6 +2264,7 @@ function MobileProductCard({
   isDark = false,
   promotions = [], onOpenLocationModal = null,
   shippingSettings = null,
+  priority = false,
 }) {
   const price = Number(product.price) || 0;
   const hasFixedPrice = price > 0;
@@ -2162,7 +2272,10 @@ function MobileProductCard({
   const discount = getProductDiscount(product);
   const bulkPrice = getLowestBulkPrice(product);
   const activePromos = getProductPromotions(product, promotions);
-  const productImage = getProductImage(product, product.category || categories);
+  const productImage = cloudinaryCardImageUrl(
+    getProductImage(product, product.category || categories),
+    240,
+  );
 
   const normalizedCity = (selectedCity || "").trim().toLowerCase();
   const cityUnavailable = Boolean(
@@ -2190,6 +2303,14 @@ function MobileProductCard({
           href={detailHref}
           className="mobile-card-img-btn"
           aria-label={`View ${product.name} details`}
+          onClick={() => {
+            try {
+              sessionStorage.setItem('MTBOSS-shop-scroll', JSON.stringify({
+                path: window.location.pathname + window.location.search,
+                y: window.scrollY || 0,
+              }));
+            } catch { /* ignore */ }
+          }}
         >
           {productImage ? (
             <ShopImage
@@ -2198,6 +2319,7 @@ function MobileProductCard({
               fill
               sizes="84px"
               className="object-cover rounded-xl"
+              priority={priority}
               unoptimized
             />
           ) : (
@@ -2314,4 +2436,4 @@ function MobileProductCard({
       </div>
     </article>
   );
-}
+});

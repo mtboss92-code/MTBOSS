@@ -243,7 +243,9 @@ export default function ProductDetailPage({ params }) {
         setSelectedQuantity(getCartStep(prod) || 1);
 
         // Fetch and filter related products strictly matching subcategory or relevance
-        const categoryParam = prod.category ? `?category=${encodeURIComponent(prod.category)}` : "";
+        const categoryParam = prod.category
+          ? `?category=${encodeURIComponent(prod.category)}&limit=24&page=1`
+          : "?limit=24&page=1&sort=newest";
         const relRes = await fetch(`/api/shop-material-options${categoryParam}`);
         const relData = await relRes.json();
         if (relData?.success && Array.isArray(relData.data?.products) && !isCancelled) {

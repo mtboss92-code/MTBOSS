@@ -9,7 +9,10 @@ import { defaultHeroImages } from '@/lib/shop-storefront-defaults';
 function cloudinaryHeroUrl(value) {
   const src = String(value || '').trim();
   if (!/^https:\/\/res\.cloudinary\.com\//i.test(src)) return src;
-  return src.replace('/image/upload/', '/image/upload/f_auto,q_auto,c_fill,w_1400/');
+  // Cap hero downloads to roughly the desktop hero column (~600–900px).
+  // Avoid stacking transforms if the URL is already optimized.
+  if (/\/image\/upload\/[^/]+,[^/]+\//.test(src)) return src;
+  return src.replace('/image/upload/', '/image/upload/f_auto,q_auto,c_fill,w_900/');
 }
 
 export default function HeroBannerGallery({
@@ -136,6 +139,10 @@ export default function HeroBannerGallery({
                 alt={`${alt} ${i + 1}`}
                 loading={i === 0 ? 'eager' : 'lazy'}
                 fetchPriority={i === 0 ? 'high' : 'low'}
+                decoding={i === 0 ? 'sync' : 'async'}
+                sizes="(max-width: 900px) 100vw, 900px"
+                width={900}
+                height={520}
                 onError={(event) => {
                   // A deleted/misconfigured Cloudinary asset must never leave
                   // the Shop Now hero blank.
