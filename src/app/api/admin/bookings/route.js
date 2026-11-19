@@ -13,7 +13,7 @@ const SORT_FIELDS = {
 };
 
 let phoneRestorationPromise;
-export async function restoreServiceBookingPhones() {
+async function restoreServiceBookingPhones() {
   if (phoneRestorationPromise) return phoneRestorationPromise;
 
   phoneRestorationPromise = (async () => {

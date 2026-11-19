@@ -48,8 +48,6 @@ async function readSlotPayload(req) {
   return { body, imageFile, removeImage: body.remove_image === true || body.remove_image === 'true' };
 }
 
-export { ensureFreeSlotsColumns };
-
 // GET — user mode: city + service_id; admin mode: no params
 export async function GET(req) {
   try {

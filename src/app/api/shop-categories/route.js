@@ -64,7 +64,7 @@ const ensureTable = createInitializationGuard(async () => {
 });
 
 
-export const NAVBAR_PRESET_CATEGORIES = [
+const NAVBAR_PRESET_CATEGORIES = [
   {
     name: 'Building Materials',
     emoji: '🧱',
@@ -163,7 +163,7 @@ export const NAVBAR_PRESET_CATEGORIES = [
   },
 ];
 
-export async function syncNavbarCategories() {
+async function syncNavbarCategories() {
   try {
     await pool.query(`
       UPDATE supplier_materials

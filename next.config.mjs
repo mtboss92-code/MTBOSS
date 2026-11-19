@@ -24,6 +24,11 @@ const nextConfig = {
     // child-process spawn failures on restricted Windows environments.
     webpackBuildWorker: false,
     workerThreads: true,
+    // This machine has 8 GB of RAM. The default worker count is (cpu count - 1),
+    // which on 8 cores starts enough Node processes to exhaust the Windows
+    // commit limit during `next build` (os error 1450 / V8 zone OOM).
+    cpus: 1,
+    webpackMemoryOptimizations: true,
   },
   // Keep development/HMR artifacts separate from production builds. Running
   // `next build` while `next dev` is open must not replace the live router
