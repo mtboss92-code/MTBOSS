@@ -6,6 +6,12 @@ import Autoplay from 'embla-carousel-autoplay';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { defaultHeroImages } from '@/lib/shop-storefront-defaults';
 
+function cloudinaryHeroUrl(value) {
+  const src = String(value || '').trim();
+  if (!/^https:\/\/res\.cloudinary\.com\//i.test(src)) return src;
+  return src.replace('/image/upload/', '/image/upload/f_auto,q_auto,c_fill,w_1400/');
+}
+
 export default function HeroBannerGallery({
   images = [],
   alt = 'Construction materials',
@@ -126,9 +132,18 @@ export default function HeroBannerGallery({
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={src}
+                src={cloudinaryHeroUrl(src)}
                 alt={`${alt} ${i + 1}`}
                 loading={i === 0 ? 'eager' : 'lazy'}
+                fetchPriority={i === 0 ? 'high' : 'low'}
+                onError={(event) => {
+                  // A deleted/misconfigured Cloudinary asset must never leave
+                  // the Shop Now hero blank.
+                  if (!event.currentTarget.dataset.fallback) {
+                    event.currentTarget.dataset.fallback = 'true';
+                    event.currentTarget.src = '/images/banners/materials.jpg';
+                  }
+                }}
                 style={{
                   width: '100%',
                   height: '100%',

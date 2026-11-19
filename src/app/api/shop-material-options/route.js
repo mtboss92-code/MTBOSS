@@ -3,7 +3,9 @@ import pool from '@/lib/db';
 import { createInitializationGuard, isDatabaseConnectionError } from '@/lib/api-utils';
 
 const productCache = (globalThis.__shopProductCache = globalThis.__shopProductCache || new Map());
-const PRODUCT_CACHE_TTL_MS = 15000;
+// Catalogue mutations explicitly clear this cache. A longer normal TTL keeps
+// repeat Shop Now visits from needlessly queuing the database under traffic.
+const PRODUCT_CACHE_TTL_MS = 60_000;
 
 const ensureTable = createInitializationGuard(async() => {
     await pool.query(`
@@ -231,7 +233,7 @@ export async function GET(req) {
         const cached = productCache.get(cacheKey);
         if (!bypassCache && cached?.expiresAt > Date.now()) {
             return NextResponse.json(cached.payload, {
-                headers: { 'Cache-Control': 'public, max-age=15, s-maxage=30, stale-while-revalidate=120' },
+                headers: { 'Cache-Control': 'public, max-age=60, s-maxage=120, stale-while-revalidate=300' },
             });
         }
 
@@ -329,7 +331,7 @@ export async function GET(req) {
         };
         productCache.set(cacheKey, { expiresAt: Date.now() + PRODUCT_CACHE_TTL_MS, payload });
         return NextResponse.json(payload, {
-            headers: { 'Cache-Control': 'public, max-age=15, s-maxage=30, stale-while-revalidate=120' },
+            headers: { 'Cache-Control': 'public, max-age=60, s-maxage=120, stale-while-revalidate=300' },
         });
     } catch (error) {
         console.error('GET shop-material-options error:', error);

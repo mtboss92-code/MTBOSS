@@ -1,9 +1,7 @@
 export const defaultHeroImages = [
-  'https://res.cloudinary.com/kgrg3oe3/image/upload/v1793164625/Sunset_Construction_Materials_Yard.png',
-  'https://res.cloudinary.com/kgrg3oe3/image/upload/v1793164626/Construction_Materials_Loading_Yard.png',
-  'https://res.cloudinary.com/kgrg3oe3/image/upload/v1793164626/Loaded_Tata_Dump_Truck_at_a_Sandy_Worksite.png',
-  'https://res.cloudinary.com/kgrg3oe3/image/upload/v1793164626/Mahindra_Tractor_Hauling_Bricks.png',
-  'https://res.cloudinary.com/kgrg3oe3/image/upload/v1793164628/Steel_Loads_at_the_Industrial_Yard.png',
+  // A local, versioned fallback makes first paint dependable if the saved
+  // Cloudinary hero has been deleted or is temporarily unavailable.
+  '/images/banners/materials.jpg',
 ];
 
 export const defaultShopStorefront = {

@@ -4,6 +4,12 @@ import React, { useMemo } from 'react';
 import useEmblaCarousel from 'embla-carousel-react';
 import Autoplay from 'embla-carousel-autoplay';
 
+function cloudinaryCategoryUrl(value) {
+  const src = String(value || '').trim();
+  if (!/^https:\/\/res\.cloudinary\.com\//i.test(src)) return src;
+  return src.replace('/image/upload/', '/image/upload/f_auto,q_auto,c_fill,w_480/');
+}
+
 /**
  * AutoSwipeGallery:
  * - If 0 images: returns null.
@@ -71,7 +77,7 @@ export default function AutoSwipeGallery({
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={cleanImages[0]}
+          src={cloudinaryCategoryUrl(cleanImages[0])}
           alt={alt}
           className={singleIsPng ? 'is-png-image' : ''}
           style={{
@@ -82,6 +88,12 @@ export default function AutoSwipeGallery({
             ...imageStyle,
           }}
           loading="lazy"
+          onError={(event) => {
+            if (!event.currentTarget.dataset.fallback) {
+              event.currentTarget.dataset.fallback = 'true';
+              event.currentTarget.src = '/images/banners/materials.jpg';
+            }
+          }}
         />
       </div>
     );
@@ -115,7 +127,7 @@ export default function AutoSwipeGallery({
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={src}
+                src={cloudinaryCategoryUrl(src)}
                 alt={`${alt} ${i + 1}`}
                 className={slideIsPng ? 'is-png-image' : ''}
                 style={{
@@ -126,6 +138,12 @@ export default function AutoSwipeGallery({
                   ...imageStyle,
                 }}
                 loading="lazy"
+                onError={(event) => {
+                  if (!event.currentTarget.dataset.fallback) {
+                    event.currentTarget.dataset.fallback = 'true';
+                    event.currentTarget.src = '/images/banners/materials.jpg';
+                  }
+                }}
               />
             </div>
           );

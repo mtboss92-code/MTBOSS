@@ -178,7 +178,9 @@ export default function ShopPage() {
   }, [cart, cartReady]);
 
   useEffect(() => {
-    fetch("/api/shop-categories")
+    // The storefront only needs the lightweight category shape. Avoid
+    // transferring editor-only image/configuration fields during first paint.
+    fetch("/api/shop-categories?fields=lite", { cache: 'force-cache' })
       .then(parseJsonResponse)
       .then((d) => { if (d?.success) setCategories(d.data || []); })
       .catch(console.error)
@@ -233,7 +235,10 @@ export default function ShopPage() {
     loadProducts();
 
     const refreshVisibleShop = () => {
-      if (document.visibilityState === "visible") loadProducts(true);
+      // Focus/visibility fires frequently on mobile. Let the short API cache
+      // serve these events instead of repeatedly forcing a full catalogue
+      // query and exhausting the DB connection pool.
+      if (document.visibilityState === "visible") loadProducts(false);
     };
     const refreshFromProductChange = (event) => {
       if (event.type !== "storage" || event.key === "MTBOSS-shop-products-updated") loadProducts(true);
