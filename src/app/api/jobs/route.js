@@ -3,7 +3,7 @@ import pool from '@/lib/db';
 import { jobs as defaultJobs } from '@/app/careers/data/jobs';
 import { createInitializationGuard } from '@/lib/api-utils';
 import { requireRole, unauthorized } from '@/lib/auth';
-import { resolveManagedCity } from '@/lib/cities';
+import { cleanCityName, resolveManagedCity } from '@/lib/cities';
 
 function toList(value) {
   if (Array.isArray(value)) return value.filter(Boolean);
@@ -39,6 +39,8 @@ const ensureTable = createInitializationGuard(async () => {
 
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'active'`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs (status, created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs (created_at DESC)`);
 });
 
 const seedDefaultJobs = createInitializationGuard(async () => {
@@ -119,11 +121,37 @@ export async function GET(req) {
     }
 
     if (status === 'all' && !admin) return unauthorized();
-    const result = status === 'all'
-      ? await pool.query('SELECT * FROM jobs ORDER BY created_at DESC')
-      : await pool.query("SELECT * FROM jobs WHERE status = 'active' ORDER BY urgent DESC, created_at DESC");
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(searchParams.get('limit') || '100', 10) || 100));
+    const offset = (page - 1) * limit;
+    const whereSql = status === 'all' ? '' : "WHERE status = 'active'";
+    const orderSql = status === 'all'
+      ? 'ORDER BY created_at DESC'
+      : 'ORDER BY urgent DESC, created_at DESC';
+    const countRes = await pool.query(`SELECT COUNT(*)::INT AS total FROM jobs ${whereSql}`);
+    const total = countRes.rows[0]?.total || 0;
+    // Admin managers need full rows; public list omits large JSON arrays (detail via ?id=)
+    const selectSql = status === 'all'
+      ? `SELECT * FROM jobs`
+      : `SELECT id, title, department, location, type, experience, salary, description,
+                urgent, status, created_at, updated_at,
+                COALESCE(skills, '[]'::jsonb) AS skills,
+                '[]'::jsonb AS responsibilities,
+                '[]'::jsonb AS requirements
+         FROM jobs`;
+    const result = await pool.query(
+      `${selectSql}
+       ${whereSql}
+       ${orderSql}
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
 
-    return NextResponse.json({ success: true, data: result.rows.map(normalizeJob) });
+    return NextResponse.json({
+      success: true,
+      data: result.rows.map(normalizeJob),
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+    });
   } catch (error) {
     console.error('Jobs fetch error:', error);
     return NextResponse.json({ success: false, error: 'Server error' }, { status: 500 });
@@ -157,9 +185,9 @@ export async function POST(req) {
       );
     }
 
-    const canonicalLocation = await resolveManagedCity(location);
+    const canonicalLocation = (await resolveManagedCity(location)) || cleanCityName(location);
     if (!canonicalLocation) {
-      return NextResponse.json({ success: false, error: 'Select an active city from City Management' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Location is required' }, { status: 400 });
     }
     const result = await pool.query(
       `INSERT INTO jobs (
@@ -219,9 +247,9 @@ export async function PATCH(req) {
       );
     }
 
-    const canonicalLocation = await resolveManagedCity(location);
+    const canonicalLocation = (await resolveManagedCity(location)) || cleanCityName(location);
     if (!canonicalLocation) {
-      return NextResponse.json({ success: false, error: 'Select an active city from City Management' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Location is required' }, { status: 400 });
     }
     const result = await pool.query(
       `UPDATE jobs SET

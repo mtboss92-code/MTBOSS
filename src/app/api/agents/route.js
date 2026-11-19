@@ -3,23 +3,20 @@ import bcrypt from 'bcryptjs';
 import pool from '@/lib/db';
 import { ensureAgentSchema, requireAdmin } from '@/lib/agent-auth';
 import { sendMail } from '@/lib/email';
-import { cleanText, normalizePhone, validateContactFields } from '@/lib/validation';
-import { resolveManagedCity } from '@/lib/cities';
+import {
+  validateAgentApplicationBody,
+  cleanAgentSpecializations,
+  AGENT_DUPLICATE_EMAIL_MESSAGE,
+} from '@/lib/agent-application';
 import { ensureAgentNotificationsSchema } from '@/lib/agent-notifications';
 
 const AGENT_STATUSES = ['Pending', 'Reviewing', 'Approved', 'Rejected'];
-const ALLOWED_SPECIALIZATIONS = ['payments', 'labor', 'vendor', 'construction'];
 const AGENT_SAFE_COLUMNS = `
   id, name, email, phone, city, state, occupation, agent_type, experience,
   network, message, status, login_enabled, must_change_password, approved_at,
   approved_by, auth_version, last_login_at, created_at, updated_at, has_project_management_access,
-  specializations
+  specializations, is_manager, manager_id
 `;
-
-function cleanSpecializations(specs) {
-  if (!specs || !Array.isArray(specs)) return [];
-  return specs.filter((s) => ALLOWED_SPECIALIZATIONS.includes(s));
-}
 
 function makeTemporaryPassword() {
   return `Agent@${Math.random().toString(36).slice(2, 8)}${Math.floor(10 + Math.random() * 90)}`;
@@ -33,19 +30,59 @@ export async function GET(req) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
+    const { searchParams } = new URL(req.url);
+    const q = String(searchParams.get('q') || searchParams.get('search') || '').trim();
+    const status = String(searchParams.get('status') || '').trim();
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50', 10) || 50));
+    const offset = (page - 1) * limit;
+    const includeCounts = searchParams.get('counts') !== '0';
+
+    const vals = [];
+    const where = [];
+    if (status && AGENT_STATUSES.includes(status)) {
+      vals.push(status);
+      where.push(`a.status = $${vals.length}`);
+    }
+    if (q) {
+      vals.push(`%${q}%`);
+      where.push(`(
+        a.name ILIKE $${vals.length}
+        OR a.email ILIKE $${vals.length}
+        OR a.phone ILIKE $${vals.length}
+        OR COALESCE(a.city,'') ILIKE $${vals.length}
+      )`);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const countRes = await pool.query(`SELECT COUNT(*)::INT AS total FROM agents a ${whereSql}`, vals);
+    const total = countRes.rows[0]?.total || 0;
+
+    const cols = AGENT_SAFE_COLUMNS.split(',').map((column) => `a.${column.trim()}`).join(', ');
+    const countSelect = includeCounts
+      ? `,
+        (SELECT COUNT(*)::INT FROM agent_leads l WHERE l.agent_id = a.id) AS leads_count,
+        (SELECT COUNT(*)::INT FROM agent_schedule s WHERE s.agent_id = a.id) AS schedule_count`
+      : `,
+        0::INT AS leads_count,
+        0::INT AS schedule_count`;
+
+    vals.push(limit, offset);
     const result = await pool.query(
-      `SELECT
-        ${AGENT_SAFE_COLUMNS.split(',').map((column) => `a.${column.trim()}`).join(', ')},
-        COUNT(DISTINCT l.id)::INT AS leads_count,
-        COUNT(DISTINCT s.id)::INT AS schedule_count
+      `SELECT ${cols}, m.name AS manager_name${countSelect}
        FROM agents a
-       LEFT JOIN agent_leads l ON l.agent_id = a.id
-       LEFT JOIN agent_schedule s ON s.agent_id = a.id
-       GROUP BY a.id
-       ORDER BY a.created_at DESC`
+       LEFT JOIN agents m ON m.id = a.manager_id
+       ${whereSql}
+       ORDER BY a.created_at DESC
+       LIMIT $${vals.length - 1} OFFSET $${vals.length}`,
+      vals
     );
 
-    return NextResponse.json({ success: true, data: result.rows });
+    return NextResponse.json({
+      success: true,
+      data: result.rows,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+    });
   } catch (error) {
     console.error('Agents fetch error:', error);
     return NextResponse.json({ success: false, error: 'Server error' }, { status: 500 });
@@ -56,21 +93,24 @@ export async function POST(req) {
   try {
     await ensureAgentSchema();
     const body = await req.json();
-    const { name, email, phone, city, state, occupation, agentType, experience, network, message, specializations, has_project_management_access } = body;
-    const cleanName = cleanText(name);
-    const cleanEmail = cleanText(email).toLowerCase();
-    const cleanPhone = normalizePhone(phone);
-    const canonicalCity = await resolveManagedCity(city);
-    const validSpecs = cleanSpecializations(specializations);
-    const pmAccess = Boolean(has_project_management_access || validSpecs.length > 0);
-
-    if (!cleanName || !cleanEmail || !cleanPhone || !canonicalCity || !state || !agentType) {
-      return NextResponse.json({ success: false, error: 'Required fields missing' }, { status: 400 });
+    const parsed = await validateAgentApplicationBody(body);
+    if (!parsed.ok) {
+      return NextResponse.json({ success: false, error: parsed.error }, { status: parsed.status || 400 });
     }
-    const contactError = validateContactFields({ name: cleanName, email: cleanEmail, phone: cleanPhone });
-    if (contactError) {
-      return NextResponse.json({ success: false, error: contactError }, { status: 400 });
-    }
+    const {
+      cleanName,
+      cleanEmail,
+      cleanPhone,
+      canonicalCity,
+      cleanState,
+      cleanAgentType,
+      occupation,
+      experience,
+      network,
+      message,
+      validSpecs,
+      pmAccess,
+    } = parsed.data;
 
     const existing = await pool.query(
       `SELECT id FROM agents
@@ -81,7 +121,21 @@ export async function POST(req) {
     );
     if (existing.rows.length > 0) {
       return NextResponse.json(
-        { success: false, error: 'An active agent application already exists for this email.' },
+        { success: false, error: AGENT_DUPLICATE_EMAIL_MESSAGE },
+        { status: 409 }
+      );
+    }
+
+    const userConflict = await pool.query(
+      `SELECT id, role FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
+      [cleanEmail]
+    );
+    if (userConflict.rows[0] && String(userConflict.rows[0].role || '').toLowerCase() !== 'agent') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `This email is already registered as a ${userConflict.rows[0].role} account. Please sign in with that account or use a different email.`,
+        },
         { status: 409 }
       );
     }
@@ -90,7 +144,7 @@ export async function POST(req) {
       `INSERT INTO agents (name, email, phone, city, state, occupation, agent_type, experience, network, message, specializations, has_project_management_access)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)
        RETURNING ${AGENT_SAFE_COLUMNS}`,
-      [cleanName, cleanEmail, cleanPhone, canonicalCity, state, occupation, agentType, experience || null, network || null, message || null, JSON.stringify(validSpecs), pmAccess]
+      [cleanName, cleanEmail, cleanPhone, canonicalCity, cleanState, occupation, cleanAgentType, experience, network, message, JSON.stringify(validSpecs), pmAccess]
     );
 
     return NextResponse.json({ success: true, data: result.rows[0] }, { status: 201 });
@@ -98,7 +152,7 @@ export async function POST(req) {
     console.error('Agent submit error:', error);
     if (error.code === '23505') {
       return NextResponse.json(
-        { success: false, error: 'An active agent application already exists for this email.' },
+        { success: false, error: AGENT_DUPLICATE_EMAIL_MESSAGE },
         { status: 409 }
       );
     }
@@ -116,23 +170,31 @@ export async function PATCH(req) {
     }
 
     const body = await req.json();
-    const { id, status, createLogin, action, specializations, has_project_management_access } = body;
+    const { id, status, createLogin, action, specializations, has_project_management_access, is_manager, manager_id } = body;
     if (!id) {
       return NextResponse.json({ success: false, error: 'Agent id is required' }, { status: 400 });
     }
 
-    // Direct update of specializations / pm access without changing status
-    if (!status && (specializations !== undefined || has_project_management_access !== undefined)) {
+    // Direct update of specializations / pm access / manager status without changing status
+    if (!status && (specializations !== undefined || has_project_management_access !== undefined || is_manager !== undefined || manager_id !== undefined)) {
       const updates = [];
       const params = [];
       if (specializations !== undefined) {
-        const validSpecs = cleanSpecializations(specializations);
+        const validSpecs = cleanAgentSpecializations(specializations);
         params.push(JSON.stringify(validSpecs));
         updates.push(`specializations = $${params.length}::jsonb`);
       }
       if (typeof has_project_management_access === 'boolean') {
         params.push(has_project_management_access);
         updates.push(`has_project_management_access = $${params.length}`);
+      }
+      if (typeof is_manager === 'boolean') {
+        params.push(is_manager);
+        updates.push(`is_manager = $${params.length}`);
+      }
+      if (manager_id !== undefined) {
+        params.push(manager_id ? Number(manager_id) : null);
+        updates.push(`manager_id = $${params.length}`);
       }
       updates.push(`updated_at = NOW()`);
       params.push(id);
@@ -169,8 +231,10 @@ export async function PATCH(req) {
       );
     }
 
-    const extraSpecsSql = specializations !== undefined ? `, specializations = '${JSON.stringify(cleanSpecializations(specializations))}'::jsonb` : '';
+    const extraSpecsSql = specializations !== undefined ? `, specializations = '${JSON.stringify(cleanAgentSpecializations(specializations))}'::jsonb` : '';
     const extraPmSql = typeof has_project_management_access === 'boolean' ? `, has_project_management_access = ${has_project_management_access}` : '';
+    const extraManagerSql = typeof is_manager === 'boolean' ? `, is_manager = ${is_manager}` : '';
+    const extraManagerIdSql = manager_id !== undefined ? `, manager_id = ${manager_id ? Number(manager_id) : 'NULL'}` : '';
 
     if (resetPassword || createLogin || (status === 'Approved' && !agent.login_enabled)) {
       if (!agent.city) {
@@ -202,7 +266,7 @@ export async function PATCH(req) {
                 auth_version = auth_version + 1,
                 approved_at = NOW(),
                 approved_by = $2,
-                updated_at = NOW()${extraSpecsSql}${extraPmSql}
+                updated_at = NOW()${extraSpecsSql}${extraPmSql}${extraManagerSql}${extraManagerIdSql}
           WHERE id = $3
           RETURNING ${AGENT_SAFE_COLUMNS}`,
         [passwordHash, admin.email || 'admin', id]
@@ -213,10 +277,10 @@ export async function PATCH(req) {
         const appUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '');
         await sendMail({
           to: agent.email,
-          subject: resetPassword ? 'Your MTBoss Agent Password Was Reset' : 'Your MTBoss Agent Login',
+          subject: resetPassword ? 'Your MTBOSS Agent Password Was Reset' : 'Your MTBOSS Agent Login',
           html: `
             <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#fff;border:1px solid #eee;">
-              <h2 style="margin:0 0 12px;color:#111;">${resetPassword ? 'Agent password reset' : 'Welcome to MTBoss Agent Network'}</h2>
+              <h2 style="margin:0 0 12px;color:#111;">${resetPassword ? 'Agent password reset' : 'Welcome to MTBOSS Agent Network'}</h2>
               <p style="color:#444;line-height:1.6;">Your agent access is active for <strong>${agent.city}, ${agent.state || ''}</strong>.</p>
               <div style="background:#f8f8f8;padding:16px;margin:18px 0;border-radius:6px;">
                 <p style="margin:0 0 8px;"><strong>Login URL:</strong> <a href="${appUrl}/agent/login">${appUrl}/agent/login</a></p>
@@ -250,7 +314,7 @@ export async function PATCH(req) {
               auth_version = CASE WHEN $1::VARCHAR = 'Approved' THEN auth_version ELSE auth_version + 1 END,
               approved_at = CASE WHEN $1::VARCHAR = 'Approved' THEN approved_at ELSE NULL END,
               approved_by = CASE WHEN $1::VARCHAR = 'Approved' THEN approved_by ELSE NULL END,
-              updated_at = NOW()${extraSpecsSql}${extraPmSql}
+              updated_at = NOW()${extraSpecsSql}${extraPmSql}${extraManagerSql}${extraManagerIdSql}
         WHERE id = $2
         RETURNING ${AGENT_SAFE_COLUMNS}`,
       [status, id]

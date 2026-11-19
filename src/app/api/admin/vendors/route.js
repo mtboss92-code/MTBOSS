@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { requireAdmin } from '@/lib/agent-auth';
+import { createInitializationGuard } from '@/lib/api-utils';
 import { ensureServiceCitiesSchema } from '@/lib/service-cities';
 import { getManagedCities } from '@/lib/cities';
 import { ensurePackageSchema } from '@/lib/packages';
 
-// ═══════════════════════════════════════════════════════════════════════
-// VERIFY ADMIN TOKEN
-// ═══════════════════════════════════════════════════════════════════════
+const ensureVendorAdminColumns = createInitializationGuard(async () => {
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pan_number VARCHAR(20)`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pan_image BYTEA`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pan_image_mime VARCHAR(100)`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_number VARCHAR(30)`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_image BYTEA`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_image_mime VARCHAR(100)`);
+});
 
 // ═══════════════════════════════════════════════════════════════════════
 // GET - FETCH ALL VENDORS
@@ -22,51 +28,111 @@ export async function GET(req) {
         { status: 401 }
       );
     }
-    await ensureServiceCitiesSchema();
-    await ensurePackageSchema();
 
+    const { searchParams } = new URL(req.url);
+    const status = String(searchParams.get('status') || '').trim();
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(searchParams.get('limit') || '100', 10) || 100));
+    const offset = (page - 1) * limit;
+    const countsOnly = searchParams.get('counts') === '1';
+    const lite = searchParams.get('lite') === '1' || countsOnly;
+
+    // Count-only badge endpoints must not run package/cities DDL on every poll.
+    if (!countsOnly) {
+      await ensureServiceCitiesSchema();
+      await ensurePackageSchema();
+      await ensureVendorAdminColumns();
+    }
+
+    const vals = [];
+    const where = [];
+    if (status === 'pending') {
+      where.push(`COALESCE(v.verification_status, 'pending') = 'pending'`);
+    } else if (status) {
+      vals.push(status);
+      where.push(`v.verification_status = $${vals.length}`);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const countRes = await pool.query(
+      `SELECT COUNT(*)::INT AS total FROM vendors v ${whereSql}`,
+      vals
+    );
+    const total = countRes.rows[0]?.total || 0;
+
+    if (countsOnly) {
+      return NextResponse.json({
+        success: true,
+        data: [],
+        pagination: { page: 1, limit: 1, total, pages: 1 },
+      });
+    }
+
+    vals.push(limit, offset);
     const result = await pool.query(
-      `SELECT
-        v.id, v.vendor_name, v.email, v.shop_name, v.phone,
-        v.city, v.state, v.country, v.postal_code,
-        v.aadhar_number,
-        (v.profile_photo IS NOT NULL) AS profile_photo,
-        (v.aadhar_image  IS NOT NULL) AS aadhar_image,
-        v.status, v.verification_status, v.is_approved,
-        v.package_id, v.package_name, v.package_price, v.package_status,
-        v.created_at, v.updated_at,
-        COALESCE(assigned.services, '[]'::json) AS services
-       FROM vendors v
-       LEFT JOIN LATERAL (
-         SELECT json_agg(
-           json_build_object(
-             'id', qs.id,
-             'label', qs.label,
-             'icon', qs.icon
-           ) ORDER BY qs.label
-         ) AS services
-         FROM vendor_services vs
-         JOIN quick_services qs ON qs.id = vs.quick_service_id
-         WHERE vs.vendor_id = v.id AND vs.is_active = TRUE
-       ) assigned ON TRUE
-       ORDER BY v.created_at DESC`
+      lite
+        ? `SELECT
+            v.id, v.vendor_name, v.email, v.shop_name, v.phone,
+            v.city, v.state, v.status, v.verification_status, v.is_approved,
+            v.package_status, v.created_at,
+            '[]'::json AS services
+           FROM vendors v
+           ${whereSql}
+           ORDER BY v.created_at DESC
+           LIMIT $${vals.length - 1} OFFSET $${vals.length}`
+        : `SELECT
+            v.id, v.vendor_name, v.email, v.shop_name, v.phone,
+            v.city, v.state, v.country, v.postal_code,
+            v.aadhar_number,
+            (v.profile_photo IS NOT NULL) AS profile_photo,
+            (v.aadhar_image  IS NOT NULL) AS aadhar_image,
+            v.pan_number,
+            (v.pan_image IS NOT NULL) AS pan_image,
+            v.gst_number,
+            (v.gst_image IS NOT NULL) AS gst_image,
+            v.status, v.verification_status, v.is_approved,
+            v.package_id, v.package_name, v.package_price, v.package_status,
+            v.created_at, v.updated_at,
+            COALESCE(assigned.services, '[]'::json) AS services
+           FROM vendors v
+           LEFT JOIN LATERAL (
+             SELECT json_agg(
+               json_build_object(
+                 'id', qs.id,
+                 'label', qs.label,
+                 'icon', qs.icon
+               ) ORDER BY qs.label
+             ) AS services
+             FROM vendor_services vs
+             JOIN quick_services qs ON qs.id = vs.quick_service_id
+             WHERE vs.vendor_id = v.id AND vs.is_active = TRUE
+           ) assigned ON TRUE
+           ${whereSql}
+           ORDER BY v.created_at DESC
+           LIMIT $${vals.length - 1} OFFSET $${vals.length}`,
+      vals
     );
 
-    const [servicesResult, managedCities] = await Promise.all([
-      pool.query(
-      `SELECT id, label, icon, cities
-       FROM quick_services
-       WHERE COALESCE(is_service_active, TRUE) = TRUE
-       ORDER BY label ASC`
-      ),
-      getManagedCities(),
-    ]);
-    const cityNames = managedCities.map((city) => city.name);
+    let available_services = [];
+    if (!lite) {
+      const [servicesResult, managedCities] = await Promise.all([
+        pool.query(
+          `SELECT id, label, icon, cities
+           FROM quick_services
+           WHERE COALESCE(is_service_active, TRUE) = TRUE
+           ORDER BY label ASC`
+        ),
+        getManagedCities(),
+      ]);
+      const cityNames = managedCities.map((city) => city.name);
+      available_services = servicesResult.rows.map((service) => ({ ...service, cities: cityNames }));
+    }
 
     return NextResponse.json({
       success: true,
       data: result.rows,
-      available_services: servicesResult.rows.map((service) => ({ ...service, cities: cityNames })),
+      available_services,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
     });
 
   } catch (error) {
@@ -92,12 +158,19 @@ export async function PUT(req) {
       );
     }
 
+    const body = await req.json();
     const {
       vendor_id,
       action, // 'approve', 'reject', 'activate', 'deactivate'
       services, // Array of quick_service_ids to assign
+      is_contractor,
+      is_project_contractor,
+      isContractor,
+      contractor_trade,
+      contractorTrade,
+      trade,
       admin_notes
-    } = await req.json();
+    } = body;
 
     if (!vendor_id || !action) {
       return NextResponse.json(
@@ -110,6 +183,7 @@ export async function PUT(req) {
     try {
       await client.query('BEGIN');
       await ensureServiceCitiesSchema();
+      await client.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS is_contractor BOOLEAN NOT NULL DEFAULT FALSE`);
 
       if (action === 'approve') {
         // Approve vendor and assign services
@@ -239,6 +313,56 @@ export async function PUT(req) {
           success: true,
           message: 'Vendor deactivated successfully',
           data: vendorResult.rows[0]
+        });
+      } else if (action === 'update_contractor') {
+        const flag = Boolean(is_contractor ?? is_project_contractor ?? isContractor);
+        const resolvedTrade = flag ? String(contractor_trade || contractorTrade || trade || 'CIVIL').trim().toUpperCase() : null;
+
+        await client.query(`
+          ALTER TABLE vendors 
+          ADD COLUMN IF NOT EXISTS is_project_contractor BOOLEAN NOT NULL DEFAULT FALSE,
+          ADD COLUMN IF NOT EXISTS contractor_trade VARCHAR(100)
+        `);
+
+        const vendorResult = await client.query(
+          `UPDATE vendors
+           SET is_contractor = $1,
+               is_project_contractor = $1,
+               contractor_trade = $2,
+               business_type = CASE WHEN $1 THEN 'Contractor' ELSE 'Vendor' END,
+               updated_at = NOW()
+           WHERE id = $3
+           RETURNING id, vendor_name, email, phone, is_contractor, is_project_contractor, contractor_trade, business_type`,
+          [flag, resolvedTrade, vendor_id]
+        );
+        if (!vendorResult.rows[0]) {
+          await client.query('ROLLBACK');
+          return NextResponse.json({ error: 'Vendor not found' }, { status: 404 });
+        }
+
+        const vRow = vendorResult.rows[0];
+
+        // Ensure pm_vendors is in sync immediately
+        if (flag) {
+          await client.query(
+            `INSERT INTO pm_vendors (external_vendor_id, name, phone, trade, is_active)
+             VALUES ($1, $2, $3, $4, TRUE)
+             ON CONFLICT (external_vendor_id) WHERE external_vendor_id IS NOT NULL
+             DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, trade = EXCLUDED.trade, is_active = TRUE`,
+            [vRow.id, vRow.vendor_name || vRow.email, vRow.phone, vRow.contractor_trade || 'CIVIL']
+          );
+        } else {
+          await client.query(
+            `UPDATE pm_vendors SET is_active = FALSE WHERE external_vendor_id = $1`,
+            [vRow.id]
+          );
+        }
+
+        await client.query('COMMIT');
+        return NextResponse.json({
+          success: true,
+          message: flag ? 'Vendor registered as Contractor successfully' : 'Contractor status removed',
+          data: vRow
         });
       } else if (action === 'update_services') {
         const serviceIds = [...new Set(

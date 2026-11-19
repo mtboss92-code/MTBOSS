@@ -82,7 +82,7 @@ export default function FranchiseOperationsManager({ permissions }) {
     const body = new FormData();
     body.append('file', file);
     body.append('upload_preset', preset);
-    body.append('folder', `mtboss/franchise-${resource}`);
+    body.append('folder', `MTBOSS/franchise-${resource}`);
     const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, { method: 'POST', body });
     const data = await res.json();
     if (!data.secure_url) throw new Error('Image upload failed');
@@ -224,7 +224,8 @@ export default function FranchiseOperationsManager({ permissions }) {
         .fom-list{padding:1rem;display:grid;gap:.65rem}.fom-row{border:1px solid #e5e7eb;border-radius:7px;padding:.8rem;display:flex;justify-content:space-between;gap:1rem;align-items:center}
         .fom-main{min-width:0}.fom-name{font-weight:900}.fom-meta{font-size:.74rem;color:#71717a;margin-top:.2rem;overflow-wrap:anywhere}
         .fom-actions{display:flex;gap:.4rem;flex-wrap:wrap;justify-content:flex-end}.fom-services{min-width:180px;min-height:64px}
-        @media(max-width:760px){.fom-form{grid-template-columns:1fr}.fom-wide{grid-column:auto}.fom-row{align-items:flex-start;flex-direction:column}.fom-actions{justify-content:flex-start}}
+        @media(max-width:1024px){.fom-form{grid-template-columns:repeat(2,minmax(0,1fr))}.fom-wide{grid-column:span 2}.fom-row{align-items:flex-start;flex-direction:column;gap:.75rem}.fom-actions{justify-content:flex-start;width:100%}}
+        @media(max-width:640px){.fom-form{grid-template-columns:1fr}.fom-wide{grid-column:auto}}
       `}</style>
 
       <div className="fom-head">

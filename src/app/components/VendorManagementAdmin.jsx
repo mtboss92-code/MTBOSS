@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import QuickServiceIcon from './QuickServiceIcon';
+import ServiceCheckboxCard from './ServiceCheckboxCard';
 import { Eye, ShieldCheck, Ban, X, CircleUser, ActionIconButton } from '@/app/components/ui/icons';
 
 export default function VendorManagementAdmin({ isDarkMode }) {
@@ -378,13 +379,19 @@ export default function VendorManagementAdmin({ isDarkMode }) {
           border-color: #2563eb;
         }
 
-        .vendors-table {
+        .vendors-table-wrap {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
           width: 100%;
-          border-collapse: collapse;
-          background: ${isDarkMode ? '#111' : '#fff'};
           border: 1px solid ${isDarkMode ? '#333' : '#e2e2e7'};
           border-radius: 8px;
-          overflow: hidden;
+        }
+
+        .vendors-table {
+          width: 100%;
+          min-width: 820px;
+          border-collapse: collapse;
+          background: ${isDarkMode ? '#111' : '#fff'};
         }
 
         .vendors-table thead {
@@ -400,6 +407,7 @@ export default function VendorManagementAdmin({ isDarkMode }) {
           text-transform: uppercase;
           letter-spacing: 0.05em;
           color: ${isDarkMode ? '#999' : '#666'};
+          white-space: nowrap;
         }
 
         .vendors-table td {
@@ -609,99 +617,38 @@ export default function VendorManagementAdmin({ isDarkMode }) {
         </div>
       )}
 
-      {/* Stats */}
-      <div className="stats-grid">
-        {stats.map((stat, idx) => (
-          <div key={idx} className={`stat-card ${stat.color}`}>
-            <div>
-              <div className="stat-label">{stat.label}</div>
-              <div className="stat-value">{stat.value}</div>
+      {selectedVendor ? (
+        <div style={{ width: '100%', padding: '0.25rem 0 2rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <button
+              onClick={() => setSelectedVendor(null)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                background: 'transparent',
+                border: `1px solid ${isDarkMode ? '#333' : '#e2e8f0'}`,
+                color: isDarkMode ? '#f3f4f6' : '#111827',
+                padding: '0.5rem 1rem',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontWeight: 700,
+                fontSize: '0.875rem'
+              }}
+            >
+              ← Back to Vendors
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span className={`badge badge-${selectedVendor.verification_status}`}>
+                ● {formatStatus(selectedVendor.verification_status)}
+              </span>
+              <span className={`badge badge-${selectedVendor.status}`}>
+                {selectedVendor.status}
+              </span>
             </div>
           </div>
-        ))}
-      </div>
 
-      {/* Controls */}
-      <div className="controls">
-        <div className="filter-tabs">
-          {['all', 'pending', 'verified', 'active', 'inactive'].map(f => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`filter-btn ${filter === f ? 'active' : ''}`}
-            >
-              {f.charAt(0).toUpperCase() + f.slice(1)}
-            </button>
-          ))}
-        </div>
-        <input
-          type="text"
-          placeholder="Search vendors..."
-          className="search-input"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-      </div>
-
-      {/* Table */}
-      {loading ? (
-        <div className="loading">Loading vendors...</div>
-      ) : filteredVendors.length === 0 ? (
-        <div className="empty-state">
-          {vendors.length === 0 
-            ? 'No vendors registered yet.' 
-            : `No vendors match filter "${filter}" ${searchTerm ? `and search "${searchTerm}"` : ''}`}
-        </div>
-      ) : (
-        <table className="vendors-table">
-          <thead>
-            <tr>
-              <th>Vendor</th>
-              <th>Email</th>
-              <th>City</th>
-              <th>Services</th>
-              <th>Verification</th>
-              <th>Status</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredVendors.map(vendor => (
-              <tr key={vendor.id}>
-                <td>
-                  <div className="vendor-name">{vendor.vendor_name || vendor.shop_name || vendor.email}</div>
-                  <div className="vendor-meta">{vendor.shop_name || 'Shop not added'}</div>
-                  <div className="vendor-meta">{vendor.city}, {vendor.state}</div>
-                </td>
-                <td className="vendor-meta">{vendor.email}</td>
-                <td className="vendor-meta">{vendor.city}</td>
-                <td className="vendor-meta">{vendor.services?.length || 0}</td>
-                <td>
-                  <span className={`badge badge-${vendor.verification_status}`}>
-                    {formatStatus(vendor.verification_status)}
-                  </span>
-                </td>
-                <td>
-                  <span className={`badge badge-${vendor.status}`}>
-                    {vendor.status}
-                  </span>
-                </td>
-                <td>
-                  <ActionIconButton
-                    icon={Eye}
-                    label="View vendor details"
-                    onClick={() => openVendor(vendor)}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {/* Modal */}
-      {selectedVendor && (
-        <div className="modal-backdrop" onClick={() => setSelectedVendor(null)}>
+          <div style={{ background: isDarkMode ? '#1a1a1f' : '#ffffff', border: `1px solid ${isDarkMode ? '#2d2d35' : '#e2e8f0'}`, borderRadius: 14, padding: '1.75rem', width: '100%', boxShadow: '0 2px 12px rgba(0,0,0,0.05)' }}>
           <div className="modal" onClick={e => e.stopPropagation()}>
 
             {/* Header */}
@@ -764,24 +711,22 @@ export default function VendorManagementAdmin({ isDarkMode }) {
               ) : vendorCityServices.length === 0 ? (
                 <div className="modal-value">No services are configured for {selectedVendor.city}.</div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(190px, 100%), 1fr))', gap: '0.5rem', width: '100%' }}>
+                <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5 w-full">
                   {vendorCityServices.map((service) => {
                     const serviceId = Number(service.id);
                     const checked = selectedServiceIds.includes(serviceId);
                     return (
-                      <label key={service.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minWidth: 0, overflow: 'hidden', padding: '0.6rem', border: `1px solid ${isDarkMode ? '#333' : '#e2e2e7'}`, borderRadius: 6, cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => setSelectedServiceIds((current) =>
-                            checked ? current.filter((id) => id !== serviceId) : [...current, serviceId]
-                          )}
-                        />
-                        <QuickServiceIcon value={service.icon} label={service.label}
-                          className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded"
-                          imageClassName="h-9 w-9 object-cover" />
-                        <span className="modal-value" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{service.label}</span>
-                      </label>
+                      <ServiceCheckboxCard
+                        key={service.id}
+                        service={service}
+                        checked={checked}
+                        isDarkMode={isDarkMode}
+                        onChange={(id, nextChecked) =>
+                          setSelectedServiceIds((current) =>
+                            nextChecked ? [...current, id] : current.filter((x) => x !== id)
+                          )
+                        }
+                      />
                     );
                   })}
                 </div>
@@ -818,7 +763,7 @@ export default function VendorManagementAdmin({ isDarkMode }) {
 
               {/* Aadhaar Card Image */}
               {selectedVendor.aadhar_image ? (
-                <div>
+                <div style={{ marginBottom: '1rem' }}>
                   <div className="modal-label" style={{ marginBottom:'0.5rem' }}>Aadhaar Card Image</div>
                   <a href={`/api/vendor/image/${selectedVendor.id}?type=aadhaar`} target="_blank" rel="noopener noreferrer">
                     <img src={`/api/vendor/image/${selectedVendor.id}?type=aadhaar`} alt="Aadhaar Card"
@@ -829,10 +774,62 @@ export default function VendorManagementAdmin({ isDarkMode }) {
                   </div>
                 </div>
               ) : (
-                <div style={{ padding:'0.75rem', background: isDarkMode?'#2a1a0a':'#fff7ed', borderRadius:8, fontSize:'0.8125rem', color:'#f97316' }}>
+                <div style={{ padding:'0.75rem', background: isDarkMode?'#2a1a0a':'#fff7ed', borderRadius:8, fontSize:'0.8125rem', color:'#f97316', marginBottom: '1rem' }}>
                   ⚠️ No Aadhaar image uploaded
                 </div>
               )}
+
+              {/* PAN Number & Document */}
+              <div style={{ background: selectedVendor.pan_number ? (isDarkMode?'#0a1f1a':'#f0fdf9') : (isDarkMode?'#222':'#f9f9f9'), border:`1px solid ${selectedVendor.pan_number ? (isDarkMode?'#0d948844':'#99f6e4') : (isDarkMode?'#333':'#e5e7eb')}`, borderRadius:10, padding:'0.875rem 1rem', marginBottom:'1rem' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'0.875rem', marginBottom: selectedVendor.pan_image ? '0.75rem' : 0 }}>
+                  <span style={{ fontSize:'1.5rem' }}>💳</span>
+                  <div>
+                    <div style={{ fontSize:'0.68rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color: selectedVendor.pan_number ? (isDarkMode?'#2dd4bf':'#0f766e') : (isDarkMode?'#888':'#666'), marginBottom:'0.2rem' }}>
+                      PAN Card Number
+                    </div>
+                    <div style={{ fontSize:'1.1rem', fontWeight:800, letterSpacing:'0.12em', fontFamily:'monospace', color: isDarkMode?'#fff':'#111' }}>
+                      {selectedVendor.pan_number || 'Not provided'}
+                    </div>
+                  </div>
+                </div>
+                {selectedVendor.pan_image ? (
+                  <div style={{ marginTop:'0.5rem', borderTop: `1px dashed ${isDarkMode?'#333':'#ddd'}`, paddingTop:'0.5rem' }}>
+                    <div className="modal-label" style={{ marginBottom:'0.4rem' }}>PAN Card Document</div>
+                    <a href={`/api/vendor/image/${selectedVendor.id}?type=pan`} target="_blank" rel="noopener noreferrer">
+                      <img src={`/api/vendor/image/${selectedVendor.id}?type=pan`} alt="PAN Card"
+                        style={{ width:'100%', maxHeight:180, objectFit:'contain', borderRadius:6, border:`1px solid ${isDarkMode?'#333':'#e2e2e7'}`, cursor:'pointer', background: isDarkMode?'#111':'#fff' }} />
+                    </a>
+                  </div>
+                ) : (
+                  <div style={{ fontSize:'0.75rem', color: isDarkMode?'#777':'#888', marginTop:'0.3rem' }}>No PAN document uploaded</div>
+                )}
+              </div>
+
+              {/* GST Number & Certificate */}
+              <div style={{ background: selectedVendor.gst_number ? (isDarkMode?'#0a1829':'#eff6ff') : (isDarkMode?'#222':'#f9f9f9'), border:`1px solid ${selectedVendor.gst_number ? (isDarkMode?'#1e40af44':'#bfdbfe') : (isDarkMode?'#333':'#e5e7eb')}`, borderRadius:10, padding:'0.875rem 1rem', marginBottom:'1rem' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'0.875rem', marginBottom: selectedVendor.gst_image ? '0.75rem' : 0 }}>
+                  <span style={{ fontSize:'1.5rem' }}>🏢</span>
+                  <div>
+                    <div style={{ fontSize:'0.68rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color: selectedVendor.gst_number ? (isDarkMode?'#60a5fa':'#1d4ed8') : (isDarkMode?'#888':'#666'), marginBottom:'0.2rem' }}>
+                      GSTIN Number (Optional)
+                    </div>
+                    <div style={{ fontSize:'1.1rem', fontWeight:800, letterSpacing:'0.12em', fontFamily:'monospace', color: isDarkMode?'#fff':'#111' }}>
+                      {selectedVendor.gst_number || 'Not provided'}
+                    </div>
+                  </div>
+                </div>
+                {selectedVendor.gst_image ? (
+                  <div style={{ marginTop:'0.5rem', borderTop: `1px dashed ${isDarkMode?'#333':'#ddd'}`, paddingTop:'0.5rem' }}>
+                    <div className="modal-label" style={{ marginBottom:'0.4rem' }}>GST Registration Document</div>
+                    <a href={`/api/vendor/image/${selectedVendor.id}?type=gst`} target="_blank" rel="noopener noreferrer">
+                      <img src={`/api/vendor/image/${selectedVendor.id}?type=gst`} alt="GST Document"
+                        style={{ width:'100%', maxHeight:180, objectFit:'contain', borderRadius:6, border:`1px solid ${isDarkMode?'#333':'#e2e2e7'}`, cursor:'pointer', background: isDarkMode?'#111':'#fff' }} />
+                    </a>
+                  </div>
+                ) : (
+                  <div style={{ fontSize:'0.75rem', color: isDarkMode?'#777':'#888', marginTop:'0.3rem' }}>No GST document uploaded</div>
+                )}
+              </div>
             </div>
 
             <div className="modal-section">
@@ -920,7 +917,103 @@ export default function VendorManagementAdmin({ isDarkMode }) {
               <button className="modal-btn modal-btn-cancel" onClick={() => setSelectedVendor(null)}>Close</button>
             </div>
           </div>
+          </div>
         </div>
+      ) : (
+        <>
+      {/* Stats */}
+      <div className="stats-grid">
+        {stats.map((stat, idx) => (
+          <div key={idx} className={`stat-card ${stat.color}`}>
+            <div>
+              <div className="stat-label">{stat.label}</div>
+              <div className="stat-value">{stat.value}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Controls */}
+      <div className="controls">
+        <div className="filter-tabs">
+          {['all', 'pending', 'verified', 'active', 'inactive'].map(f => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`filter-btn ${filter === f ? 'active' : ''}`}
+            >
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
+        <input
+          type="text"
+          placeholder="Search vendors..."
+          className="search-input"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+
+      {/* Table */}
+      {loading ? (
+        <div className="loading">Loading vendors...</div>
+      ) : filteredVendors.length === 0 ? (
+        <div className="empty-state">
+          {vendors.length === 0 
+            ? 'No vendors registered yet.' 
+            : `No vendors match filter "${filter}" ${searchTerm ? `and search "${searchTerm}"` : ''}`}
+        </div>
+      ) : (
+        <div className="vendors-table-wrap">
+        <table className="vendors-table">
+          <thead>
+            <tr>
+              <th>Vendor</th>
+              <th>Email</th>
+              <th>City</th>
+              <th>Services</th>
+              <th>Verification</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredVendors.map(vendor => (
+              <tr key={vendor.id}>
+                <td>
+                  <div className="vendor-name">{vendor.vendor_name || vendor.shop_name || vendor.email}</div>
+                  <div className="vendor-meta">{vendor.shop_name || 'Shop not added'}</div>
+                  <div className="vendor-meta">{vendor.city}, {vendor.state}</div>
+                </td>
+                <td className="vendor-meta">{vendor.email}</td>
+                <td className="vendor-meta">{vendor.city}</td>
+                <td className="vendor-meta">{vendor.services?.length || 0}</td>
+                <td>
+                  <span className={`badge badge-${vendor.verification_status}`}>
+                    {formatStatus(vendor.verification_status)}
+                  </span>
+                </td>
+                <td>
+                  <span className={`badge badge-${vendor.status}`}>
+                    {vendor.status}
+                  </span>
+                </td>
+                <td>
+                  <ActionIconButton
+                    icon={Eye}
+                    label="View vendor details"
+                    onClick={() => openVendor(vendor)}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        </div>
+      )}
+
+        </>
       )}
     </div>
   );

@@ -1,29 +1,83 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import GlobalSearch from "./GlobalSearch";
 import { ShoppingCart } from "@/app/components/ui/icons";
+import { getDashboardPath, resolveWebAuthUser, syncWebLogout } from "@/lib/client-session";
 
-function DropdownButton({ label, children, text, textHover, dropdownBg }) {
+function DropdownButton({ label, children, text, textHover, dropdownBg, id }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  const handleMouseEnter = () => {
+    if (typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+      setOpen(true);
+    }
+  };
+  const handleMouseLeave = () => {
+    if (typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+      setOpen(false);
+    }
+  };
+
+  const menuId = id || `dropdown-${label.toLowerCase().replace(/\s+/g, "-")}`;
+
   return (
-    <div className="relative group">
+    <div
+      ref={containerRef}
+      className="relative"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
       <button
-        className={`nav-control flex items-center gap-1 px-2 2xl:px-3 py-2 text-xs 2xl:text-sm font-medium ${text} ${textHover} transition-colors rounded-md`}
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="true"
+        aria-controls={menuId}
+        onClick={() => setOpen((prev) => !prev)}
+        className={`nav-control min-h-[44px] flex items-center gap-1 px-2 2xl:px-3 py-2 text-xs 2xl:text-sm font-medium ${text} ${textHover} transition-colors rounded-md select-none`}
       >
-        {label}
+        <span>{label}</span>
         <svg
-          className="w-3.5 h-3.5 transition-transform duration-200 group-hover:rotate-180"
+          className={`w-3.5 h-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
+          aria-hidden="true"
         >
-          <path strokeLinecap="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
       <div
-        className={`absolute top-full left-0 mt-1 rounded-md border shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 translate-y-1 group-hover:translate-y-0 z-[110] ${dropdownBg}`}
+        id={menuId}
+        role="region"
+        aria-label={`${label} menu`}
+        onClick={() => setOpen(false)}
+        className={`absolute top-full left-0 mt-1 rounded-md border shadow-lg transition-all duration-200 z-[110] ${dropdownBg} ${
+          open
+            ? "opacity-100 visible translate-y-0 pointer-events-auto"
+            : "opacity-0 invisible translate-y-1 pointer-events-none"
+        }`}
       >
         <div className="py-1">{children}</div>
       </div>
@@ -36,62 +90,29 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const [propertyOpen, setPropertyOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Detect logged in user - UPDATED TO LISTEN FOR CHANGES
   useEffect(() => {
     const checkUser = () => {
-      const token = localStorage.getItem('token');
-      const vendorToken = localStorage.getItem('vendor-token');
-      const adminToken = localStorage.getItem('admin-token');
-      const supplierToken = localStorage.getItem('supplier-token');
-      const franchiseToken = localStorage.getItem('franchise-token');
-
-      if (adminToken) {
-        const adminData = localStorage.getItem('admin');
-        if (adminData) {
-          try { setUser({ ...JSON.parse(adminData), role: 'admin' }); }
-          catch (e) { console.error('Error parsing admin data:', e); }
-        }
-      } else if (supplierToken) {
-        const supplierData = localStorage.getItem('supplier');
-        if (supplierData) {
-          try { setUser({ ...JSON.parse(supplierData), role: 'supplier' }); }
-          catch (e) { console.error('Error parsing supplier data:', e); }
-        }
-      } else if (franchiseToken) {
-        const franchiseData = localStorage.getItem('franchise');
-        if (franchiseData) {
-          try { setUser({ ...JSON.parse(franchiseData), role: 'franchise' }); }
-          catch (e) { console.error('Error parsing franchise data:', e); }
-        }
-      } else if (vendorToken) {
-        const vendorData = localStorage.getItem('vendor');
-        if (vendorData) {
-          try { setUser({ ...JSON.parse(vendorData), role: 'vendor' }); }
-          catch (e) { console.error('Error parsing vendor data:', e); }
-        }
-      } else if (token) {
-        const userData = localStorage.getItem('user');
-        if (userData) {
-          try {
-            const parsed = JSON.parse(userData);
-            // Use the role stored in the user object (e.g. 'admin'), not a hardcoded 'user'
-            setUser({ ...parsed, role: parsed.role || 'user' });
-            if (parsed.role !== 'admin') {
-              fetch('/api/auth/session', { headers: { Authorization: `Bearer ${token}` } })
-                .then((res) => {
-                  if (res.status === 403) {
-                    ['token', 'user'].forEach((key) => localStorage.removeItem(key));
-                    setUser(null);
-                    window.location.href = '/login?error=account_suspended';
-                  }
-                })
-                .catch(() => {});
-            }
+      const resolved = resolveWebAuthUser();
+      if (resolved) {
+        setUser(resolved);
+        if (resolved.role === 'user') {
+          const token = localStorage.getItem('token');
+          if (token) {
+            fetch('/api/auth/session', { headers: { Authorization: `Bearer ${token}` } })
+              .then((res) => {
+                if (res.status === 403) {
+                  syncWebLogout();
+                  setUser(null);
+                  window.location.href = '/login?error=account_suspended';
+                }
+              })
+              .catch(() => {});
           }
-          catch (e) { console.error('Error parsing user data:', e); }
         }
       } else {
         setUser(null);
@@ -114,6 +135,7 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
     const frame = requestAnimationFrame(() => {
       setIsOpen(false);
       setPropertyOpen(false);
+      setAgentOpen(false);
     });
     return () => cancelAnimationFrame(frame);
   }, [pathname]);
@@ -128,38 +150,30 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
   const closeMobileMenu = () => {
     setIsOpen(false);
     setPropertyOpen(false);
+    setAgentOpen(false);
   };
 
   const handleLogout = async () => {
     const logoutRole = user?.role;
 
-    [
-      'token',
-      'user',
-      'admin-token',
-      'admin',
-      'vendor-token',
-      'vendor',
-      'supplier-token',
-      'supplier',
-      'franchise-token',
-      'franchise',
-    ].forEach((key) => localStorage.removeItem(key));
-
-    await fetch('/api/auth/logout', { method: 'POST' });
+    await syncWebLogout();
 
     setUser(null);
     window.dispatchEvent(new Event('userLoggedIn'));
-    router.push(logoutRole === 'supplier' ? '/supplier/login' : logoutRole === 'franchise' ? '/franchise/login' : '/login');
+    router.push(
+      logoutRole === 'agent'
+        ? '/agent/login'
+        : logoutRole === 'supplier'
+          ? '/supplier/login'
+          : logoutRole === 'franchise'
+            ? '/franchise/login'
+            : '/login'
+    );
   };
 
   const handleDashboard = () => {
     closeMobileMenu();
-    if (user?.role === 'vendor') router.push('/vendor/dashboard');
-    else if (user?.role === 'admin') router.push('/dashboard');
-    else if (user?.role === 'supplier') router.push('/supplier/dashboard');
-    else if (user?.role === 'franchise') router.push('/franchise/dashboard');
-    else router.push('/userdashboard');
+    router.push(getDashboardPath(user?.role));
   };
 
   const propertyDropdown = [
@@ -332,7 +346,7 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
                   }`}>
                   <div
                     className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${user.role === 'admin' ? 'bg-red-500'
-                      : user.role === 'vendor' ? 'bg-green-500'
+                      : (user.role === 'vendor' || user.role === 'service provider') ? 'bg-green-500'
                         : user.role === 'supplier' ? 'bg-sky-500'
                           : user.role === 'franchise' ? 'bg-[var(--brand-blue-deep)]'
                             : 'bg-blue-500'
@@ -345,7 +359,7 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
                       {user.name || user.shop_name || user.email}
                     </span>
                     <span className={`text-[10px] capitalize ${isDarkMode ? 'text-zinc-500' : 'text-gray-500'}`}>
-                      {user.role}
+                      {(user.role === 'vendor' || user.role === 'service provider') ? 'Service Provider' : user.role === 'supplier' ? 'Vendor' : user.role}
                     </span>
                   </div>
                   <button
@@ -423,6 +437,9 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
             </button>
             <button
               onClick={() => setIsOpen(!isOpen)}
+              type="button"
+              aria-label={isOpen ? "Close menu" : "Open menu"}
+              title={isOpen ? "Close menu" : "Open menu"}
               className={`nav-control p-1.5 sm:p-2 rounded-md ${isDarkMode
                 ? 'text-zinc-300 hover:bg-zinc-800'
                 : 'text-black hover:bg-gray-100'
@@ -525,19 +542,23 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
           {/* Mobile Property */}
           <div>
             <button
+              type="button"
+              aria-expanded={propertyOpen}
+              aria-controls="mobile-submenu-property"
               onClick={() => setPropertyOpen(!propertyOpen)}
-              className={`w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
+              className={`w-full min-h-[44px] flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
                 ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
                 : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
                 }`}
             >
-              Property
+              <span>Property</span>
               <svg
-                className={`w-4 h-4 transition-transform ${propertyOpen ? 'rotate-180' : ''
+                className={`w-4 h-4 transition-transform duration-200 ${propertyOpen ? 'rotate-180' : ''
                   }`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
+                aria-hidden="true"
               >
                 <path
                   strokeLinecap="round"
@@ -548,13 +569,13 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
               </svg>
             </button>
             {propertyOpen && (
-              <div className="ml-4 mt-1 space-y-1">
+              <div id="mobile-submenu-property" className="ml-4 mt-1 space-y-1">
                 {propertyDropdown.map((s) => (
                   <Link
                     key={s.label}
                     href={s.href}
                     onClick={closeMobileMenu}
-                    className={`block px-3 py-2 text-sm rounded-md transition-colors ${isDarkMode
+                    className={`block min-h-[44px] flex items-center px-3 py-2 text-sm rounded-md transition-colors ${isDarkMode
                       ? 'text-zinc-400 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
                       : 'text-zinc-500 hover:text-zinc-900 hover:bg-gray-50'
                       }`}
@@ -577,7 +598,7 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
               key={link.label}
               href={link.href}
               onClick={closeMobileMenu}
-              className={`flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
+              className={`flex items-center gap-2 min-h-[44px] px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
                 ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
                 : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
                 }`}
@@ -589,30 +610,65 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
             </Link>
           ))}
 
-          <Link
-            href="/agent"
-            onClick={closeMobileMenu}
-            className={`block px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
-              ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
-              : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
-              }`}
-          >
-            Become an Agent
-          </Link>
-          <Link
-            href="/agent/login"
-            onClick={closeMobileMenu}
-            className={`block px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
-              ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
-              : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
-              }`}
-          >
-            Agent Login
-          </Link>
+          {/* Mobile Agent */}
+          <div>
+            <button
+              type="button"
+              aria-expanded={agentOpen}
+              aria-controls="mobile-submenu-agent"
+              onClick={() => setAgentOpen(!agentOpen)}
+              className={`w-full min-h-[44px] flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
+                ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
+                : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
+                }`}
+            >
+              <span>Agent</span>
+              <svg
+                className={`w-4 h-4 transition-transform duration-200 ${agentOpen ? 'rotate-180' : ''
+                  }`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </button>
+            {agentOpen && (
+              <div id="mobile-submenu-agent" className="ml-4 mt-1 space-y-1">
+                <Link
+                  href="/agent"
+                  onClick={closeMobileMenu}
+                  className={`block min-h-[44px] flex items-center px-3 py-2 text-sm rounded-md transition-colors ${isDarkMode
+                    ? 'text-zinc-400 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
+                    : 'text-zinc-500 hover:text-zinc-900 hover:bg-gray-50'
+                    }`}
+                >
+                  Become an Agent
+                </Link>
+                <Link
+                  href="/agent/login"
+                  onClick={closeMobileMenu}
+                  className={`block min-h-[44px] flex items-center px-3 py-2 text-sm rounded-md transition-colors ${isDarkMode
+                    ? 'text-zinc-400 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
+                    : 'text-zinc-500 hover:text-zinc-900 hover:bg-gray-50'
+                    }`}
+                >
+                  Agent Login
+                </Link>
+              </div>
+            )}
+          </div>
+
           <Link
             href="/franchise"
             onClick={closeMobileMenu}
-            className={`block px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
+            className={`block min-h-[44px] flex items-center px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
               ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
               : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
               }`}
@@ -625,7 +681,7 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
             {user ? (
               <>
                 <div className={`px-3 py-2 text-sm text-center font-semibold ${isDarkMode ? 'text-zinc-300' : 'text-gray-600'}`}>
-                  Logged in as {user.role.toUpperCase()}
+                  Logged in as {(user.role === 'vendor' || user.role === 'service provider') ? 'SERVICE PROVIDER' : user.role.toUpperCase()}
                 </div>
                 <button
                   onClick={handleDashboard}

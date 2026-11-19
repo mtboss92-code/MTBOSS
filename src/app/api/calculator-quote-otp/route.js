@@ -60,7 +60,7 @@ async function saveSiteImage(file) {
   const uploadData = new FormData();
   uploadData.append('file', file);
   uploadData.append('upload_preset', uploadPreset);
-  uploadData.append('folder', 'mtboss/calculator-sites');
+  uploadData.append('folder', 'MTBOSS/calculator-sites');
 
   const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
     method: 'POST',
@@ -202,11 +202,11 @@ export async function POST(req) {
       try {
         await sendMail({
           to: String(email).trim(),
-          subject: 'Your MTBoss budget estimate OTP',
-          text: `Your MTBoss budget estimate OTP is ${otp}. It expires in ${EXPIRY_MINUTES} minutes.`,
+          subject: 'Your MTBOSS budget estimate OTP',
+          text: `Your MTBOSS budget estimate OTP is ${otp}. It expires in ${EXPIRY_MINUTES} minutes.`,
           html: `
           <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#fff;color:#111;">
-            <h2 style="margin:0 0 8px;font-size:22px;">MTBoss Budget Estimate OTP</h2>
+            <h2 style="margin:0 0 8px;font-size:22px;">MTBOSS Budget Estimate OTP</h2>
             <p style="color:#555;line-height:1.6;">Use this OTP to verify your quote request and download your construction budget estimate. It expires in <strong>${EXPIRY_MINUTES} minutes</strong>.</p>
             <div style="background:#f4f5f7;border-radius:10px;text-align:center;padding:22px;margin:18px 0;">
               <div style="font-size:34px;font-weight:900;letter-spacing:10px;">${otp}</div>
@@ -249,13 +249,73 @@ export async function GET(req) {
   try {
     if (!requireRole(req, 'admin')) return unauthorized();
     await ensureTable();
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+
+    if (id) {
+      const detail = await pool.query(
+        `SELECT id, name, email, phone, address, site_image_url, site_image_name,
+                estimate, verified, created_at, verified_at
+         FROM calculator_quote_otps
+         WHERE id = $1
+         LIMIT 1`,
+        [id]
+      );
+      if (!detail.rows[0]) {
+        return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
+      }
+      return NextResponse.json({ success: true, data: detail.rows[0] });
+    }
+
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50', 10) || 50));
+    const offset = (page - 1) * limit;
+    const q = String(searchParams.get('q') || searchParams.get('search') || '').trim();
+    const vals = [];
+    const where = [];
+    if (q) {
+      vals.push(`%${q}%`);
+      where.push(`(
+        name ILIKE $${vals.length}
+        OR email ILIKE $${vals.length}
+        OR phone ILIKE $${vals.length}
+        OR address ILIKE $${vals.length}
+      )`);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const countRes = await pool.query(
+      `SELECT COUNT(*)::INT AS total FROM calculator_quote_otps ${whereSql}`,
+      vals
+    );
+    const total = countRes.rows[0]?.total || 0;
+    vals.push(limit, offset);
+    // List: project summary only — avoid shipping full estimate JSONB per row
     const result = await pool.query(
       `SELECT id, name, email, phone, address, site_image_url, site_image_name,
-              estimate, verified, created_at, verified_at
+              verified, created_at, verified_at,
+              jsonb_build_object(
+                'project', jsonb_build_object(
+                  'city', estimate->'project'->>'city',
+                  'propertySize', estimate->'project'->>'propertySize',
+                  'floors', estimate->'project'->>'floors',
+                  'quality', estimate->'project'->>'quality',
+                  'foundation', estimate->'project'->>'foundation'
+                ),
+                'totals', jsonb_build_object(
+                  'grandTotal', estimate->'totals'->>'grandTotal'
+                )
+              ) AS estimate
        FROM calculator_quote_otps
-       ORDER BY created_at DESC`
+       ${whereSql}
+       ORDER BY created_at DESC
+       LIMIT $${vals.length - 1} OFFSET $${vals.length}`,
+      vals
     );
-    return NextResponse.json({ success: true, data: result.rows });
+    return NextResponse.json({
+      success: true,
+      data: result.rows,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+    });
   } catch (error) {
     console.error('calculator-quote-otp GET error:', error);
     return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });

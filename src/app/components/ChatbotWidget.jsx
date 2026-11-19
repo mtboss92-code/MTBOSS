@@ -5,12 +5,12 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 const QUICK_ACTIONS = [
-  { label: '🏗️ Construction Services', href: '/Services/all', prompt: 'Tell me about the construction services offered by MT Boss.' },
-  { label: '🤝 Agents', href: '/agent', prompt: 'How can I connect with MT Boss agents or become an agent?' },
+  { label: '🏗️ Construction Services', href: '/Services/all', prompt: 'Tell me about the construction services offered by MTBOSS.' },
+  { label: '🤝 Agents', href: '/agent', prompt: 'How can I connect with MTBOSS agents or become an agent?' },
   { label: '🧮 Cost Calculator', href: '/calculator', prompt: 'What are the current house construction rates and packages?' },
   { label: '📦 Buy Materials', href: '/ShopNow', prompt: 'What are the wholesale prices for Cement and TMT Steel?' },
   { label: '🏡 Plots & Properties', href: '/buy-sale', prompt: 'Show me verified plots and properties in Bareilly and UP' },
-  { label: '💼 Franchise Info', href: '/franchise', prompt: 'What are the MT-Boss franchise investment models and requirements?' },
+  { label: '💼 Franchise Info', href: '/franchise', prompt: 'What are the MTBOSS franchise investment models and requirements?' },
 ];
 
 const INITIAL_MESSAGE = {
@@ -28,7 +28,7 @@ I am your official AI Project Advisor. You can ask me anything in **English** or
 - 💬 **WhatsApp Support:** [+91 94584 10866](https://wa.me/919458410866)`,
 };
 
-export default function ChatbotWidget({ isDarkMode }) {
+export default function ChatbotWidget({ isDarkMode, hideLauncher = false }) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([INITIAL_MESSAGE]);
@@ -40,6 +40,14 @@ export default function ChatbotWidget({ isDarkMode }) {
   const messagesEndRef = useRef(null);
   const recognitionRef = useRef(null);
 
+  useEffect(() => {
+    const openAssistant = () => {
+      setIsOpen(true);
+      setHasUnread(false);
+    };
+    window.addEventListener("MTBOSS:open-chat", openAssistant);
+    return () => window.removeEventListener("MTBOSS:open-chat", openAssistant);
+  }, []);
   // Play subtle feedback chime
   const playChime = (type = 'receive') => {
     try {
@@ -166,7 +174,7 @@ export default function ChatbotWidget({ isDarkMode }) {
         {
           role: 'assistant',
           content:
-            'Network connectivity issue. Please connect directly at [+91 94584 10866](https://wa.me/919458410866) or email mtboss2016@gmail.com.',
+            'Network connectivity issue. Please connect directly at [+91 94584 10866](https://wa.me/919458410866) or email MTBOSS2016@gmail.com.',
         },
       ]);
     } finally {
@@ -244,7 +252,7 @@ export default function ChatbotWidget({ isDarkMode }) {
   return (
     <>
       {/* ── FLOATING LAUNCHER BUTTON ── */}
-      <div className="fixed bottom-15 right-24 z-[9998] flex items-center">
+      <div className={hideLauncher ? "hidden" : "fixed bottom-15 right-24 z-[9998] flex items-center"}>
         {!isOpen && (
           <button
             onClick={() => setIsOpen(true)}
@@ -252,7 +260,7 @@ export default function ChatbotWidget({ isDarkMode }) {
             aria-label="Open MTBOSS Assistant Chat"
           >
             <span className="text-base group-hover:rotate-12 transition-transform">🤖</span>
-            <span className="hidden sm:inline font-bold">Ask MTBoss AI</span>
+            <span className="hidden sm:inline font-bold">Ask MTBOSS AI</span>
 
             {hasUnread && (
               <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-[9px] font-black flex items-center justify-center animate-bounce shadow">
@@ -287,7 +295,7 @@ export default function ChatbotWidget({ isDarkMode }) {
                     </span>
                   </div>
                   <p className="text-[10px] text-zinc-400">
-                    Trained on All MT-Boss Services &amp; Rates
+                    Trained on All MTBOSS Services &amp; Rates
                   </p>
                 </div>
               </div>
@@ -366,7 +374,7 @@ export default function ChatbotWidget({ isDarkMode }) {
                   {/* Message Action Strip */}
                   {m.role === 'assistant' && (
                     <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between text-[10px] text-zinc-400 opacity-80 group-hover:opacity-100 transition-opacity">
-                      <span className="text-[9px] text-zinc-500">MTBoss AI • Verified</span>
+                      <span className="text-[9px] text-zinc-500">MTBOSS AI • Verified</span>
                       <button
                         onClick={() => handleCopy(m.content, idx)}
                         className="hover:text-sky-400 transition-colors flex items-center gap-1"
@@ -383,7 +391,7 @@ export default function ChatbotWidget({ isDarkMode }) {
                   <div className="w-2 h-2 rounded-full bg-sky-400 animate-bounce" />
                   <div className="w-2 h-2 rounded-full bg-sky-400 animate-bounce [animation-delay:0.2s]" />
                   <div className="w-2 h-2 rounded-full bg-sky-400 animate-bounce [animation-delay:0.4s]" />
-                  <span className="text-[10px] text-zinc-400 ml-1">Consulting MT-Boss knowledge base...</span>
+                  <span className="text-[10px] text-zinc-400 ml-1">Consulting MTBOSS knowledge base...</span>
                 </div>
               )}
 

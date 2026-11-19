@@ -96,6 +96,17 @@ export const ensureShopVendorCommissionsSchema = createInitializationGuard(async
     CREATE INDEX IF NOT EXISTS idx_shop_commission_rules_scope ON shop_commission_rules(scope_type, scope_id);
     CREATE INDEX IF NOT EXISTS idx_shop_commission_rules_active ON shop_commission_rules(is_active);
   `);
+
+  // 6. Backfill vendor_id on supplier_materials from matching suppliers & vendors
+  try {
+    await pool.query(`
+      UPDATE supplier_materials sm
+      SET vendor_id = v.id
+      FROM suppliers s
+      JOIN vendors v ON (LOWER(TRIM(v.email)) = LOWER(TRIM(s.email)) OR (v.phone IS NOT NULL AND v.phone != '' AND v.phone = s.phone))
+      WHERE sm.supplier_id = s.id AND (sm.vendor_id IS NULL OR sm.vendor_id = 0)
+    `);
+  } catch (_) {}
 });
 
 /**
@@ -405,9 +416,18 @@ export async function toggleShopCommissionRule(id, isActive, { client = null } =
 /**
  * Get available categories and vendor products for rule creation selectors.
  */
-export async function getAvailableCommissionTargets({ client = null } = {}) {
+export async function getAvailableCommissionTargets({ client = null, productLimit = 200, q = '' } = {}) {
   await ensureShopVendorCommissionsSchema();
   const executor = client || pool;
+  const limit = Math.min(500, Math.max(20, Number(productLimit) || 200));
+  const search = String(q || '').trim();
+  const productParams = [];
+  let productWhere = '((sm.vendor_id IS NOT NULL AND sm.vendor_id > 0) OR (sm.supplier_id IS NOT NULL AND sm.supplier_id > 0))';
+  if (search) {
+    productParams.push(`%${search}%`);
+    productWhere += ` AND (sm.name ILIKE $${productParams.length} OR COALESCE(sm.category,'') ILIKE $${productParams.length})`;
+  }
+  productParams.push(limit);
 
   const [categoriesRes, productsRes] = await Promise.all([
     executor.query(`
@@ -416,19 +436,24 @@ export async function getAvailableCommissionTargets({ client = null } = {}) {
       WHERE is_active = TRUE
       ORDER BY sort_order ASC, name ASC
     `),
-    executor.query(`
+    executor.query(
+      `
       SELECT
         sm.id,
         sm.name,
         sm.category,
         sm.price,
-        sm.vendor_id,
-        COALESCE(v.shop_name, v.business_name, 'Vendor #' || sm.vendor_id) AS vendor_name
+        COALESCE(sm.vendor_id, sm.supplier_id) AS vendor_id,
+        COALESCE(NULLIF(TRIM(v.shop_name), ''), NULLIF(TRIM(v.business_name), ''), NULLIF(TRIM(s.shop_name), ''), 'Vendor #' || COALESCE(sm.vendor_id, sm.supplier_id)) AS vendor_name
       FROM supplier_materials sm
       LEFT JOIN vendors v ON sm.vendor_id = v.id
-      WHERE sm.vendor_id IS NOT NULL AND sm.vendor_id > 0
+      LEFT JOIN suppliers s ON sm.supplier_id = s.id
+      WHERE ${productWhere}
       ORDER BY sm.name ASC
-    `),
+      LIMIT $${productParams.length}
+    `,
+      productParams
+    ),
   ]);
 
   return {
@@ -515,6 +540,8 @@ export async function getShopVendorCommissionRecords({
       me.order_reference,
       COALESCE(NULLIF(TRIM(v.shop_name), ''), NULLIF(TRIM(v.business_name), ''), 'Vendor #' || svc.vendor_id) AS vendor_name,
       v.phone AS vendor_phone,
+      v.email AS vendor_email,
+      v.city AS vendor_city,
       COALESCE(NULLIF(TRIM(sm.name), ''), 'Shop Product #' || COALESCE(svc.product_id::text, svc.order_id::text)) AS product_name,
       sm.category AS product_category
     FROM shop_vendor_commissions svc
@@ -546,6 +573,8 @@ export async function getShopVendorCommissionRecords({
       vendor_id: Number(r.vendor_id),
       vendor_name: r.vendor_name,
       vendor_phone: r.vendor_phone,
+      vendor_email: r.vendor_email || '',
+      vendor_city: r.vendor_city || '',
       product_id: r.product_id ? Number(r.product_id) : null,
       product_name: r.product_name,
       product_category: r.product_category,
@@ -596,14 +625,13 @@ export async function getShopVendorCommissionOverview() {
         v.phone,
         v.email,
         COUNT(svc.id)::int AS pending_orders_count,
-        COALESCE(SUM(svc.commission_amount), 0)::numeric AS pending_due_amount,
-        array_agg(svc.id ORDER BY svc.id DESC) AS commission_ids,
-        array_agg(svc.order_id ORDER BY svc.id DESC) AS order_ids
+        COALESCE(SUM(svc.commission_amount), 0)::numeric AS pending_due_amount
       FROM shop_vendor_commissions svc
       LEFT JOIN vendors v ON v.id = svc.vendor_id
       WHERE svc.status = 'pending'
       GROUP BY svc.vendor_id, v.shop_name, v.business_name, v.phone, v.email
       ORDER BY pending_due_amount DESC
+      LIMIT 100
     `),
   ]);
 
@@ -623,8 +651,9 @@ export async function getShopVendorCommissionOverview() {
       email: v.email || '',
       pending_orders_count: Number(v.pending_orders_count || 0),
       pending_due_amount: Number(v.pending_due_amount || 0),
-      commission_ids: v.commission_ids || [],
-      order_ids: v.order_ids || [],
+      // IDs loaded on settle action — omit heavy array_agg from overview
+      commission_ids: [],
+      order_ids: [],
     })),
   };
 }
@@ -731,4 +760,188 @@ export async function getVendorOwnCommissionSummary(vendorId) {
     })),
   };
 }
+
+/**
+ * Get a specific supplier's own commission summary and recent orders list.
+ * Scoped to orders/products associated with that supplier ID and/or linked vendor account.
+ */
+export async function getSupplierOwnCommissionSummary(supplierId, supplierEmail = '') {
+  await ensureShopVendorCommissionsSchema();
+
+  const sId = Number(supplierId);
+  if (!sId) {
+    throw new Error('Valid supplierId is required');
+  }
+
+  const cleanEmail = String(supplierEmail || '').trim().toLowerCase();
+
+  const whereConditions = [
+    `svc.product_id IN (SELECT id FROM supplier_materials WHERE supplier_id = $1)`,
+    `svc.order_id IN (SELECT id FROM material_enquiries WHERE accepted_by_supplier_id = $1)`,
+  ];
+  const params = [sId];
+
+  if (cleanEmail) {
+    params.push(cleanEmail);
+    whereConditions.push(`svc.vendor_id IN (SELECT id FROM vendors WHERE LOWER(email) = $2)`);
+  }
+
+  const filterClause = whereConditions.join(' OR ');
+
+  const [statsRes, ordersRes] = await Promise.all([
+    pool.query(`
+      SELECT
+        COALESCE(SUM(CASE WHEN svc.status = 'pending' THEN svc.commission_amount ELSE 0 END), 0)::numeric AS pending_commission,
+        COALESCE(SUM(CASE WHEN svc.status = 'paid' THEN svc.commission_amount ELSE 0 END), 0)::numeric AS paid_commission,
+        COALESCE(SUM(svc.commission_amount), 0)::numeric AS total_commission,
+        COUNT(*)::int AS total_orders_count,
+        COUNT(CASE WHEN svc.status = 'pending' THEN 1 END)::int AS pending_orders_count,
+        COUNT(CASE WHEN svc.status = 'paid' THEN 1 END)::int AS paid_orders_count
+      FROM shop_vendor_commissions svc
+      WHERE ${filterClause}
+    `, params),
+    pool.query(`
+      SELECT
+        svc.id,
+        svc.order_id,
+        svc.product_id,
+        COALESCE(NULLIF(TRIM(sm.name), ''), 'Shop Product #' || COALESCE(svc.product_id::text, svc.order_id::text)) AS product_name,
+        svc.order_amount,
+        svc.commission_percent_applied,
+        svc.commission_amount,
+        svc.status,
+        svc.created_at,
+        svc.paid_at,
+        svc.paid_note
+      FROM shop_vendor_commissions svc
+      LEFT JOIN supplier_materials sm ON sm.id = svc.product_id
+      WHERE ${filterClause}
+      ORDER BY svc.created_at DESC
+      LIMIT 50
+    `, params),
+  ]);
+
+  const row = statsRes.rows[0] || {};
+  return {
+    pending_commission: Number(row.pending_commission || 0),
+    paid_commission: Number(row.paid_commission || 0),
+    total_commission: Number(row.total_commission || 0),
+    total_orders_count: Number(row.total_orders_count || 0),
+    pending_orders_count: Number(row.pending_orders_count || 0),
+    paid_orders_count: Number(row.paid_orders_count || 0),
+    recent_orders: ordersRes.rows.map((r) => ({
+      id: r.id,
+      order_id: r.order_id,
+      product_id: r.product_id,
+      product_name: r.product_name,
+      order_amount: Number(r.order_amount || 0),
+      commission_percent_applied: Number(r.commission_percent_applied || 0),
+      commission_amount: Number(r.commission_amount || 0),
+      status: r.status,
+      created_at: r.created_at,
+      paid_at: r.paid_at,
+      paid_note: r.paid_note,
+    })),
+  };
+}
+
+/**
+ * Ensures a supplier has a linked vendor record in the `vendors` table.
+ * If vendor already exists (matched by email or phone), returns vendor_id.
+ * If not, creates a vendor record and returns the new vendor_id.
+ *
+ * @param {number|Object} supplierOrId - Supplier ID number or supplier row object
+ * @param {Object} [options]
+ * @param {Object} [options.client] - Optional db client (for transactions)
+ * @returns {Promise<number|null>}
+ */
+export async function ensureVendorForSupplier(supplierOrId, { client = null } = {}) {
+  const executor = client || pool;
+  if (!supplierOrId) return null;
+
+  let supplier = typeof supplierOrId === 'object' && supplierOrId !== null ? supplierOrId : null;
+  const supplierId = supplier?.id ? Number(supplier.id) : Number(supplierOrId);
+
+  if ((!supplier || !supplier.email) && supplierId) {
+    const res = await executor.query(
+      `SELECT id, email, password_hash, shop_name, business_name, phone,
+              city, state, country, postal_code, status, package_id,
+              package_name, package_price, package_duration_months,
+              package_purchased_at, package_starts_at, package_expires_at, package_status
+       FROM suppliers WHERE id = $1 LIMIT 1`,
+      [supplierId]
+    );
+    if (res.rows.length > 0) {
+      supplier = res.rows[0];
+    }
+  }
+
+  if (!supplier) return null;
+
+  const email = String(supplier.email || '').trim().toLowerCase();
+  const phone = String(supplier.phone || '').trim();
+
+  // 1. Check if vendor already exists matching email or phone
+  if (email || phone) {
+    const where = [];
+    const params = [];
+    if (email) {
+      params.push(email);
+      where.push(`LOWER(TRIM(email)) = $${params.length}`);
+    }
+    if (phone) {
+      params.push(phone);
+      where.push(`phone = $${params.length}`);
+    }
+    const checkRes = await executor.query(
+      `SELECT id FROM vendors WHERE ${where.join(' OR ')} ORDER BY id ASC LIMIT 1`,
+      params
+    );
+    if (checkRes.rows.length > 0) {
+      return Number(checkRes.rows[0].id);
+    }
+  }
+
+  // 2. Create matching vendor record so foreign key constraints and admin commission work
+  const shopName = supplier.shop_name || supplier.business_name || `Vendor #${supplierId}`;
+  const bizName = supplier.business_name || supplier.shop_name || `Vendor #${supplierId}`;
+  const fallbackEmail = email || `vendor_supplier_${supplierId}@mtboss.in`;
+
+  const insertRes = await executor.query(
+    `INSERT INTO vendors (
+      email, password_hash, shop_name, business_name, phone,
+      city, state, country, postal_code, status, verification_status,
+      is_approved, package_id, package_name, package_price, package_duration_months,
+      package_purchased_at, package_starts_at, package_expires_at, package_status
+    ) VALUES (
+      $1, COALESCE($2, 'sync_supplier'), $3, $4, $5,
+      $6, $7, COALESCE($8, 'India'), $9, COALESCE($10, 'active'), 'verified',
+      TRUE, $11, $12, $13, $14,
+      $15, $16, $17, COALESCE($18, 'active')
+    ) RETURNING id`,
+    [
+      fallbackEmail,
+      supplier.password_hash || null,
+      shopName,
+      bizName,
+      phone,
+      supplier.city || null,
+      supplier.state || null,
+      supplier.country || 'India',
+      supplier.postal_code || null,
+      supplier.status === 'blocked' ? 'inactive' : 'active',
+      supplier.package_id || 'pkg_free_1m',
+      supplier.package_name || 'Free Plan',
+      supplier.package_price || 0,
+      supplier.package_duration_months || 0,
+      supplier.package_purchased_at || null,
+      supplier.package_starts_at || null,
+      supplier.package_expires_at || null,
+      supplier.package_status || 'active',
+    ]
+  );
+
+  return Number(insertRes.rows[0].id);
+}
+
 

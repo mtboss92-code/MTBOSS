@@ -1,4 +1,5 @@
 'use client';
+import RequiredAsterisk from '../../components/RequiredAsterisk';
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -93,7 +94,7 @@ function SingleImageUpload({ label, value, onChange, isDark, required }) {
   return (
     <div>
       <label style={{ fontSize:'10px',fontWeight:700,color:t.sub,textTransform:'uppercase',letterSpacing:'0.07em',display:'block',marginBottom:'6px' }}>
-        {label}{required ? ' *' : ''}
+        {label}{required ? <> <RequiredAsterisk /></> : null}
       </label>
       <div style={{ display:'flex',gap:'10px',alignItems:'center' }}>
         {value && (
@@ -290,23 +291,33 @@ function ApplyModal({ isDark, onClose }) {
 
             <form onSubmit={handleSubmit}>
               <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:'14px' }}>
-                <div><label style={lbl}>Full Name *</label><input style={inp} value={form.name} onChange={set('name')} placeholder="John Doe" /></div>
-                <div><label style={lbl}>Professional Title *</label><input style={inp} value={form.title} onChange={set('title')} placeholder="Senior Interior Designer" /></div>
+                <div><label style={lbl}>Full Name <RequiredAsterisk /></label><input style={inp} value={form.name} onChange={set('name')} placeholder="John Doe" /></div>
+                <div><label style={lbl}>Professional Title <RequiredAsterisk /></label><input style={inp} value={form.title} onChange={set('title')} placeholder="Senior Interior Designer" /></div>
                 <div>
-                  <label style={lbl}>Category *</label>
+                  <label style={lbl}>Category <RequiredAsterisk /></label>
                   <select style={inp} value={form.category} onChange={set('category')}>
                     {CATEGORIES.filter(c=>c!=='All').map(c=><option key={c}>{c}</option>)}
                   </select>
                 </div>
-                <div><label style={lbl}>Years of Experience *</label><input style={inp} type="number" min="0" value={form.experience} onChange={set('experience')} placeholder="5" /></div>
-                <div><label style={lbl}>City *</label><select style={inp} value={form.city} onChange={set('city')} disabled={citiesLoading}>
-                  <option value="">{citiesLoading ? 'Loading cities...' : 'Select city'}</option>
-                  {cities.map(city => <option key={city} value={city}>{city}</option>)}
-                </select></div>
-                <div><label style={lbl}>Phone *</label><input style={inp} value={form.phone} onChange={set('phone')} placeholder="+91 98765 43210" /></div>
-                <div style={{ gridColumn:'span 2' }}><label style={lbl}>Email *</label><input style={inp} type="email" value={form.email} onChange={set('email')} placeholder="you@example.com" /></div>
+                <div><label style={lbl}>Years of Experience <RequiredAsterisk /></label><input style={inp} type="number" min="0" value={form.experience} onChange={set('experience')} placeholder="5" /></div>
+                <div>
+                  <label style={lbl}>City <RequiredAsterisk /></label>
+                  <input
+                    style={inp}
+                    value={form.city}
+                    onChange={set('city')}
+                    placeholder="Enter your city"
+                    required
+                    list="pro-city-list"
+                  />
+                  <datalist id="pro-city-list">
+                    {cities.map(city => <option key={city} value={city} />)}
+                  </datalist>
+                </div>
+                <div><label style={lbl}>Phone <RequiredAsterisk /></label><input style={inp} value={form.phone} onChange={set('phone')} placeholder="+91 98765 43210" /></div>
+                <div style={{ gridColumn:'span 2' }}><label style={lbl}>Email <RequiredAsterisk /></label><input style={inp} type="email" value={form.email} onChange={set('email')} placeholder="you@example.com" /></div>
                 <div style={{ gridColumn:'span 2' }}>
-                  <label style={lbl}>Bio / Description *</label>
+                  <label style={lbl}>Bio / Description <RequiredAsterisk /></label>
                   <textarea style={{...inp,resize:'vertical'}} rows={4} value={form.description} onChange={set('description')} placeholder="Describe your expertise, style and approach…" />
                 </div>
                 <div style={{ gridColumn:'span 2' }}><label style={lbl}>Specializations (comma-separated)</label><input style={inp} value={form.specializations} onChange={set('specializations')} placeholder="Residential Design, 3D Visualization…" /></div>
@@ -360,7 +371,7 @@ function ProfileModal({ pro, isDark, onEnquire, onClose }) {
               <h2 style={{ color:'#fff',margin:'0 0 4px',fontSize:'22px',fontWeight:800 }}>{pro.name}</h2>
               <p style={{ color:'rgba(255,255,255,0.6)',margin:'0 0 12px',fontSize:'14px' }}>{pro.title}</p>
               <div style={{ display:'flex',gap:'8px',flexWrap:'wrap' }}>
-                <span style={{ background:'rgba(255,255,255,0.08)',color:'rgba(255,255,255,0.75)',padding:'3px 10px',border:'1px solid rgba(255,255,255,0.12)',fontSize:'11px',fontWeight:600 }}>📍 {pro.city}</span>
+                <span style={{ background:'rgba(255,255,255,0.08)',color:'rgba(255,255,255,0.75)',padding:'3px 10px',border:'1px solid rgba(255,255,255,0.12)',fontSize:'11px',fontWeight:600 }}>{pro.city}</span>
                 <span style={{ background:'rgba(255,255,255,0.08)',color:'rgba(255,255,255,0.75)',padding:'3px 10px',border:'1px solid rgba(255,255,255,0.12)',fontSize:'11px',fontWeight:600 }}>⏱ {pro.experience} yrs exp</span>
               </div>
             </div>
@@ -450,7 +461,7 @@ function ProCard({ pro, isDark, onClick }) {
         <p style={{ color:t.accent,margin:'0 0 10px',fontSize:'12px',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.04em' }}>{pro.title}</p>
         <div style={{ display:'flex',gap:'12px',fontSize:'11px',color:t.sub,fontWeight:600 }}>
           <span>⏱ {pro.experience} yr{pro.experience!==1?'s':''}</span>
-          <span>📍 {pro.city}</span>
+          <span>{pro.city}</span>
         </div>
       </div>
     </div>
@@ -496,7 +507,7 @@ export default function ProfessionalsPage() {
       {/* Hero */}
       <div style={{ background:t.heroBg,padding:'22px 24px 24px',textAlign:'center',position:'relative',overflow:'hidden',borderBottom:`2px solid ${t.accent}` }}>
         <div style={{ position:'absolute',inset:0,backgroundImage:`linear-gradient(${isDark?'color-mix(in srgb, var(--brand-blue) 3%, transparent)':'rgba(255,255,255,0.03)'} 1px,transparent 1px),linear-gradient(90deg,${isDark?'color-mix(in srgb, var(--brand-blue) 3%, transparent)':'rgba(255,255,255,0.03)'} 1px,transparent 1px)`,backgroundSize:'40px 40px',pointerEvents:'none' }} />
-        <p style={{ display:'inline-flex',alignItems:'center',justifyContent:'center',color:'#eaf7ff',background:'rgba(41,157,244,0.14)',border:'1px solid rgba(41,157,244,0.45)',borderRadius:'2px',padding:'5px 12px',fontSize:'10px',fontWeight:800,textTransform:'uppercase',letterSpacing:'0.15em',margin:'0 0 8px' }}>MTbossProfessional Services</p>
+        <p style={{ display:'inline-flex',alignItems:'center',justifyContent:'center',color:'#eaf7ff',background:'rgba(41,157,244,0.14)',border:'1px solid rgba(41,157,244,0.45)',borderRadius:'2px',padding:'5px 12px',fontSize:'10px',fontWeight:800,textTransform:'uppercase',letterSpacing:'0.15em',margin:'0 0 8px' }}>MTBOSSProfessional Services</p>
         <h1 style={{ color:'#fff',fontSize:'clamp(24px,3.4vw,36px)',fontWeight:800,margin:'0 0 8px',lineHeight:1.05,textTransform:'uppercase',letterSpacing:'-0.02em' }}>Meet Our Professional Team</h1>
         <p style={{ color:'rgba(255,255,255,0.55)',fontSize:'13px',maxWidth:'480px',margin:'0 auto 14px',lineHeight:1.45 }}>
           Verified interior designers, architects and home experts — handpicked for quality and excellence.

@@ -1,4 +1,5 @@
 'use client';
+import RequiredAsterisk from './RequiredAsterisk';
 
 import { useState, useEffect, useRef } from 'react';
 
@@ -83,7 +84,7 @@ export default function ProjectsManager() {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('upload_preset', process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET);
-      formData.append('folder', 'mtboss/projects');
+      formData.append('folder', 'MTBOSS/projects');
 
       const res = await fetch(
         `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`,
@@ -111,7 +112,7 @@ export default function ProjectsManager() {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('upload_preset', process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET);
-        formData.append('folder', 'mtboss/projects');
+        formData.append('folder', 'MTBOSS/projects');
 
         const res = await fetch(
           `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`,
@@ -306,6 +307,9 @@ export default function ProjectsManager() {
           border-radius: 8px; overflow: hidden;
           cursor: pointer;
           transition: border-color .15s, transform .15s, box-shadow .15s;
+          display: flex;
+          flex-direction: column;
+          height: 100%;
         }
         .pm-card:hover {
           border-color: var(--accent);
@@ -343,7 +347,12 @@ export default function ProjectsManager() {
           display: flex; align-items: center; justify-content: center;
           font-size: 2rem; color: var(--muted);
         }
-        .pm-card-body { padding: 0.875rem; }
+        .pm-card-body {
+          padding: 0.875rem;
+          display: flex;
+          flex-direction: column;
+          flex: 1;
+        }
         .pm-card-top {
           display: flex; align-items: flex-start;
           justify-content: space-between; gap: 0.5rem;
@@ -357,7 +366,10 @@ export default function ProjectsManager() {
           background: var(--accent-lt); color: var(--accent);
           white-space: nowrap;
         }
-        .pm-card-meta { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.5rem; }
+        .pm-card-meta {
+          font-size: 0.75rem; color: var(--muted); margin-bottom: 0.5rem;
+          min-height: 1.125rem;
+        }
         .pm-card-desc {
           font-size: 0.75rem; color: var(--muted);
           line-height: 1.5;
@@ -370,6 +382,8 @@ export default function ProjectsManager() {
           justify-content: space-between;
           padding-top: 0.625rem;
           border-top: 1px solid var(--border);
+          margin-top: auto;
+          min-height: 2.25rem;
         }
         .pm-badge {
           display: inline-block; padding: 0.15rem 0.55rem;
@@ -611,9 +625,12 @@ export default function ProjectsManager() {
                       <span className="pm-card-title">{project.title}</span>
                       <span className="pm-card-cat">{project.category}</span>
                     </div>
-                    {project.location && (
-                      <div className="pm-card-meta">📍 {project.location} · {project.size}</div>
-                    )}
+                    <div className="pm-card-meta">
+                      {project.location
+                        ? `${project.location}${project.size ? ` · ${project.size}` : ''}`
+                        : (project.size ? project.size : <span style={{ opacity: 0.4 }}>—</span>)
+                      }
+                    </div>
                     {(project.client_name || project.source_lead_id) && (
                       <div className="pm-card-meta">
                         {project.client_name ? `Client: ${project.client_name}` : ''}
@@ -662,7 +679,7 @@ export default function ProjectsManager() {
 
               {/* Image Upload */}
               <div>
-                <label className="pm-field-label">Project Image *</label>
+                <label className="pm-field-label">Project Image <RequiredAsterisk /></label>
                 <div className="pm-upload-area" onClick={() => fileRef.current?.click()}>
                   {preview && <img src={preview} alt="preview" className="pm-upload-preview" />}
                   <p className="pm-upload-label">
@@ -723,7 +740,7 @@ export default function ProjectsManager() {
 
               {/* Title */}
               <div>
-                <label className="pm-field-label">Project Title *</label>
+                <label className="pm-field-label">Project Title <RequiredAsterisk /></label>
                 <input
                   className="pm-input"
                   placeholder="e.g. The Sky Atrium"
@@ -735,7 +752,7 @@ export default function ProjectsManager() {
               {/* Category + Location */}
               <div className="pm-row">
                 <div>
-                  <label className="pm-field-label">Category *</label>
+                  <label className="pm-field-label">Category <RequiredAsterisk /></label>
                   <select
                     className="pm-input"
                     value={form.category}

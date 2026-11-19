@@ -85,10 +85,10 @@ export async function POST(req) {
     // Email the ADMIN (admin acts as middleman — client never contacts professional directly)
     try {
       const { sendMail } = await import('@/lib/email');
-      const adminEmail = process.env.SMTP_USER || 'mtboss2016@gmail.com';
+      const adminEmail = process.env.SMTP_USER || 'MTBOSS2016@gmail.com';
       await sendMail({
         to: adminEmail,
-        subject: `Professional Enquiry: ${enquirer_name} → ${professional.name} — MTBoss`,
+        subject: `Professional Enquiry: ${enquirer_name} → ${professional.name} — MTBOSS`,
         html: `
           <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;
                       background:#fff;border-radius:8px;border:1px solid #e5e7eb">
@@ -97,7 +97,7 @@ export async function POST(req) {
               A user has enquired about a professional — ${new Date().toLocaleString('en-IN')}
             </p>
 
-            <h3 style="color:#f6b400;font-size:13px;font-weight:700;text-transform:uppercase;
+            <h3 style="color:#2196F3;font-size:13px;font-weight:700;text-transform:uppercase;
                        letter-spacing:0.06em;margin:0 0 8px;">Professional Requested</h3>
             <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:20px;">
               ${[
@@ -112,7 +112,7 @@ export async function POST(req) {
               ).join('')}
             </table>
 
-            <h3 style="color:#f6b400;font-size:13px;font-weight:700;text-transform:uppercase;
+            <h3 style="color:#2196F3;font-size:13px;font-weight:700;text-transform:uppercase;
                        letter-spacing:0.06em;margin:0 0 8px;">Enquirer Details</h3>
             <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:20px;">
               ${[
@@ -127,7 +127,7 @@ export async function POST(req) {
               ).join('')}
             </table>
 
-            <h3 style="color:#f6b400;font-size:13px;font-weight:700;text-transform:uppercase;
+            <h3 style="color:#2196F3;font-size:13px;font-weight:700;text-transform:uppercase;
                        letter-spacing:0.06em;margin:0 0 8px;">Message</h3>
             <div style="padding:16px;background:#f9fafb;border-radius:6px;
                         font-size:14px;color:#374151;line-height:1.6;">
@@ -136,7 +136,7 @@ export async function POST(req) {
 
             <p style="margin-top:20px;font-size:12px;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:16px;">
               Action required: Review this enquiry in the
-              <strong>MTbossAdmin Dashboard → Professional Enquiries</strong> tab and
+              <strong>MTBOSSAdmin Dashboard → Professional Enquiries</strong> tab and
               facilitate the connection between the user and professional.
             </p>
           </div>
@@ -164,17 +164,37 @@ export async function GET(req) {
 
     const { searchParams } = new URL(req.url);
     const proId = searchParams.get('professional_id');
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50', 10) || 50));
+    const offset = (page - 1) * limit;
+    const vals = [];
+    const where = [];
+    if (proId) {
+      vals.push(proId);
+      where.push(`professional_id = $${vals.length}`);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const countRes = await pool.query(
+      `SELECT COUNT(*)::INT AS total FROM professional_enquiries ${whereSql}`,
+      vals
+    );
+    const total = countRes.rows[0]?.total || 0;
+    vals.push(limit, offset);
+    const result = await pool.query(
+      `SELECT id, professional_id, professional_name, professional_email,
+              enquirer_name, enquirer_email, enquirer_phone, message, is_read, created_at
+       FROM professional_enquiries
+       ${whereSql}
+       ORDER BY created_at DESC
+       LIMIT $${vals.length - 1} OFFSET $${vals.length}`,
+      vals
+    );
 
-    const result = proId
-      ? await pool.query(
-          `SELECT * FROM professional_enquiries WHERE professional_id=$1 ORDER BY created_at DESC`,
-          [proId]
-        )
-      : await pool.query(
-          `SELECT * FROM professional_enquiries ORDER BY created_at DESC`
-        );
-
-    return NextResponse.json({ success: true, data: result.rows });
+    return NextResponse.json({
+      success: true,
+      data: result.rows,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+    });
   } catch (error) {
     console.error('GET professional-enquiries error:', error);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });

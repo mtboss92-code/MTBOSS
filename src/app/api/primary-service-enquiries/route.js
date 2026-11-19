@@ -9,7 +9,7 @@ import { notifyAdminSubmission } from '@/lib/customer-communications';
 const ADMIN_EMAIL =
   process.env.ADMIN_EMAIL ||
   process.env.NEXT_PUBLIC_ADMIN_EMAIL ||
-  'mtboss2016@gmail.com';
+  'MTBOSS2016@gmail.com';
 
 export const runtime = 'nodejs';
 
@@ -93,26 +93,62 @@ async function syncEnquiryToLead(enquiry) {
       `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS source_ref_table VARCHAR(80)`,
       `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS source_ref_id INTEGER`,
       `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS priority VARCHAR(30) DEFAULT 'Normal'`,
+      `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS time_slot VARCHAR(100)`,
+      `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS meeting_date VARCHAR(100)`,
+      `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS address TEXT`,
+      `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS state VARCHAR(120)`,
+      `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS gps_location VARCHAR(100)`,
+      `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS alternate_phone VARCHAR(50)`,
     ];
     for (const sql of alters) await pool.query(sql);
 
+    const meetingDateStr = enquiry.meeting_date ? String(enquiry.meeting_date).slice(0, 10) : null;
+
     await pool.query(
       `INSERT INTO agent_leads
-         (city, client_name, client_phone, client_email, service_type, lead_type, status,
-          notes, client_requirement, lead_source, source_ref_table, source_ref_id, assigned_by_role)
-       SELECT $1,$2,$3,$4,$5,'Primary Service','New',$6,$7,'primary-service','primary_service_enquiries',$8,'system'
+         (city, state, address, client_name, client_phone, alternate_phone, client_email, service_type, lead_type, status,
+          notes, client_requirement, lead_source, source_ref_table, source_ref_id, assigned_by_role,
+          time_slot, meeting_date, gps_location)
+       SELECT $1,$2,$3,$4,$5,$6,$7,$8,'Primary Service','New',$9,$10,'primary-service','primary_service_enquiries',$11,'system',$12,$13,$14
        WHERE NOT EXISTS (
          SELECT 1 FROM agent_leads
-         WHERE source_ref_table = 'primary_service_enquiries' AND source_ref_id = $8
+         WHERE source_ref_table = 'primary_service_enquiries' AND source_ref_id = $11
        )`,
       [
         [enquiry.city, enquiry.state].filter(Boolean).join(', ') || enquiry.address || 'Unassigned',
+        enquiry.state || null,
+        enquiry.address || null,
         enquiry.name,
         enquiry.phone,
+        enquiry.alternate_phone || null,
         enquiry.email || null,
         enquiry.service_title,
         enquiry.message || null,
         [enquiry.budget, enquiry.carpet_area ? `${enquiry.carpet_area} sqft` : null].filter(Boolean).join(' | ') || null,
+        enquiry.id,
+        enquiry.time_slot || null,
+        meetingDateStr,
+        enquiry.gps_location || null,
+      ]
+    );
+
+    // Also update existing lead if already present
+    await pool.query(
+      `UPDATE agent_leads
+       SET time_slot = COALESCE($1, time_slot),
+           meeting_date = COALESCE($2, meeting_date),
+           address = COALESCE($3, address),
+           state = COALESCE($4, state),
+           gps_location = COALESCE($5, gps_location),
+           alternate_phone = COALESCE($6, alternate_phone)
+       WHERE source_ref_table = 'primary_service_enquiries' AND source_ref_id = $7`,
+      [
+        enquiry.time_slot || null,
+        meetingDateStr,
+        enquiry.address || null,
+        enquiry.state || null,
+        enquiry.gps_location || null,
+        enquiry.alternate_phone || null,
         enquiry.id,
       ]
     );
@@ -142,7 +178,7 @@ async function savePropertyImage(file) {
   const uploadData = new FormData();
   uploadData.append('file', file);
   uploadData.append('upload_preset', uploadPreset);
-  uploadData.append('folder', 'mtboss/primary-service-properties');
+  uploadData.append('folder', 'MTBOSS/primary-service-properties');
   const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
     method: 'POST',
     body: uploadData,
@@ -161,18 +197,18 @@ async function savePropertyImages(files) {
     throw new Error('You can upload a maximum of 10 property images.');
   }
 
-  const urls = [];
-  const names = [];
+  const uploads = await Promise.all(
+    files.map(async (file) => {
+      const url = await savePropertyImage(file);
+      return url ? { name: file.name, url } : null;
+    })
+  );
 
-  for (const file of files) {
-    const url = await savePropertyImage(file);
-    if (url) {
-      urls.push(url);
-      names.push(file.name);
-    }
-  }
-
-  return { names, urls };
+  const valid = uploads.filter(Boolean);
+  return {
+    names: valid.map((v) => v.name),
+    urls: valid.map((v) => v.url),
+  };
 }
 
 async function sendAdminNotification(enquiry) {
@@ -357,6 +393,27 @@ export async function GET(req) {
 
     await ensureTable();
 
+    const { searchParams } = new URL(req.url);
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50', 10) || 50));
+    const offset = (page - 1) * limit;
+    const status = (searchParams.get('status') || '').trim();
+
+    const where = [];
+    const vals = [];
+    if (status && status !== 'all') {
+      vals.push(status);
+      where.push(`status = $${vals.length}`);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const countRes = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM primary_service_enquiries ${whereSql}`,
+      vals
+    );
+    const total = countRes.rows[0]?.total || 0;
+
+    const dataVals = [...vals, limit, offset];
     const result = await pool.query(
       `SELECT id, service_slug, service_title, user_id, name, phone, alternate_phone, email, message,
               budget, carpet_area, time_slot, meeting_date, gps_location, address, state, city,
@@ -364,8 +421,10 @@ export async function GET(req) {
               rating_stars, review_text, site_image_names, site_image_urls, reviewed_at,
               status, created_at
        FROM primary_service_enquiries
+       ${whereSql}
        ORDER BY created_at DESC
-       LIMIT 100`
+       LIMIT $${dataVals.length - 1} OFFSET $${dataVals.length}`,
+      dataVals
     );
 
     const data = result.rows.map((row) => {
@@ -387,6 +446,12 @@ export async function GET(req) {
     return NextResponse.json({
       success: true,
       data,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
     });
   } catch (error) {
     console.error('Error fetching primary services enquiries:', error);

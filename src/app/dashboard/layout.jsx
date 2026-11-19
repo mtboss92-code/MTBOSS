@@ -1,8 +1,12 @@
-'use client';
+"use client";
 
-import { useState, useEffect, Suspense } from 'react';
-import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect, useRef, Suspense } from "react";
+import Link from "next/link";
+import "./admin-theme.css";
+import { AdminStatusBadge } from "./AdminUI";
+import DashboardNotifications from "./DashboardNotifications";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ACTIVE_ROLE_KEY } from "@/lib/client-session";
 import {
   LayoutDashboard,
   UserCog,
@@ -38,63 +42,305 @@ import {
   HardHat,
   PackageCheck,
   Wallet,
-  ChevronLeft,
-  ChevronRight,
   LogOut,
   Menu,
-} from '@/app/components/ui/icons';
+  ChevronDown,
+} from "@/app/components/ui/icons";
 
-const menuItems = [
-  { label: 'Overview', icon: LayoutDashboard, tab: '' },
-  { label: 'Agents', icon: UserCog, tab: 'agents' },
-  { label: 'Users', icon: Users, tab: 'users' },
-  { label: 'Calculator', icon: Calculator, tab: 'calculator' },
-  { label: 'Calculator Quotes', icon: FileText, tab: 'calculator-quotes' },
-  { label: 'Career Enquiry', icon: Briefcase, tab: 'career-enquiries' },
-  { label: 'New Jobs', icon: BriefcaseBusiness, tab: 'jobs' },
-  { label: 'Lead Management', icon: ClipboardList, tab: 'lead-management' },
-  { label: 'Office Locations', icon: MapPin, tab: 'office-locations' },
-  { label: 'Cities', icon: Building, tab: 'cities' },
-  { label: 'Contact Forms', icon: Mail, tab: 'submissions' },
-  { label: 'Franchises', icon: Store, tab: 'franchises' },
-  { label: 'Free Time Slots', icon: CalendarClock, tab: 'free-slots' },
-  { label: 'FAQs Management', icon: HelpCircle, tab: 'faqs' },
-  { label: 'Customer Reviews', icon: Star, tab: 'reviews' },
-  { label: 'Hero Banners', icon: ImageIcon, tab: 'hero-banners' },
-  { label: 'SEO Blogs & Guides', icon: Newspaper, tab: 'blogs' },
+const menuStructure = [
+  // Standalone top items
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard, tab: '' },
+  { id: 'users', label: 'Users', icon: Users, tab: 'users' },
+  { id: 'agent-tasks', label: 'Tasks', icon: CalendarClock, tab: 'agent-tasks' },
+  { id: 'franchises', label: 'Franchises', icon: BriefcaseBusiness, tab: 'franchises' },
 
-  { label: 'Construction Services', icon: Layers, tab: 'primary-services' },
-  { label: 'Construction Enquiry', icon: MessageSquare, tab: 'primary-service-enquiries' },
-  { label: 'Professional Enquiries', icon: MessageSquare, tab: 'professional-enquiries' },
-  { label: 'Professional Services', icon: Users, tab: 'professionals' },
-  { label: 'Project Management', icon: Building2, tab: 'project-management' },
-{ label: 'Project Management · Parties', icon: Building2, tab: 'party-project-management' },
-{ label: 'PM Dashboard', icon: LayoutDashboard, tab: 'pm-dashboard' },
-{ label: 'PM Reports', icon: FileText, tab: 'pm-reports' },
-{ label: 'PM Activity Log', icon: FolderKanban, tab: 'pm-audit' },
-{ label: 'PM Benchmarks · Rates', icon: CircleDollarSign, tab: 'pm-benchmarks' },
-  { label: 'Portfolio Projects', icon: FolderKanban, tab: 'projects' },
-  { label: 'Properties', icon: House, tab: 'properties' },
-  { label: 'Property Enquiries', icon: MessageSquareText, tab: 'property-enquiries' },
-  { label: 'Quick Enquiry', icon: Zap, tab: 'quick-enquiries' },
-  { label: 'Quick Services', icon: Wrench, tab: 'quick-services' },
-  { label: 'Revenue & Earnings', icon: CircleDollarSign, tab: 'revenue' },
-  { label: 'Service Bookings', icon: CalendarDays, tab: 'bookings' },
-  { label: 'Orders History', icon: ClipboardList, tab: 'orders-history' },
-  { label: 'Service Pricing', icon: Tags, tab: 'quick-services-pricing' },
-  { label: 'Shop Now Manager', icon: ShoppingCart, tab: 'shop-categories' },
-  { label: 'Cashback & Wallet', icon: Wallet, tab: 'cashback' },
-  { label: '+ Add Shop Product', icon: PlusCircle, tab: 'shop-products' },
-  { label: 'Shipping Settings', icon: Truck, tab: 'shipping-settings' },
-  { label: 'Suppliers', icon: Truck, tab: 'suppliers' },
-  { label: 'Vendors', icon: HardHat, tab: 'vendors' },
-  { label: 'Product Approvals', icon: PackageCheck, tab: 'product-approvals' },
-  { label: 'Package Approvals', icon: PackageCheck, tab: 'packages' },
+  // Approvals
+  {
+    id: 'approvals',
+    label: 'Approvals',
+    icon: PackageCheck,
+    children: [
+      { label: 'Product Approvals', tab: 'product-approvals' },
+      { label: 'Package Approvals', tab: 'packages' },
+    ],
+  },
+
+  // Properties & Rentals
+  {
+    id: 'properties',
+    label: 'Properties & Rentals',
+    icon: House,
+    children: [
+      { label: 'Properties', tab: 'properties' },
+      // { label: 'Room Rentals', tab: 'room-rentals' },
+      // { label: 'Flats', tab: 'flats' },
+      // { label: 'Plots', tab: 'plots' },
+      // { label: 'Create Property', tab: 'create-property' },
+      { label: 'Property Bookings', tab: 'property-bookings' },
+      { label: 'Property Enquiries', tab: 'property-enquiries' },
+    ],
+  },
+
+  // Agent
+  // {
+  //   id: 'agents',
+  //   label: 'Agent',
+  //   icon: UserCog,
+  //   children: [
+  //     { label: 'All Agents', tab: 'agents' },
+  //     { label: 'Agent Leads', tab: 'lead-management' },
+  //   ],
+  // },
+
+  // Services
+  {
+    id: 'services',
+    label: 'Services',
+    icon: Wrench,
+    children: [
+      { label: 'Construction Services', tab: 'primary-services' },
+      // { label: 'Construction Enquiry', tab: 'primary-service-enquiries' },
+      { label: 'Quick Services', tab: 'quick-services' },
+      // { label: 'Quick Enquiry', tab: 'quick-enquiries' },
+      { label: 'Professional Services', tab: 'professionals' },
+      // { label: 'Professional Enquiries', tab: 'professional-enquiries' },
+      { label: 'Service Bookings', tab: 'bookings' },
+      { label: 'Service Pricing', tab: 'quick-services-pricing' },
+    ],
+  },
+
+  // Enquiries
+  {
+    id: 'enquiries',
+    label: 'Enquiries',
+    icon: MessageSquareText,
+    children: [
+      { label: 'Professional Enquiries', tab: 'professional-enquiries' },
+      { label: 'Quick Enquiry', tab: 'quick-enquiries' },
+      { label: 'Construction Enquiry', tab: 'primary-service-enquiries' },
+    ],
+  },
+
+  // Shop & E-Commerce
+  {
+    id: 'shop',
+    label: 'Shop & E-Commerce',
+    icon: ShoppingCart,
+    children: [
+      { label: 'Shop Now Manager', tab: 'shop-categories' },
+      { label: '+ Add Shop Product', tab: 'shop-products' },
+      { label: 'Orders History', tab: 'orders-history' },
+      { label: 'Shipping Settings', tab: 'shipping-settings' },
+      { label: 'Vendor Commission', tab: 'shop-commission-settings' },
+      { label: 'Cashback & Wallet', tab: 'cashback' },
+    ],
+  },
+
+  // Project Management
+  {
+    id: 'project-management',
+    label: 'Project Management',
+    icon: Building2,
+    children: [
+      { label: 'PM Dashboard', tab: 'pm-dashboard' },
+      { label: 'Project Management', tab: 'project-management' },
+      { label: 'Party Project Management', tab: 'party-project-management' },
+      { label: 'PM Reports', tab: 'pm-reports' },
+      { label: 'PM Activity Log', tab: 'pm-audit' },
+      { label: 'Portfolio Projects', tab: 'projects' },
+    ],
+  },
+
+  // Leads
+  {
+    id: 'sales',
+    label: 'Sales & Leads',
+    icon: ClipboardList,
+    children: [
+      { label: 'Lead Management', tab: 'lead-management' },
+      // { label: 'Calculator', tab: 'calculator' },
+      // { label: 'Calculator Quotes', tab: 'calculator-quotes' },
+      { label: 'Revenue & Earnings', tab: 'revenue' },
+    ],
+  },
+
+  // calculator
+  {
+    id: 'calculator',
+    label: 'Calculator',
+    icon: Calculator,
+    children: [
+      { label: 'Calculator', tab: 'calculator' },
+      { label: 'Calculator Quotes', tab: 'calculator-quotes' },
+    ],
+  },
+
+  // Hiring & Jobs
+  {
+    id: 'hiring',
+    label: 'Hiring & Jobs',
+    icon: Briefcase,
+    children: [
+      { label: 'Career Enquiry', tab: 'career-enquiries' },
+      { label: 'New Jobs', tab: 'jobs' },
+    ],
+  },
+
+  // Locations
+  {
+    id: 'locations',
+    label: 'Locations',
+    icon: MapPin,
+    children: [
+      { label: 'Office Locations', tab: 'office-locations' },
+      { label: 'Cities', tab: 'cities' },
+    ],
+  },
+
+  // Website & Content
+  {
+    id: 'website',
+    label: 'Website & Content',
+    icon: Layers,
+    children: [
+      { label: 'Hero Banners', tab: 'hero-banners' },
+      { label: 'SEO Blogs & Guides', tab: 'blogs' },
+      { label: 'Customer Reviews', tab: 'reviews' },
+      { label: 'FAQs Management', tab: 'faqs' },
+      { label: 'Free Time Slots', tab: 'free-slots' },
+      { label: 'Contact Forms', tab: 'submissions' },
+    ],
+  },
 ];
+
+function isTabAllowedForAgent(tab, user) {
+  if (user?.role === "agent") {
+    if (tab === "product-approvals" || tab === "packages") return false;
+    if (tab === "agents") return false;
+    if (
+      tab.includes("project-management") ||
+      tab.startsWith("pm-") ||
+      tab === "projects"
+    ) {
+      return !!user.has_project_management_access;
+    }
+    if (tab === "lead-management") return true;
+    return false;
+  }
+  return true;
+}
+
+function SidebarGroup({
+  item,
+  isOpen,
+  onToggle,
+  currentTab,
+  closeSidebarOnMobile,
+  pendingApprovalsCount,
+}) {
+  const IconComponent = item.icon;
+  const isChildActive = item.children.some(
+    (child) => (child.tab || "") === currentTab
+  );
+  const hasApprovalsBadge =
+    item.id === "approvals" && pendingApprovalsCount > 0;
+  const submenuId = `submenu-${item.id}`;
+
+  return (
+    <div className="admin-sidebar__dropdown-group">
+      <button
+        type="button"
+        id={`group-btn-${item.id}`}
+        aria-expanded={isOpen}
+        aria-controls={submenuId}
+        onClick={onToggle}
+        className={`w-full min-h-[44px] flex items-center justify-between px-3 py-2.5 rounded-xl transition-colors text-sm font-medium ${
+          isChildActive
+            ? "bg-brand-50 text-brand-600 font-semibold"
+            : "text-ink-700 hover:bg-app"
+        }`}
+      >
+        <span className="flex items-center gap-3 min-w-0">
+          <span
+            className={`flex items-center justify-center shrink-0 w-8 h-8 rounded-lg ${
+              isChildActive ? "text-brand-600" : "text-current"
+            }`}
+          >
+            {IconComponent ? (
+              <IconComponent
+                size={20}
+                strokeWidth={1.7}
+                aria-hidden="true"
+              />
+            ) : null}
+          </span>
+          <span className="truncate select-none text-left">
+            {item.label}
+          </span>
+        </span>
+
+        <span className="flex items-center gap-2 shrink-0">
+          {hasApprovalsBadge && (
+            <AdminStatusBadge tone="danger">
+              {pendingApprovalsCount}
+            </AdminStatusBadge>
+          )}
+          <ChevronDown
+            size={16}
+            className={`text-ink-500 transition-transform duration-200 ${
+              isOpen ? "rotate-180" : ""
+            }`}
+            aria-hidden="true"
+          />
+        </span>
+      </button>
+
+      {isOpen && (
+        <ul
+          id={submenuId}
+          role="region"
+          aria-labelledby={`group-btn-${item.id}`}
+          className="mt-1 ml-4 pl-3 border-l-2 border-line space-y-1 list-none"
+        >
+          {item.children.map((child) => {
+            const isChildTabActive = (child.tab || "") === currentTab;
+            return (
+              <li key={child.label || child.tab}>
+                <Link
+                  href={
+                    child.tab
+                      ? `/dashboard?tab=${child.tab}`
+                      : "/dashboard"
+                  }
+                  onClick={closeSidebarOnMobile}
+                  title={child.label}
+                  aria-current={isChildTabActive ? "page" : undefined}
+                  className={`flex items-center justify-between min-h-[38px] px-3 py-2 rounded-lg text-xs transition-colors ${
+                    isChildTabActive
+                      ? "bg-brand-100 text-brand-600 font-bold"
+                      : "text-ink-700 hover:text-ink-900 hover:bg-app font-medium"
+                  }`}
+                >
+                  <span className="truncate">{child.label}</span>
+                  {child.tab === "product-approvals" &&
+                    pendingApprovalsCount > 0 && (
+                      <AdminStatusBadge tone="danger" className="ml-2">
+                        {pendingApprovalsCount}
+                      </AdminStatusBadge>
+                    )}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function SidebarNav({ sidebarOpen, closeSidebarOnMobile, isDarkMode, user }) {
   const searchParams = useSearchParams();
-  const currentTab = searchParams ? (searchParams.get('tab') || '') : '';
+  const currentTab = searchParams ? searchParams.get("tab") || "" : "";
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
 
   useEffect(() => {
@@ -102,12 +348,19 @@ function SidebarNav({ sidebarOpen, closeSidebarOnMobile, isDarkMode, user }) {
     const fetchPending = async () => {
       try {
         let u = {};
-        try { u = JSON.parse(localStorage.getItem('user') || '{}'); } catch {}
-        const token = localStorage.getItem('admin-token') || (u.role === 'admin' ? localStorage.getItem('token') : '');
+        try {
+          u = JSON.parse(localStorage.getItem("user") || "{}");
+        } catch {}
+        const token =
+          localStorage.getItem("admin-token") ||
+          (u.role === "admin" ? localStorage.getItem("token") : "");
         if (!token) return;
-        const res = await fetch('/api/admin/product-approvals?count_only=true', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await fetch(
+          "/api/admin/product-approvals?count_only=true",
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
         const data = await res.json();
         if (active && data.success) {
           setPendingApprovalsCount(data.pendingCount || 0);
@@ -116,75 +369,104 @@ function SidebarNav({ sidebarOpen, closeSidebarOnMobile, isDarkMode, user }) {
     };
     fetchPending();
     const handleUpdate = () => fetchPending();
-    window.addEventListener('mtbossShopProductsUpdated', handleUpdate);
+    window.addEventListener("MTBOSSShopProductsUpdated", handleUpdate);
     return () => {
       active = false;
-      window.removeEventListener('mtbossShopProductsUpdated', handleUpdate);
+      window.removeEventListener("MTBOSSShopProductsUpdated", handleUpdate);
     };
   }, []);
 
-  const visibleItems = menuItems.filter((item) => {
-    if (user?.role === 'agent') {
-      const tab = item.tab || '';
-      if (tab === 'product-approvals') return false;
-      if (tab.includes('project-management') || tab.startsWith('pm-') || tab === 'projects') {
-        return !!user.has_project_management_access;
+  const [openGroups, setOpenGroups] = useState({});
+
+  // Filter visible items and their children based on user permissions
+  const visibleItems = menuStructure
+    .map((item) => {
+      if (item.children) {
+        const allowedChildren = item.children.filter((child) =>
+          isTabAllowedForAgent(child.tab || "", user)
+        );
+        if (allowedChildren.length === 0) return null;
+        return { ...item, children: allowedChildren };
       }
-      if (tab === 'lead-management') return true;
-      return false;
-    }
-    return true;
-  });
+      if (!isTabAllowedForAgent(item.tab || "", user)) return null;
+      return item;
+    })
+    .filter(Boolean);
+
+  // Automatically expand group containing active tab
+  useEffect(() => {
+    visibleItems.forEach((item) => {
+      if (item.children) {
+        const hasActiveChild = item.children.some(
+          (child) => (child.tab || "") === currentTab
+        );
+        if (hasActiveChild) {
+          setOpenGroups((prev) => ({ ...prev, [item.id]: true }));
+        }
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTab]);
+
+  const toggleGroup = (groupId) => {
+    setOpenGroups((prev) => ({
+      ...prev,
+      [groupId]: !prev[groupId],
+    }));
+  };
 
   return (
-    <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-1">
+    <nav className="admin-sidebar__nav flex-1 overflow-y-auto px-3 py-4 space-y-1.5">
       {visibleItems.map((item) => {
-        const IconComponent = item.icon;
-        const isActive = (item.tab || '') === currentTab;
+        if (item.children) {
+          return (
+            <SidebarGroup
+              key={item.id}
+              item={item}
+              isOpen={!!openGroups[item.id]}
+              onToggle={() => toggleGroup(item.id)}
+              currentTab={currentTab}
+              closeSidebarOnMobile={closeSidebarOnMobile}
+              pendingApprovalsCount={pendingApprovalsCount}
+            />
+          );
+        }
 
+        // Standalone Items (e.g. Overview, Users)
+        const IconComponent = item.icon;
+        const isActive = (item.tab || "") === currentTab;
         return (
-          <Link
-            key={item.label}
-            href={item.tab ? `/dashboard?tab=${item.tab}` : '/dashboard'}
-            onClick={closeSidebarOnMobile}
-            title={item.label}
-            className={`relative flex items-center gap-3 px-2.5 py-2 rounded-lg transition-all ${isActive
-                ? 'bg-[rgba(33,150,243,0.12)] text-[#0284c7] font-semibold'
-                : isDarkMode
-                  ? 'text-gray-300 hover:text-white hover:bg-white/5 font-medium'
-                  : 'text-[#0f172a] hover:text-[#0284c7] hover:bg-slate-100/80 font-medium'
+          <div key={item.id || item.label}>
+            <Link
+              href={item.tab ? `/dashboard?tab=${item.tab}` : "/dashboard"}
+              onClick={closeSidebarOnMobile}
+              title={item.label}
+              aria-current={isActive ? "page" : undefined}
+              data-active={isActive ? "true" : undefined}
+              className={`admin-sidebar__item relative min-h-[44px] flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors ${
+                isActive
+                  ? "bg-brand-100 text-brand-600 font-semibold"
+                  : "text-ink-700 hover:bg-app font-medium"
               }`}
-          >
-            <span
-              className={`flex items-center justify-center shrink-0 w-8 h-8 rounded-md transition-colors ${isActive
-                  ? 'bg-[rgba(33,150,243,0.18)] text-[#0284c7]'
-                  : 'text-current'
-                }`}
             >
-              {IconComponent ? (
-                <IconComponent
-                  size={20}
-                  strokeWidth={1.75}
-                  color="currentColor"
-                  aria-hidden="true"
-                />
-              ) : null}
-            </span>
-            {sidebarOpen ? (
-              <span className="flex-1 flex items-center justify-between text-sm truncate select-none">
-                <span>{item.label}</span>
-                {item.tab === 'product-approvals' && pendingApprovalsCount > 0 && (
-                  <span className="ml-auto inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold leading-none text-white bg-amber-500 rounded-full shadow-sm">
-                    {pendingApprovalsCount}
-                  </span>
-                )}
+              <span
+                className={`flex items-center justify-center shrink-0 w-8 h-8 rounded-lg ${
+                  isActive ? "text-brand-600" : "text-current"
+                }`}
+              >
+                {IconComponent ? (
+                  <IconComponent
+                    size={20}
+                    strokeWidth={1.7}
+                    aria-hidden="true"
+                  />
+                ) : null}
               </span>
-            ) : (
-              item.tab === 'product-approvals' && pendingApprovalsCount > 0 && (
-                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-amber-500 rounded-full ring-2 ring-white dark:ring-zinc-900" />
-              )
-            )}
-          </Link>
+              <span className="flex-1 text-sm truncate select-none">
+                {item.label}
+              </span>
+            </Link>
+          </div>
         );
       })}
     </nav>
@@ -194,30 +476,110 @@ function SidebarNav({ sidebarOpen, closeSidebarOnMobile, isDarkMode, user }) {
 export default function DashboardLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [user, setUser] = useState({});
-  const router = useRouter();
-
-  // Detect dark mode from navbar
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     const html = document.documentElement;
-    const updateDarkMode = () => setIsDarkMode(html.classList.contains('dark-mode'));
-    updateDarkMode();
-
-    const observer = new MutationObserver(updateDarkMode);
+    const sync = () =>
+      setIsDarkMode(
+        html.classList.contains('dark-mode') ||
+        html.classList.contains('dark') ||
+        localStorage.getItem('theme') === 'dark'
+      );
+    sync();
+    const observer = new MutationObserver(sync);
     observer.observe(html, { attributes: true, attributeFilter: ['class'] });
     return () => observer.disconnect();
   }, []);
 
+  const toggleTheme = () => {
+    const nextMode = !isDarkMode;
+    setIsDarkMode(nextMode);
+    document.documentElement.classList.toggle('dark-mode', nextMode);
+    document.documentElement.classList.toggle('dark', nextMode);
+    localStorage.setItem('theme', nextMode ? 'dark' : 'light');
+    window.dispatchEvent(new Event('storage'));
+  };
+  const [user, setUser] = useState({});
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!profileOpen) return;
+    const handleOutsideClick = (e) => {
+      if (profileRef.current && !profileRef.current.contains(e.target)) {
+        setProfileOpen(false);
+      }
+    };
+    const handleEscape = (e) => {
+      if (e.key === "Escape") setProfileOpen(false);
+    };
+    document.addEventListener("pointerdown", handleOutsideClick);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", handleOutsideClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [profileOpen]);
+
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       try {
-        let u = JSON.parse(localStorage.getItem('user'));
-        if (!u) {
-          const agentStr = localStorage.getItem('agent');
+        const activeRole = localStorage.getItem(ACTIVE_ROLE_KEY);
+        const adminToken =
+          localStorage.getItem("admin-token") ||
+          (localStorage.getItem("token") &&
+            (() => {
+              try {
+                return JSON.parse(localStorage.getItem("user") || "{}").role === "admin";
+              } catch {
+                return false;
+              }
+            })());
+
+        // Non-admin roles should never stay on the admin dashboard layout
+        if (!adminToken) {
+          if (activeRole === "agent" || localStorage.getItem("agent-token")) {
+            router.replace("/agent/dashboard");
+            return;
+          }
+          if (activeRole === "franchise" || localStorage.getItem("franchise-token")) {
+            router.replace("/franchise/dashboard");
+            return;
+          }
+          if (activeRole === "vendor" || localStorage.getItem("vendor-token") || localStorage.getItem("service-provider-token")) {
+            router.replace("/vendor/dashboard");
+            return;
+          }
+          if (activeRole === "supplier" || localStorage.getItem("supplier-token")) {
+            router.replace("/supplier/dashboard");
+            return;
+          }
+        }
+
+        let u = null;
+        if (activeRole === "agent") {
+          const agentStr = localStorage.getItem("agent");
           if (agentStr) {
             u = JSON.parse(agentStr);
-            u.role = 'agent';
+            u.role = "agent";
+          }
+        } else if (activeRole === "admin") {
+          const adminStr = localStorage.getItem("admin") || localStorage.getItem("user");
+          if (adminStr) {
+            u = JSON.parse(adminStr);
+            u.role = u.role || "admin";
+          }
+        } else {
+          const userStr = localStorage.getItem("user");
+          if (userStr) {
+            u = JSON.parse(userStr);
+          } else {
+            const agentStr = localStorage.getItem("agent");
+            if (agentStr) {
+              u = JSON.parse(agentStr);
+              u.role = "agent";
+            }
           }
         }
         setUser(u || {});
@@ -231,131 +593,191 @@ export default function DashboardLayout({ children }) {
   useEffect(() => {
     const syncSidebar = () => setSidebarOpen(window.innerWidth >= 1024);
     syncSidebar();
-    window.addEventListener('resize', syncSidebar);
-    return () => window.removeEventListener('resize', syncSidebar);
+    window.addEventListener("resize", syncSidebar);
+    return () => window.removeEventListener("resize", syncSidebar);
   }, []);
 
   useEffect(() => {
     const originalFetch = window.fetch;
     window.fetch = async (...args) => {
       const res = await originalFetch(...args);
-      if (res.status === 403 && typeof args[0] === 'string' && args[0].includes('/api/admin/project-management')) {
+      if (
+        res.status === 403 &&
+        typeof args[0] === "string" &&
+        args[0].includes("/api/admin/project-management")
+      ) {
         let u = null;
-        try { u = JSON.parse(localStorage.getItem('agent')); } catch {}
+        try {
+          u = JSON.parse(localStorage.getItem("agent"));
+        } catch {}
         if (u) {
-          alert('Your access to Project Management has been revoked. Contact admin.');
-          window.location.href = '/agent/dashboard';
+          alert(
+            "Your access to Project Management has been revoked. Contact admin.",
+          );
+          window.location.href = "/agent/dashboard";
         }
       }
       return res;
     };
-    return () => { window.fetch = originalFetch; };
+    return () => {
+      window.fetch = originalFetch;
+    };
   }, []);
   const handleLogout = async () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/login');
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+  };
+
+  const goBack = () => {
+    if (window.history.length > 1) router.back();
+    else router.push('/dashboard?tab=overview');
   };
 
   const closeSidebarOnMobile = () => {
     if (window.innerWidth < 1024) setSidebarOpen(false);
   };
 
-  const bgClass = isDarkMode ? 'bg-black' : 'bg-white';
-  const pageBgClass = isDarkMode ? 'bg-[#0f0f11]' : 'bg-[#f5f5f7]';
-  const textPrimary = isDarkMode ? 'text-white' : 'text-black';
-  const textSecondary = isDarkMode ? 'text-gray-400' : 'text-gray-600';
-  const borderColor = isDarkMode ? 'border-[var(--brand-blue-light)]' : 'border-[var(--brand-blue)]';
-  const hoverBg = isDarkMode ? 'hover:bg-[var(--brand-blue-dark)]/10' : 'hover:bg-sky-50';
-
+  const bgClass = "bg-surface";
+  const pageBgClass = "bg-app";
+  const textPrimary = "text-ink-900";
+  const borderColor = "border-line";
+  const hoverBg = "hover:bg-app";
   return (
-    <div className={`admin-dashboard-root flex h-[calc(100dvh-4rem)] overflow-hidden ${pageBgClass}`}>
+    <div
+      className={`admin-dashboard-root flex h-dvh overflow-hidden ${pageBgClass}`}
+    >
       {sidebarOpen && (
         <div
           aria-label="Close dashboard menu"
           onClick={() => setSidebarOpen(false)}
-          className="fixed inset-x-0 top-16 bottom-0 z-[70] bg-black/50 lg:hidden"
+          className="fixed inset-0 z-[70] bg-black/50 lg:hidden"
         />
       )}
 
       {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'translate-x-0 lg:w-64' : '-translate-x-full lg:translate-x-0 lg:w-20'} fixed lg:relative top-16 bottom-0 lg:top-auto lg:bottom-auto left-0 z-[80] w-72 h-[calc(100dvh-4rem)] lg:h-full shrink-0 ${bgClass} border-r ${borderColor} transition-all duration-300 flex flex-col shadow-lg`}>
+      <aside
+        className={`admin-sidebar ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} fixed lg:relative top-0 bottom-0 lg:top-auto lg:bottom-auto left-0 z-[80] w-72 lg:w-64 h-dvh lg:h-full shrink-0 ${bgClass} border-r ${borderColor} transition-transform duration-300 flex flex-col shadow-lg lg:translate-x-0`}
+      >
         {/* Logo / Header */}
-        <div className={`flex items-center justify-between h-16 px-4 border-b ${borderColor}`}>
-          {sidebarOpen && <span className={`font-black text-xl tracking-tight ${textPrimary}`}>MTBoss</span>}
-          <button
-            type="button"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-            aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-            className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-white/10 text-white' : 'hover:bg-slate-100 text-slate-700'}`}
-          >
-            {sidebarOpen ? (
-              <ChevronLeft size={18} strokeWidth={1.75} aria-hidden="true" />
-            ) : (
-              <ChevronRight size={18} strokeWidth={1.75} aria-hidden="true" />
-            )}
-          </button>
+        <div className="admin-sidebar__brand flex items-center px-4 border-b">
+          <Link href="/" aria-label="Go to MTBOSS website" className="admin-sidebar__brand-link">
+            MTBOSS
+          </Link>
         </div>
-
         {/* Menu Items with active indicator */}
         <Suspense fallback={<div className="flex-1 p-4" />}>
           <SidebarNav
-            sidebarOpen={sidebarOpen}
+            sidebarOpen={true}
             closeSidebarOnMobile={closeSidebarOnMobile}
             isDarkMode={isDarkMode}
             user={user}
           />
         </Suspense>
-
-        {/* User Profile */}
-        <div className={`border-t ${borderColor} p-3`}>
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setProfileOpen(!profileOpen)}
-              className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-lg transition-colors ${hoverBg}`}
-            >
-              <div className="w-9 h-9 rounded-lg bg-[#0284c7] flex items-center justify-center font-bold text-white shrink-0">
-                {user.name?.charAt(0) || 'A'}
-              </div>
-              {sidebarOpen && (
-                <div className="text-left flex-1 min-w-0">
-                  <p className={`text-sm font-semibold truncate ${textPrimary}`}>{user.name || 'Admin'}</p>
-                  <p className="text-xs text-slate-400 truncate">{user.email || 'admin@example.com'}</p>
-                </div>
-              )}
-            </button>
-
-            {profileOpen && sidebarOpen && (
-              <div className={`absolute bottom-full left-0 right-0 mb-2 ${bgClass} border ${borderColor} rounded-lg shadow-xl overflow-hidden`}>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className={`w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${isDarkMode ? 'text-red-400 hover:bg-red-400/10' : 'text-red-600 hover:bg-red-50'}`}
-                >
-                  <LogOut size={16} strokeWidth={1.75} aria-hidden="true" />
-                  Logout
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
       </aside>
 
       {/* Main Content */}
-      <main className={`h-full flex-1 min-w-0 overflow-y-auto overscroll-contain ${pageBgClass}`}>
-        <div className={`lg:hidden sticky top-0 z-40 flex items-center justify-between border-b px-4 py-3 ${bgClass} ${borderColor}`}>
-          <button
-            type="button"
-            onClick={() => setSidebarOpen(true)}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold ${isDarkMode ? 'text-white hover:bg-white/10' : 'text-slate-800 hover:bg-slate-100'}`}
-          >
-            <Menu size={18} strokeWidth={1.75} aria-hidden="true" />
-            Menu
-          </button>
-          <span className={`text-sm font-bold ${textPrimary}`}>Admin Dashboard</span>
+      <main
+        className={`h-full flex-1 min-w-0 overflow-y-auto overscroll-contain ${pageBgClass}`}
+      >
+        <div
+          className="admin-topbar sticky top-0 z-40 flex items-center justify-between"
+        >
+          <div className="flex items-center gap-3">
+            {/* <button
+              type="button"
+              onClick={goBack}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold ${isDarkMode ? "text-white hover:bg-white/10" : "text-slate-800 hover:bg-slate-100"}`}
+              aria-label="Go to previous page"
+            >
+              ← Back
+            </button> */}
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              className={`lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold ${isDarkMode ? "text-white hover:bg-white/10" : "text-slate-800 hover:bg-slate-100"}`}
+            >
+              <Menu size={18} strokeWidth={1.75} aria-hidden="true" />
+              Menu
+            </button>
+            <span className={`hidden lg:block text-sm font-semibold ${textPrimary}`}>
+              {" "}
+              Admin Dashboard
+            </span>
+          </div>
+          <div className="flex-1" />
+          <div className="relative flex items-center gap-1">
+                        {/* Dark Mode Toggle */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+              title={isDarkMode ? "Light mode" : "Dark mode"}
+              className="rounded-lg p-2 transition-colors hover:bg-black/5 dark:hover:bg-white/10 text-ink-700"
+            >
+              {isDarkMode ? (
+                <svg className="w-5 h-5 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5 text-slate-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                </svg>
+              )}
+            </button>
+            <DashboardNotifications />
+            <div className="relative" ref={profileRef}>
+              <button
+                type="button"
+                onClick={() => setProfileOpen((prev) => !prev)}
+                aria-expanded={profileOpen}
+                className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${hoverBg}`}
+              >
+                <span className="admin-avatar flex h-8 w-8 items-center justify-center rounded-lg font-bold text-white">
+                  {user.name?.charAt(0) || "A"}
+                </span>
+                <span
+                  className={`hidden sm:block max-w-40 truncate text-sm font-semibold ${textPrimary}`}
+                >
+                  {user.name || "Admin"}
+                </span>
+              </button>
+
+              {profileOpen && (
+                <div
+                  className={`absolute right-0 top-full mt-2 min-w-48 z-50 rounded-lg border ${borderColor} ${bgClass} p-1 shadow-xl`}
+                >
+                  <div
+                    className={`px-3 py-2 text-xs ${isDarkMode ? "text-gray-400" : "text-gray-600"}`}
+                  >
+                    {user.email || "Admin account"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      handleLogout();
+                    }}
+                    className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${isDarkMode ? "text-red-400 hover:bg-red-400/10" : "text-red-600 hover:bg-red-50"}`}
+                  >
+                    <LogOut size={16} strokeWidth={1.75} aria-hidden="true" />
+                    Logout
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              aria-label="Log out"
+              title="Log out"
+              className="admin-logout-button rounded-lg p-2 transition-colors"
+            >
+              <LogOut size={18} strokeWidth={1.75} aria-hidden="true" />
+            </button>
+          </div>
         </div>
         {children}
       </main>

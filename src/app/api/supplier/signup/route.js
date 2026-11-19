@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { ensurePackageSchema, getPackageById } from '@/lib/packages';
 import { cleanText, normalizePhone, isValidEmail, isValidIndianMobile } from '@/lib/validation';
-import { resolveManagedCity } from '@/lib/cities';
+import { resolveManagedCityWithMessage } from '@/lib/cities';
 import { createPayURequest } from '@/lib/payu';
 import { createPayUIntent, getPayUCallbackUrl, newPayUTxnId } from '@/lib/payu-intents';
 
@@ -11,16 +11,33 @@ export async function POST(request) {
     const body = await request.json();
     let {
       email, password, shop_name, phone, city, state, country, postal_code,
-      aadhaar_number, product_categories, package_id,
+      aadhaar_number, aadhaar_document,
+      pan_number, pan_document,
+      gst_number, gst_document,
+      product_categories, package_id,
     } = body;
     email = cleanText(email).toLowerCase();
     phone = normalizePhone(phone);
     postal_code = cleanText(postal_code);
-    const canonicalCity = await resolveManagedCity(city);
-
-    if (!email || !password || !shop_name || !phone || !canonicalCity) {
-      return NextResponse.json({ error: 'Required fields missing' }, { status: 400 });
+    pan_number = cleanText(pan_number || '').toUpperCase();
+    gst_number = cleanText(gst_number || '').toUpperCase();
+    if (!email) {
+      return NextResponse.json({ error: 'Email address is required' }, { status: 400 });
     }
+    if (!password) {
+      return NextResponse.json({ error: 'Password is required' }, { status: 400 });
+    }
+    if (!shop_name) {
+      return NextResponse.json({ error: 'Shop name is required' }, { status: 400 });
+    }
+    if (!phone) {
+      return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
+    }
+    const cityResult = await resolveManagedCityWithMessage(city);
+    if (cityResult.error) {
+      return NextResponse.json({ error: cityResult.error }, { status: 400 });
+    }
+    const canonicalCity = cityResult.city;
     if (!isValidEmail(email)) {
       return NextResponse.json({ error: 'Enter a valid email address' }, { status: 400 });
     }
@@ -36,17 +53,30 @@ export async function POST(request) {
     if (!aadhaar_number || !/^\d{12}$/.test(aadhaar_number.replace(/\s/g, ''))) {
       return NextResponse.json({ error: 'Valid 12-digit Aadhaar number is required' }, { status: 400 });
     }
+    if (pan_number && !/^[A-Z]{4,5}[0-9]{4}[A-Z]{1}$/i.test(pan_number)) {
+      return NextResponse.json({ error: 'Valid PAN number is required (e.g., ABCDE1234F)' }, { status: 400 });
+    }
+    if (gst_number && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(gst_number)) {
+      return NextResponse.json({ error: 'Invalid GST number format' }, { status: 400 });
+    }
     if (!Array.isArray(product_categories) || product_categories.length === 0) {
       return NextResponse.json({ error: 'Select at least one product category' }, { status: 400 });
     }
 
     await ensurePackageSchema();
     await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS product_categories TEXT[] DEFAULT '{}'`);
+    await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS aadhaar_document TEXT`);
+    await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS pan_number VARCHAR(20)`);
+    await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS pan_document TEXT`);
+    await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS gst_number VARCHAR(30)`);
+    await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS gst_document TEXT`);
 
-    const pkg = getPackageById(package_id || 'pkg_6m');
+    const pkg = await getPackageById(package_id || 'pkg_6m');
     if (!pkg) {
       return NextResponse.json({ error: 'Select a valid subscription plan' }, { status: 400 });
     }
+
+    const isFreePlan = Number(pkg.price || 0) <= 0;
 
     const client = await pool.connect();
     try {
@@ -73,9 +103,24 @@ export async function POST(request) {
         await client.query(
           `UPDATE suppliers
            SET package_id = $1, package_name = $2, package_price = $3,
-               package_duration_months = $4, package_status = 'unpaid'
-           WHERE id = $5`,
-          [pkg.id, pkg.name, pkg.price, pkg.duration_months, supplier.id]
+               package_duration_months = $4,
+               package_purchased_at = ${isFreePlan ? 'NOW()' : 'NULL'},
+               package_status = ${isFreePlan ? "'pending'" : "'unpaid'"},
+               aadhaar_document = COALESCE($5, aadhaar_document),
+               pan_number = COALESCE($6, pan_number),
+               pan_document = COALESCE($7, pan_document),
+               gst_number = COALESCE($8, gst_number),
+               gst_document = COALESCE($9, gst_document)
+           WHERE id = $10`,
+          [
+            pkg.id, pkg.name, pkg.price, pkg.duration_months,
+            aadhaar_document || null,
+            pan_number || null,
+            pan_document || null,
+            gst_number || null,
+            gst_document || null,
+            supplier.id
+          ]
         );
       } else {
         const result = await client.query(
@@ -83,16 +128,22 @@ export async function POST(request) {
             email, password_hash,
             shop_name, business_name, phone,
             city, state, country, postal_code,
-            aadhaar_number, product_categories, status,
+            aadhaar_number, aadhaar_document,
+            pan_number, pan_document,
+            gst_number, gst_document,
+            product_categories, status,
             package_id, package_name, package_price, package_duration_months,
             package_purchased_at, package_status
           ) VALUES (
             $1, crypt($2, gen_salt('bf')),
             $3, $4, $5,
             $6, $7, $8, $9,
-            $10, $11, 'pending',
-            $12, $13, $14, $15,
-            NULL, 'unpaid'
+            $10, $11,
+            $12, $13,
+            $14, $15,
+            $16, 'pending',
+            $17, $18, $19, $20,
+            $21, $22
           )
           RETURNING id, email, shop_name, phone, status, created_at`,
           [
@@ -100,41 +151,54 @@ export async function POST(request) {
             shop_name, shop_name, phone,
             canonicalCity, state || null, country || 'India', postal_code || null,
             aadhaar_number.replace(/\s/g, ''),
+            aadhaar_document || null,
+            pan_number || null,
+            pan_document || null,
+            gst_number || null,
+            gst_document || null,
             product_categories,
             pkg.id, pkg.name, pkg.price, pkg.duration_months,
+            isFreePlan ? new Date() : null,
+            isFreePlan ? 'pending' : 'unpaid',
           ]
         );
         supplier = result.rows[0];
       }
 
-      const txnid = newPayUTxnId('SRG');
-      await createPayUIntent({
-        txnid,
-        purpose: 'supplier_registration',
-        entityId: supplier.id,
-        packageId: pkg.id,
-        amount: pkg.price,
-        client,
-      });
-      const callbackUrl = getPayUCallbackUrl(request);
-      const payment = createPayURequest({
-        txnid,
-        amount: pkg.price,
-        productinfo: `MTBOSS supplier registration - ${pkg.label}`,
-        firstname: String(shop_name).trim().split(/\s+/)[0],
-        email,
-        phone,
-        surl: callbackUrl,
-        furl: callbackUrl,
-        udf1: String(supplier.id),
-        udf2: pkg.id,
-        udf3: 'supplier_registration',
-      });
+      let payment = null;
+      if (!isFreePlan) {
+        const txnid = newPayUTxnId('SRG');
+        await createPayUIntent({
+          txnid,
+          purpose: 'supplier_registration',
+          entityId: supplier.id,
+          packageId: pkg.id,
+          amount: pkg.price,
+          client,
+        });
+        const callbackUrl = getPayUCallbackUrl(request);
+        payment = createPayURequest({
+          txnid,
+          amount: pkg.price,
+          productinfo: `MTBOSS supplier registration - ${pkg.label}`,
+          firstname: String(shop_name).trim().split(/\s+/)[0],
+          email,
+          phone,
+          surl: callbackUrl,
+          furl: callbackUrl,
+          udf1: String(supplier.id),
+          udf2: pkg.id,
+          udf3: 'supplier_registration',
+        });
+      }
 
       await client.query('COMMIT');
       return NextResponse.json({
         success: true,
-        message: 'Registration saved. Redirecting to PayU for subscription payment.',
+        message: isFreePlan
+          ? 'Registration submitted successfully. Waiting for admin approval.'
+          : 'Registration saved. Redirecting to PayU for subscription payment.',
+        redirectTo: '/supplier/pending-approval',
         supplier: {
           id: supplier.id,
           email: supplier.email,

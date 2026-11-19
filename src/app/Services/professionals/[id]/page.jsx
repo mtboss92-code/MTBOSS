@@ -1,4 +1,5 @@
 'use client';
+import RequiredAsterisk from '../../../components/RequiredAsterisk';
 import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
@@ -189,7 +190,7 @@ export default function ProfessionalProfilePage() {
             <p style={{ color: 'rgba(255,255,255,0.55)', margin: '0 0 20px', fontSize: '15px', fontWeight: 500 }}>{pro.title}</p>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.7)', padding: '5px 14px', fontSize: '11px', fontWeight: 600 }}>
-                📍 {pro.city}
+                {pro.city}
               </span>
               <span style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.7)', padding: '5px 14px', fontSize: '11px', fontWeight: 600 }}>
                 ⏱ {pro.experience} yr{pro.experience !== 1 ? 's' : ''} experience
@@ -236,7 +237,7 @@ export default function ProfessionalProfilePage() {
           {/* ──────────────────── SIDEBAR ──────────────────────────────────── */}
           <aside className="pro-aside" style={{ width: '292px', flexShrink: 0, position: 'sticky', top: '24px' }}>
 
-            {/* Contact via MTboss— no direct contact info shown */}
+            {/* Contact via MTBOSS— no direct contact info shown */}
             <div style={{ background: t.card, border: `1px solid ${t.border}`, marginBottom: '16px', overflow: 'hidden' }}>
               <div style={{ background: isDark ? '#0d0d0d' : '#f9fafb', padding: '14px 20px', borderBottom: `1px solid ${t.border}` }}>
                 <p style={{ margin: 0, fontSize: '9px', fontWeight: 800, color: t.accent, textTransform: 'uppercase', letterSpacing: '0.12em' }}>Contact</p>
@@ -382,11 +383,11 @@ export default function ProfessionalProfilePage() {
                 <form onSubmit={handleEnquiry}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '14px' }}>
                     <div>
-                      <label style={{ fontSize: '10px', fontWeight: 700, color: t.muted, textTransform: 'uppercase', letterSpacing: '0.07em', display: 'block', marginBottom: '6px' }}>Your Name *</label>
+                      <label style={{ fontSize: '10px', fontWeight: 700, color: t.muted, textTransform: 'uppercase', letterSpacing: '0.07em', display: 'block', marginBottom: '6px' }}>Your Name <RequiredAsterisk /></label>
                       <input className="enq-inp" style={inp} placeholder="Full name" value={form.name} onChange={set('name')} />
                     </div>
                     <div>
-                      <label style={{ fontSize: '10px', fontWeight: 700, color: t.muted, textTransform: 'uppercase', letterSpacing: '0.07em', display: 'block', marginBottom: '6px' }}>Email Address *</label>
+                      <label style={{ fontSize: '10px', fontWeight: 700, color: t.muted, textTransform: 'uppercase', letterSpacing: '0.07em', display: 'block', marginBottom: '6px' }}>Email Address <RequiredAsterisk /></label>
                       <input className="enq-inp" style={inp} type="email" placeholder="you@example.com" value={form.email} onChange={set('email')} />
                     </div>
                     <div>
@@ -395,7 +396,7 @@ export default function ProfessionalProfilePage() {
                     </div>
                   </div>
                   <div style={{ marginBottom: '20px' }}>
-                    <label style={{ fontSize: '10px', fontWeight: 700, color: t.muted, textTransform: 'uppercase', letterSpacing: '0.07em', display: 'block', marginBottom: '6px' }}>Your Message *</label>
+                    <label style={{ fontSize: '10px', fontWeight: 700, color: t.muted, textTransform: 'uppercase', letterSpacing: '0.07em', display: 'block', marginBottom: '6px' }}>Your Message <RequiredAsterisk /></label>
                     <textarea className="enq-inp" style={{ ...inp, resize: 'vertical' }} rows={5}
                       placeholder={`Describe your project or requirement to ${firstName}…`}
                       value={form.message} onChange={set('message')} />

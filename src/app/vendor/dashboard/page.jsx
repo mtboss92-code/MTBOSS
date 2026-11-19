@@ -1,23 +1,29 @@
 // ════════════════════════════════════════════════════════════════════════════════
-// FILE: app/vendor/dashboard/page.jsx
-// VENDOR DASHBOARD - Notifications, Active Booking, Messages
+// FILE: app/service provider/dashboard/page.jsx
+// service provider DASHBOARD - Notifications, Active Booking, Messages
 // ════════════════════════════════════════════════════════════════════════════════
- 
-"use client";
+'use client';
+import RequiredAsterisk from '../../components/RequiredAsterisk';
+
 import { Suspense, useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { redirectToPayU } from '@/lib/payu-client';
+import PanelLayout from '@/app/components/PanelLayout';
+import {
+  LayoutDashboard,
+  ShoppingCart,
+  Layers,
+  CalendarDays,
+  BarChart3,
+  History,
+  Package,
+  User,
+} from '@/app/components/ui/icons';
 
 const panelLoading = () => <div className="min-h-48 flex items-center justify-center text-sm opacity-60">Loading panel...</div>;
-const MaterialOrdersPanel = dynamic(() => import('@/app/components/MaterialOrdersPanel'), { loading: panelLoading });
-const VendorShopProductsManager = dynamic(
-  () => import('@/app/components/ShopNowManager').then((module) => module.VendorShopProductsManager),
-  { loading: panelLoading },
-);
-const ShippingSettingsManager = dynamic(() => import('@/app/components/ShippingSettingsManager'), { loading: panelLoading });
-const VENDOR_TABS = ['notifications', 'leads', 'history', 'packages', 'profile', 'materials', 'products', 'shipping'];
+const VENDOR_TABS = ['overview', 'bookings', 'notifications', 'leads', 'packages', 'profile'];
 
 function ServiceIcon({ icon, className = "h-8 w-8" }) {
   const value = String(icon || "").trim();
@@ -43,15 +49,15 @@ function ServiceIcon({ icon, className = "h-8 w-8" }) {
   );
 }
  
-export default function VendorDashboard() {
+export default function ServiceProviderDashboard() {
   return (
     <Suspense fallback={<main className="min-h-screen flex items-center justify-center">Loading dashboard...</main>}>
-      <VendorDashboardContent />
+      <ServiceProviderDashboardContent />
     </Suspense>
   );
 }
 
-function VendorDashboardContent() {
+function ServiceProviderDashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [vendor, setVendor] = useState(null);
@@ -71,7 +77,8 @@ function VendorDashboardContent() {
   const [completeLoading, setCompleteLoading] = useState(false);
   const [activeTab, setActiveTab] = useState(() => {
     const requestedTab = searchParams.get('tab');
-    return VENDOR_TABS.includes(requestedTab) ? requestedTab : 'notifications';
+    if (requestedTab === 'notifications') return 'bookings';
+    return VENDOR_TABS.includes(requestedTab) ? requestedTab : 'overview';
   });
   const [vendorProfile, setVendorProfile] = useState(null);
   const [editMode, setEditMode] = useState(false);
@@ -116,7 +123,7 @@ function VendorDashboardContent() {
   }, [editMode]);
  
   useEffect(() => {
-    const token = localStorage.getItem("vendor-token");
+    const token = (localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token'));
     if (!token) {
       setLoading(false);
       router.replace("/vendor/login");
@@ -127,7 +134,7 @@ function VendorDashboardContent() {
       if (document.visibilityState === 'visible') fetchVendorData(token, activeTab);
     };
     refresh();
-    const shouldPoll = activeTab === 'notifications' || activeTab === 'leads';
+    const shouldPoll = activeTab === 'overview' || activeTab === 'notifications' || activeTab === 'bookings' || activeTab === 'leads';
     const interval = shouldPoll ? setInterval(refresh, 20000) : null;
     document.addEventListener('visibilitychange', refresh);
     return () => {
@@ -135,13 +142,15 @@ function VendorDashboardContent() {
       document.removeEventListener('visibilitychange', refresh);
     };
     // Each dashboard tab loads only the data it displays. Live tabs refresh at
-    // a modest interval instead of hitting every vendor endpoint every 5s.
+    // a modest interval instead of hitting every service provider endpoint every 5s.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, activeTab]);
 
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (VENDOR_TABS.includes(tab)) {
+    if (tab === 'notifications') {
+      setActiveTab('bookings');
+    } else if (VENDOR_TABS.includes(tab)) {
       setActiveTab(tab);
       if (tab === 'packages') loadPackages();
     }
@@ -155,20 +164,19 @@ function VendorDashboardContent() {
         fetch(url, { headers }).then(async (response) => ({ key, response, data: await response.json() })),
       );
 
-      if (tab === 'notifications') {
+      if (tab === 'overview' || tab === 'notifications' || tab === 'bookings') {
         addRequest('notifications', '/api/vendor/notifications');
         addRequest('active', '/api/vendor/bookings?type=active');
         addRequest('completed', '/api/vendor/bookings?type=completed');
+        addRequest('leads', '/api/vendor/leads');
       } else if (tab === 'leads') {
         addRequest('leads', '/api/vendor/leads');
-      } else if (tab === 'history') {
-        addRequest('completed', '/api/vendor/bookings?type=completed');
       }
       if (!profileLoadedRef.current || tab === 'profile') addRequest('profile', '/api/vendor/profile');
 
       const results = await Promise.all(requests);
       if (results.some(({ response }) => response.status === 401 || response.status === 403)) {
-        localStorage.removeItem('vendor-token');
+        localStorage.removeItem('service provider-token');
         setLoading(false);
         router.replace('/vendor/login');
         return;
@@ -220,13 +228,13 @@ function VendorDashboardContent() {
 
       setLoading(false);
     } catch (error) {
-      console.error("Error fetching vendor data:", error);
+      console.error("Error fetching service provider data:", error);
       setLoading(false);
     }
   }
 
   async function loadPackages() {
-    const token = localStorage.getItem('vendor-token');
+    const token = (localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token'));
     try {
       const [listRes, statusRes] = await Promise.all([
         fetch('/api/vendor/packages', { headers: { Authorization: `Bearer ${token}` } }),
@@ -242,7 +250,7 @@ function VendorDashboardContent() {
   async function selectPackage(pkgId) {
     setPkgLoading(true);
     setPkgMsg('');
-    const token = localStorage.getItem('vendor-token');
+    const token = (localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token'));
     try {
       const res = await fetch('/api/vendor/packages', {
         method: 'POST',
@@ -261,7 +269,7 @@ function VendorDashboardContent() {
   async function verifyStartOtp(bookingId) {
     setOtpLoading(true);
     setOtpMsg('');
-    const token = localStorage.getItem('vendor-token');
+    const token = (localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token'));
     try {
       const res = await fetch(`/api/bookings/${bookingId}/verify-start-otp`, {
         method: 'POST',
@@ -283,7 +291,7 @@ function VendorDashboardContent() {
   async function sendStartOtp(bookingId) {
     setOtpLoading(true);
     setOtpMsg('');
-    const token = localStorage.getItem('vendor-token');
+    const token = (localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token'));
     try {
       const res = await fetch(`/api/bookings/${bookingId}/start-otp`, {
         method: 'POST',
@@ -301,7 +309,7 @@ function VendorDashboardContent() {
   async function verifyFinishOtp(bookingId) {
     setOtpLoading(true);
     setOtpMsg('');
-    const token = localStorage.getItem('vendor-token');
+    const token = (localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token'));
     try {
       const res = await fetch(`/api/bookings/${bookingId}/verify-finish-otp`, {
         method: 'POST',
@@ -322,7 +330,7 @@ function VendorDashboardContent() {
   async function sendFinishOtp(bookingId) {
     setOtpLoading(true);
     setOtpMsg('');
-    const token = localStorage.getItem('vendor-token');
+    const token = (localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token'));
     try {
       const res = await fetch(`/api/bookings/${bookingId}/finish-otp`, {
         method: 'POST',
@@ -364,7 +372,7 @@ function VendorDashboardContent() {
   async function saveProfile() {
     setProfileLoading(true);
     setProfileMsg("");
-    const token = localStorage.getItem("vendor-token");
+    const token = (localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token'));
     try {
       const res = await fetch("/api/vendor/profile", {
         method: "PUT",
@@ -394,10 +402,9 @@ function VendorDashboardContent() {
   }
 
   function openBookings() {
-    setActiveTab("notifications");
+    setActiveTab("bookings");
 
-    // "Bookings" is the default tab, so setting the same tab alone has no
-    // visible effect. Move the vendor to the assigned booking/request details.
+    // "Bookings" moves the service provider to the assigned booking/request details.
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         const target = activeBooking ? activeBookingRef.current : incomingBookingsRef.current;
@@ -425,7 +432,7 @@ function VendorDashboardContent() {
       return;
     }
 
-    const token = localStorage.getItem("vendor-token");
+    const token = (localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token'));
     setRequestMsg('');
     try {
       const res = await fetch(`/api/bookings/${bookingId}/accept`, {
@@ -471,7 +478,7 @@ function VendorDashboardContent() {
   }
  
   async function rejectBooking(bookingId) {
-    const token = localStorage.getItem("vendor-token");
+    const token = (localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token'));
     try {
       const res = await fetch(`/api/bookings/${bookingId}/reject`, {
         method: "POST",
@@ -491,7 +498,7 @@ function VendorDashboardContent() {
     if (!activeBooking) return;
     if (!isQuickJob && !extraAmount) return;
     setCompleteLoading(true);
-    const token = localStorage.getItem("vendor-token");
+    const token = (localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token'));
     try {
       const res = await fetch(`/api/bookings/${activeBooking.id}/complete`, {
         method: "POST",
@@ -524,7 +531,7 @@ function VendorDashboardContent() {
       navigator.geolocation.getCurrentPosition(
         async (position) => {
           const { latitude, longitude, accuracy } = position.coords;
-          const token = localStorage.getItem("vendor-token");
+          const token = (localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token'));
 
           try {
             const res = await fetch("/api/vendor/location/update", {
@@ -572,82 +579,76 @@ function VendorDashboardContent() {
     );
   }
  
+  const handleLogout = () => {
+    localStorage.removeItem("service provider-token");
+    router.replace("/vendor/login");
+  };
+
+  const menuItems = [
+    { key: 'overview', label: 'Overview', icon: LayoutDashboard },
+    {
+      key: 'bookings',
+      label: 'Bookings',
+      icon: CalendarDays,
+      badge: notifications.length > 0 ? notifications.length : null,
+      badgeColor: 'bg-amber-500 text-white',
+    },
+    {
+      key: 'leads',
+      label: 'Lead Track',
+      icon: BarChart3,
+      badge: vendorLeadCounts.incoming > 0 ? vendorLeadCounts.incoming : null,
+      badgeColor: 'bg-[var(--brand-blue)] text-black',
+    },
+    { key: 'packages', label: 'Package', icon: Package },
+    { key: 'profile', label: 'Profile', icon: User },
+  ];
+
   return (
-    <main className={`min-h-screen font-serif ${bg} px-4 py-6 sm:p-6`}>
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex flex-col gap-4 mb-6 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0 max-w-full">
-            <h1 className="max-w-full text-[clamp(2rem,13vw,3.25rem)] sm:text-4xl font-black uppercase leading-[0.95]">
-              Vendor<br />Dashboard
-            </h1>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab("products");
-                window.requestAnimationFrame(() => {
-                  window.requestAnimationFrame(() => {
-                    document.getElementById('vendor-shop-product-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  });
-                });
-              }}
-              className="mt-4 inline-flex items-center justify-center rounded-lg bg-[var(--brand-blue)] px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg transition-transform hover:scale-105"
-            >
-              + Add Product
-            </button>
-            <p className={`text-sm ${muted} mt-2 break-words`}>{vendorProfile?.shop_name || "My Shop"} · {vendorProfile?.city || ""}</p>
-          </div>
-          <div className={`grid w-full min-w-0 grid-cols-2 overflow-hidden border ${isDark ? "border-zinc-800" : "border-zinc-200"} sm:flex sm:w-auto sm:flex-wrap lg:shrink-0`}>
-            {[
-              { key: "products", label: "Products" },
-              { key: "shipping", label: "Shipping" },
-              { key: "materials", label: "Material Orders" },
-              { key: "notifications", label: "📬 Bookings" },
-              { key: "leads", label: "Lead Track" },
-              { key: "history", label: "📋 History" },
-              { key: "packages", label: "📦 Package" },
-              { key: "profile", label: "👤 Profile" },
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => {
-                  if (tab.key === "notifications") {
-                    openBookings();
-                    return;
-                  }
-                  setActiveTab(tab.key);
-                  if (tab.key === "packages") loadPackages();
-                }}
-                className={`min-w-0 whitespace-normal break-words px-2.5 py-2.5 text-[10px] font-black uppercase leading-tight tracking-wider transition-all sm:px-5 sm:tracking-widest ${
-                  activeTab === tab.key
-                    ? "bg-[var(--brand-blue)] text-black"
-                    : isDark ? "text-zinc-400 hover:text-white" : "text-zinc-500 hover:text-zinc-900"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
- 
-        {activeTab === "products" ? (
-          <VendorShopProductsManager isDarkMode={isDark} />
-        ) : activeTab === "shipping" ? (
-          <ShippingSettingsManager vendor city={vendorProfile?.city} />
-        ) : activeTab === "materials" ? (
-          <MaterialOrdersPanel role="vendor" embedded />
-        ) : activeTab === "leads" ? (
+    <PanelLayout
+      title="Service Provider Dashboard"
+      subtitle={`${vendorProfile?.shop_name || 'My Shop'} · ${vendorProfile?.city || ''}`}
+      user={{
+        name: vendorProfile?.shop_name || 'Service Provider',
+        city: vendorProfile?.city || '',
+        role: 'Service Provider',
+      }}
+      roleBadge="Service Provider"
+      menuItems={menuItems}
+      activeTab={activeTab === 'notifications' ? 'bookings' : activeTab}
+      onTabChange={(tab) => {
+        if (tab === 'bookings') {
+          openBookings();
+          return;
+        }
+        setActiveTab(tab);
+        if (tab === 'packages') loadPackages();
+        router.push(`/vendor/dashboard?tab=${tab}`);
+      }}
+      onLogout={handleLogout}
+      actions={
+        <button
+          type="button"
+          onClick={() => fetchVendorData((localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token')))}
+          className="px-3 py-1.5 border border-slate-300 dark:border-zinc-700 text-xs font-semibold rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+        >
+          Refresh
+        </button>
+      }
+    >
+      <div className="space-y-6">
+        {activeTab === "leads" ? (
           <div className="space-y-5">
             <div className={`border ${card} p-5`}>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <p className="text-[10px] font-black uppercase text-[var(--brand-blue)] tracking-widest">Lead Track</p>
-                  <h2 className="mt-1 text-xl font-black uppercase">Vendor Service Leads</h2>
+                  <h2 className="mt-1 text-xl font-black uppercase">Service Provider Leads</h2>
                   <p className={`mt-1 text-xs ${muted}`}>Incoming requests, active work, payment follow-up, and completed leads in one place.</p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => fetchVendorData(localStorage.getItem("vendor-token"))}
+                  onClick={() => fetchVendorData((localStorage.getItem('vendor-token') || localStorage.getItem('service-provider-token') || localStorage.getItem('service provider-token')))}
                   className="px-4 py-2 border border-[var(--brand-blue)] text-[var(--brand-blue)] text-[9px] font-black uppercase tracking-widest"
                 >
                   Refresh
@@ -744,103 +745,6 @@ function VendorDashboardContent() {
                 );
               })}
             </div>
-          </div>
-        ) : activeTab === "history" ? (
-          /* ── History Tab ── */
-          <div className="space-y-4">
-            {/* Earnings Summary */}
-            <div className={`border ${card} p-5`}>
-              <p className="text-[10px] font-black uppercase text-[var(--brand-blue)] tracking-widest mb-4">Earnings Breakdown</p>
-              <div className="grid grid-cols-3 gap-4">
-                {[
-                  { label: "Your Net Earnings (85%)", value: `₹${totalEarning.toLocaleString('en-IN')}`, color: "text-green-500" },
-                  { label: "Admin Commission (15%)", value: `₹${Math.round(completedBookings.reduce((s,b) => s + parseFloat(b.admin_commission||0), 0)).toLocaleString('en-IN')}`, color: "text-[var(--brand-blue)]" },
-                  { label: "GST Collected (18%)", value: `₹${Math.round(completedBookings.reduce((s,b) => s + parseFloat(b.gst_amount||0), 0)).toLocaleString('en-IN')}`, color: "text-zinc-400" },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className={`p-4 border ${isDark ? "border-zinc-800 bg-zinc-900" : "border-zinc-100 bg-zinc-50"}`}>
-                    <p className={`text-[9px] font-black uppercase tracking-widest ${muted}`}>{label}</p>
-                    <p className={`text-2xl font-black mt-1 ${color}`}>{value}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Completed Bookings List */}
-            {completedBookings.length === 0 ? (
-              <div className={`border ${card} p-10 text-center`}>
-                <p className={muted}>No completed bookings yet.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {completedBookings.map((b) => (
-                  <div key={b.id} className={`border ${card} p-5`}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 space-y-3">
-                        {/* Header */}
-                        <div className="flex items-center gap-3">
-                          <ServiceIcon icon={b.icon} className="h-9 w-9" />
-                          <div>
-                            <p className="font-black text-sm">{b.label}</p>
-                            <p className={`text-[10px] ${muted}`}>{b.booking_reference} · {b.service_city}</p>
-                          </div>
-                        </div>
-
-                        {/* Customer */}
-                        <div className="flex gap-6">
-                          <div>
-                            <p className={`text-[9px] font-black uppercase ${muted}`}>Customer</p>
-                            <p className="text-sm font-medium">{b.user_name}</p>
-                            <p className={`text-[10px] ${muted}`}>{b.user_phone}</p>
-                          </div>
-                          <div>
-                            <p className={`text-[9px] font-black uppercase ${muted}`}>Date</p>
-                            <p className="text-sm font-medium">{b.booking_date ? new Date(b.booking_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</p>
-                          </div>
-                          <div>
-                            <p className={`text-[9px] font-black uppercase ${muted}`}>Completed</p>
-                            <p className="text-sm font-medium">{b.completed_at ? new Date(b.completed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</p>
-                          </div>
-                        </div>
-
-                        {/* Rating */}
-                        {b.rating_stars ? (
-                          <div className={`p-3 border-l-2 border-[var(--brand-blue)] ${isDark ? "bg-zinc-900" : "bg-zinc-50"}`}>
-                            <div className="flex items-center gap-2">
-                              <span className="text-[var(--brand-blue)] font-black">{"★".repeat(b.rating_stars)}{"☆".repeat(5 - b.rating_stars)}</span>
-                              <span className={`text-[10px] font-black ${muted}`}>{b.rating_stars}/5</span>
-                            </div>
-                            {b.review_text && <p className={`text-xs mt-1 ${muted}`}>{b.review_text}</p>}
-                          </div>
-                        ) : (
-                          <p className={`text-[10px] ${muted}`}>No rating yet</p>
-                        )}
-                      </div>
-
-                      {/* Earnings */}
-                      <div className={`min-w-35 p-4 border ${isDark ? "border-zinc-800 bg-zinc-900" : "border-zinc-100 bg-zinc-50"} space-y-2`}>
-                        <p className={`text-[9px] font-black uppercase tracking-widest ${muted}`}>Earnings</p>
-                        <div>
-                          <p className={`text-[9px] ${muted}`}>Total Charged</p>
-                          <p className="text-sm font-black">₹{b.final_amount || b.total_amount}</p>
-                        </div>
-                        <div>
-                          <p className={`text-[9px] ${muted}`}>− GST (18%)</p>
-                          <p className="text-xs text-red-400">− ₹{b.gst_amount}</p>
-                        </div>
-                        <div>
-                          <p className={`text-[9px] ${muted}`}>− Commission (15%)</p>
-                          <p className="text-xs text-red-400">− ₹{b.admin_commission}</p>
-                        </div>
-                        <div className={`border-t pt-2 ${isDark ? "border-zinc-700" : "border-zinc-200"}`}>
-                          <p className={`text-[9px] font-black uppercase ${muted}`}>Your Net</p>
-                          <p className="text-lg font-black text-green-500">₹{b.vendor_earning}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         ) : activeTab === "packages" ? (
           /* ── Packages Tab ── */
@@ -1066,37 +970,57 @@ function VendorDashboardContent() {
             )}
           </div>
         ) : (
-        <>
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <div className={`p-6 border ${card}`}>
-            <p className="text-[10px] font-black uppercase text-[var(--brand-blue)] tracking-widest">Pending</p>
-            <p className="text-3xl font-black mt-2">{notifications.length}</p>
-            <p className={`text-[10px] ${muted} mt-1`}>Incoming requests</p>
-          </div>
- 
-          <button
-            type="button"
-            onClick={openBookings}
-            className={`p-6 border ${card} text-left cursor-pointer hover:border-[var(--brand-blue)] transition-colors no-global-btn`}
-          >
-            <p className="text-[10px] font-black uppercase text-[var(--brand-blue)] tracking-widest">Active</p>
-            <p className="text-3xl font-black mt-2">{activeBooking ? 1 : 0}</p>
-            <p className={`text-[10px] ${muted} mt-1`}>Current booking</p>
-          </button>
- 
-          <div className={`p-6 border ${card}`}>
-            <p className="text-[10px] font-black uppercase text-[var(--brand-blue)] tracking-widest">Completed</p>
-            <p className="text-3xl font-black mt-2">{completedCount}</p>
-            <p className={`text-[10px] ${muted} mt-1`}>Total jobs</p>
-          </div>
- 
-          <div className={`p-6 border ${card}`}>
-            <p className="text-[10px] font-black uppercase text-[var(--brand-blue)] tracking-widest">Your Earnings</p>
-            <p className="text-3xl font-black mt-2">₹{totalEarning.toLocaleString('en-IN')}</p>
-            <p className={`text-[10px] ${muted} mt-1`}>After GST + commission</p>
-          </div>
-        </div>
+          <div className="space-y-6">
+            {activeTab === 'overview' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-2">
+                <div className={`border ${card} p-5 rounded-lg flex items-center justify-between`}>
+                  <div>
+                    <p className={`text-[10px] font-black uppercase tracking-widest ${muted}`}>Pending</p>
+                    <p className="text-3xl font-black mt-1 text-amber-500">{notifications.length}</p>
+                    <p className={`text-[10px] ${muted} mt-0.5`}>Incoming requests</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                    <CalendarDays size={22} />
+                  </div>
+                </div>
+
+                <div
+                  onClick={openBookings}
+                  className={`border ${card} p-5 rounded-lg flex items-center justify-between cursor-pointer hover:border-[var(--brand-blue)] transition-colors`}
+                >
+                  <div>
+                    <p className={`text-[10px] font-black uppercase tracking-widest ${muted}`}>Active</p>
+                    <p className="text-3xl font-black mt-1 text-[var(--brand-blue)]">{activeBooking ? 1 : 0}</p>
+                    <p className={`text-[10px] ${muted} mt-0.5`}>Current booking</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-lg bg-[rgba(33,150,243,0.12)] text-[#0284c7] flex items-center justify-center">
+                    <BarChart3 size={22} />
+                  </div>
+                </div>
+
+                <div className={`border ${card} p-5 rounded-lg flex items-center justify-between`}>
+                  <div>
+                    <p className={`text-[10px] font-black uppercase tracking-widest ${muted}`}>Completed</p>
+                    <p className="text-3xl font-black mt-1 text-green-500">{completedCount}</p>
+                    <p className={`text-[10px] ${muted} mt-0.5`}>Total jobs</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-lg bg-green-500/10 text-green-500 flex items-center justify-center">
+                    <History size={22} />
+                  </div>
+                </div>
+
+                <div className={`border ${card} p-5 rounded-lg flex items-center justify-between`}>
+                  <div>
+                    <p className={`text-[10px] font-black uppercase tracking-widest ${muted}`}>Your Earnings</p>
+                    <p className="text-3xl font-black mt-1">₹{totalEarning.toLocaleString('en-IN')}</p>
+                    <p className={`text-[10px] ${muted} mt-0.5`}>After GST + commission</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+                    <Layers size={22} />
+                  </div>
+                </div>
+              </div>
+            )}
  
         <div ref={incomingBookingsRef} className="grid grid-cols-1 lg:grid-cols-3 gap-6 scroll-mt-6">
           {/* Notifications / Incoming Requests */}
@@ -1122,7 +1046,7 @@ function VendorDashboardContent() {
                     >
                       <div className="flex items-start justify-between">
                         <div>
-                          <p className="font-black text-[var(--brand-blue)]">{notif.label} 📍 {notif.service_city}</p>
+                          <p className="font-black text-[var(--brand-blue)]">{notif.label} {notif.service_city}</p>
                           <p className={`text-sm ${muted} mt-1`}>
                             {notif.contact_locked ? 'Contact locked - package required' : `Phone: ${notif.user_phone}`}
                           </p>
@@ -1161,7 +1085,7 @@ function VendorDashboardContent() {
                   </p>
                   {selectedNotification.location_map_url && (
                     <a href={selectedNotification.location_map_url} target="_blank" className="text-[10px] text-[var(--brand-blue)] hover:underline mt-1 inline-block">
-                      📍 View on Map
+                      View on Map
                     </a>
                   )}
                 </div>
@@ -1184,7 +1108,7 @@ function VendorDashboardContent() {
                 {selectedNotification.contact_locked && (
                   <div className={`p-4 border ${isDark ? 'border-yellow-500/30 bg-yellow-500/10' : 'border-yellow-200 bg-yellow-50'}`}>
                     <p className="text-[10px] font-black uppercase tracking-widest text-yellow-600">Package Required</p>
-                    <p className={`text-xs mt-1 ${muted}`}>Only paid vendors can accept this request and see customer phone, address, and map details.</p>
+                    <p className={`text-xs mt-1 ${muted}`}>Only paid service providers can accept this request and see customer phone, address, and map details.</p>
                     <button
                       onClick={() => { setActiveTab('packages'); loadPackages(); }}
                       className="mt-3 w-full py-2.5 bg-[var(--brand-blue)] text-black text-[9px] font-black uppercase hover:bg-[var(--brand-blue-light)] transition-all"
@@ -1237,7 +1161,7 @@ function VendorDashboardContent() {
                   <p className="text-sm">{activeBooking.service_address}</p>
                   {activeBooking.location_map_url && (
                     <a href={activeBooking.location_map_url} target="_blank" rel="noreferrer" className="text-[10px] text-[var(--brand-blue)] hover:underline mt-1 inline-block">
-                      📍 Open in Maps
+                      Open in Maps
                     </a>
                   )}
                 </div>
@@ -1268,7 +1192,7 @@ function VendorDashboardContent() {
 
                 {otpMsg && <p className={`text-xs font-bold ${otpMsg.includes('✓') ? 'text-green-500' : 'text-red-400'}`}>{otpMsg}</p>}
 
-                {/* OTP Start Flow - Vendor enters start OTP to begin */}
+                {/* OTP Start Flow - service provider enters start OTP to begin */}
                 {(activeBooking.status === 'VENDOR_ACCEPTED' || activeBooking.status === 'VENDOR_ON_WAY') && !activeBooking.start_otp_verified && (
                   <div className={`p-4 border ${isDark ? 'border-blue-500/30 bg-blue-500/10' : 'border-blue-200 bg-blue-50'}`}>
                     <p className="text-[9px] font-black uppercase text-blue-400 tracking-widest mb-2">🔑 Enter Start OTP</p>
@@ -1299,7 +1223,7 @@ function VendorDashboardContent() {
                   </div>
                 )}
 
-                {/* Service In Progress - Vendor enters finish OTP */}
+                {/* Service In Progress - service provider enters finish OTP */}
                 {activeBooking.status === 'IN_PROGRESS' && (
                   <div className={`p-4 border ${isDark ? 'border-orange-500/30 bg-orange-500/10' : 'border-orange-200 bg-orange-50'}`}>
                     <p className="text-[9px] font-black uppercase text-orange-400 tracking-widest mb-2">🏁 Enter Finish OTP</p>
@@ -1344,7 +1268,7 @@ function VendorDashboardContent() {
                       onClick={() => updateLocation()}
                       className="w-full py-2.5 border border-[var(--brand-blue)] text-[var(--brand-blue)] text-[9px] font-black uppercase hover:bg-[var(--brand-blue)]/10 transition-all"
                     >
-                      📍 Update My Location
+                      Update My Location
                     </button>
                   </>
                 ) : null}
@@ -1352,7 +1276,7 @@ function VendorDashboardContent() {
             </div>
           </div>
         )}
-        </>
+          </div>
         )}
       </div>
 
@@ -1414,7 +1338,7 @@ function VendorDashboardContent() {
               ) : (
                 <>
                   <div>
-                    <label className={`block text-[9px] font-black uppercase tracking-widest mb-1.5 ${muted}`}>Extra Amount Beyond Base (₹) *</label>
+                    <label className={`block text-[9px] font-black uppercase tracking-widest mb-1.5 ${muted}`}>Extra Amount Beyond Base (₹) <RequiredAsterisk /></label>
                     <input type="number" min="0"
                       className={`w-full px-3 py-2.5 text-sm border outline-none transition-all ${isDark ? "bg-zinc-900 border-zinc-700 text-white" : "bg-zinc-50 border-zinc-300 text-zinc-900"}`}
                       placeholder="Amount charged above ₹150 base"
@@ -1457,7 +1381,7 @@ function VendorDashboardContent() {
           </div>
         </div>
       )}
-    </main>
+    </PanelLayout>
   );
 }
  

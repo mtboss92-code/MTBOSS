@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import { ensurePackageSchema, getPackageById } from '@/lib/packages';
 import { cleanText, normalizePhone, isValidEmail, isValidIndianMobile } from '@/lib/validation';
 import { cleanCity, ensureServiceCitiesSchema } from '@/lib/service-cities';
-import { resolveManagedCity } from '@/lib/cities';
+import { resolveManagedCity, resolveManagedCityWithMessage } from '@/lib/cities';
 import { verifyOtp } from '@/lib/otp';
 import { createPayURequest } from '@/lib/payu';
 import { createPayUIntent, getPayUCallbackUrl, newPayUTxnId } from '@/lib/payu-intents';
@@ -15,7 +15,11 @@ export async function POST(req) {
   try {
     let vendor_name, email, password, phone, city, state, country, postal_code,
         aadhar_number, services, profilePhotoBuffer, profilePhotoMime,
-        aadharImageBuffer, aadharImageMime, package_id, registration_otp;
+        aadharImageBuffer, aadharImageMime,
+        pan_number, panImageBuffer, panImageMime,
+        gst_number, gstImageBuffer, gstImageMime,
+        package_id, registration_otp,
+        is_contractor, contractor_trade, labor_roles, labor_team_size;
 
     const contentType = req.headers.get('content-type') || '';
 
@@ -30,7 +34,7 @@ export async function POST(req) {
       console.log('📨 [SIGNUP] Parsing FormData with file uploads...');
       
       const fd = await req.formData();
-      vendor_name   = fd.get('vendor_name');
+      vendor_name   = fd.get('vendor_name') || fd.get('service provider_name');
       email         = fd.get('email');
       password      = fd.get('password');
       phone         = fd.get('phone');
@@ -39,12 +43,20 @@ export async function POST(req) {
       country       = fd.get('country') || 'India';
       postal_code   = fd.get('postal_code');
       aadhar_number = (fd.get('aadhar_number') || '').replace(/\s/g, '');
+      pan_number    = (fd.get('pan_number') || '').replace(/\s/g, '').toUpperCase();
+      gst_number    = (fd.get('gst_number') || '').replace(/\s/g, '').toUpperCase();
       services      = JSON.parse(fd.get('services') || '[]');
       package_id    = fd.get('package_id');
       registration_otp = fd.get('registration_otp');
+      is_contractor = fd.get('is_contractor') === 'true';
+      contractor_trade = fd.get('contractor_trade');
+      labor_roles = JSON.parse(fd.get('labor_roles') || '[]');
+      labor_team_size = fd.get('labor_team_size');
 
       const profileFile = fd.get('profile_photo');
       const aadharFile  = fd.get('aadhar_image');
+      const panFile     = fd.get('pan_image');
+      const gstFile     = fd.get('gst_image');
 
       if (profileFile?.size > 0) {
         profilePhotoBuffer = Buffer.from(await profileFile.arrayBuffer());
@@ -56,10 +68,20 @@ export async function POST(req) {
         aadharImageMime   = aadharFile.type;
         console.log('🪪 [SIGNUP] Aadhaar image received:', aadharImageMime);
       }
+      if (panFile?.size > 0) {
+        panImageBuffer = Buffer.from(await panFile.arrayBuffer());
+        panImageMime   = panFile.type;
+        console.log('💳 [SIGNUP] PAN image received:', panImageMime);
+      }
+      if (gstFile?.size > 0) {
+        gstImageBuffer = Buffer.from(await gstFile.arrayBuffer());
+        gstImageMime   = gstFile.type;
+        console.log('🏢 [SIGNUP] GST image received:', gstImageMime);
+      }
     } else {
       console.log('📨 [SIGNUP] Parsing JSON request...');
       const body = await req.json();
-      vendor_name   = body.vendor_name;
+      vendor_name   = body.vendor_name || body['service provider_name'];
       email         = body.email;
       password      = body.password;
       phone         = body.phone;
@@ -68,9 +90,15 @@ export async function POST(req) {
       country       = body.country || 'India';
       postal_code   = body.postal_code;
       aadhar_number = (body.aadhar_number || '').replace(/\s/g, '');
+      pan_number    = (body.pan_number || '').replace(/\s/g, '').toUpperCase();
+      gst_number    = (body.gst_number || '').replace(/\s/g, '').toUpperCase();
       services      = body.services || [];
       package_id    = body.package_id;
       registration_otp = body.registration_otp;
+      is_contractor = Boolean(body.is_contractor);
+      contractor_trade = body.contractor_trade;
+      labor_roles = body.labor_roles || [];
+      labor_team_size = body.labor_team_size;
     }
 
     vendor_name = cleanText(vendor_name);
@@ -86,10 +114,28 @@ export async function POST(req) {
     // VALIDATION
     // ════════════════════════════════════════════════════════════════
 
-    if (!vendor_name || !email || !password || !phone || !canonicalManagedCity || !state || !postal_code) {
-      console.warn('❌ [SIGNUP] Missing required fields');
+    if (!vendor_name) {
+      return NextResponse.json({ error: 'Service provider name is required' }, { status: 400 });
+    }
+    if (!email) {
+      return NextResponse.json({ error: 'Email address is required' }, { status: 400 });
+    }
+    if (!password) {
+      return NextResponse.json({ error: 'Password is required' }, { status: 400 });
+    }
+    if (!phone) {
+      return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
+    }
+    if (!state) {
+      return NextResponse.json({ error: 'State is required' }, { status: 400 });
+    }
+    if (!postal_code) {
+      return NextResponse.json({ error: 'Postal code is required' }, { status: 400 });
+    }
+    if (!canonicalManagedCity) {
+      const cityMsg = await resolveManagedCityWithMessage(city);
       return NextResponse.json(
-        { error: 'Missing required fields: vendor_name, email, password, phone, city, state, postal_code' },
+        { error: cityMsg.error || 'Please select an active service city' },
         { status: 400 }
       );
     }
@@ -133,7 +179,7 @@ export async function POST(req) {
       );
     }
 
-    if (!Array.isArray(services) || services.length === 0) {
+    if (!Array.isArray(services) || (services.length === 0 && !is_contractor)) {
       console.warn('❌ [SIGNUP] No services selected');
       return NextResponse.json(
         { error: 'Please select at least one service' },
@@ -169,7 +215,7 @@ export async function POST(req) {
     services = serviceIds;
     const selectedPackageId = String(package_id || 'free');
     const isFreeRegistration = selectedPackageId === 'free';
-    const pkg = isFreeRegistration ? null : getPackageById(selectedPackageId);
+    const pkg = isFreeRegistration ? null : await getPackageById(selectedPackageId);
 
     if (!isFreeRegistration && !pkg) {
       return NextResponse.json({ error: 'Select a valid subscription plan' }, { status: 400 });
@@ -224,6 +270,17 @@ export async function POST(req) {
     // ════════════════════════════════════════════════════════════════
 
     await ensurePackageSchema();
+    // Kept here so deployments upgrade existing databases automatically.
+    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS is_contractor BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS contractor_trade VARCHAR(120)`);
+    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS labor_roles JSONB NOT NULL DEFAULT '[]'::jsonb`);
+    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS labor_team_size VARCHAR(50)`);
+    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pan_number VARCHAR(20)`);
+    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pan_image BYTEA`);
+    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pan_image_mime VARCHAR(100)`);
+    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_number VARCHAR(30)`);
+    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_image BYTEA`);
+    await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_image_mime VARCHAR(100)`);
 
     console.log('💾 [SIGNUP] Getting database connection...');
     client = await pool.connect();
@@ -277,6 +334,11 @@ export async function POST(req) {
 
     if (cols.has('shop_name'))     fields.shop_name     = vendor_name;
     if (cols.has('business_name')) fields.business_name = vendor_name;
+    if (cols.has('is_contractor')) fields.is_contractor = Boolean(is_contractor);
+    if (cols.has('business_type')) fields.business_type = is_contractor ? 'Contractor' : 'Vendor';
+    if (cols.has('contractor_trade')) fields.contractor_trade = is_contractor ? cleanText(contractor_trade) : null;
+    if (cols.has('labor_roles')) fields.labor_roles = JSON.stringify(is_contractor && Array.isArray(labor_roles) ? labor_roles : []);
+    if (cols.has('labor_team_size')) fields.labor_team_size = is_contractor ? cleanText(labor_team_size) : null;
 
     if (cols.has('aadhar_number') && aadhar_number)
       fields.aadhar_number = aadhar_number;
@@ -292,6 +354,24 @@ export async function POST(req) {
     
     if (cols.has('aadhar_image_mime') && aadharImageMime)
       fields.aadhar_image_mime = aadharImageMime;
+
+    if (cols.has('pan_number') && pan_number)
+      fields.pan_number = pan_number;
+
+    if (cols.has('pan_image') && panImageBuffer)
+      fields.pan_image = panImageBuffer;
+
+    if (cols.has('pan_image_mime') && panImageMime)
+      fields.pan_image_mime = panImageMime;
+
+    if (cols.has('gst_number') && gst_number)
+      fields.gst_number = gst_number;
+
+    if (cols.has('gst_image') && gstImageBuffer)
+      fields.gst_image = gstImageBuffer;
+
+    if (cols.has('gst_image_mime') && gstImageMime)
+      fields.gst_image_mime = gstImageMime;
 
     console.log('✅ [SIGNUP] Fields prepared:', Object.keys(fields).join(', '));
 

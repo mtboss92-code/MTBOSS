@@ -37,7 +37,9 @@ const ensureQuickServiceSeoColumns = createInitializationGuard(async () => {
         ADD COLUMN IF NOT EXISTS cities TEXT[] NOT NULL DEFAULT '{}',
         ADD COLUMN IF NOT EXISTS main_category VARCHAR(200),
         ADD COLUMN IF NOT EXISTS sub_category VARCHAR(200),
-        ADD COLUMN IF NOT EXISTS visiting_price DECIMAL(10,2)
+        ADD COLUMN IF NOT EXISTS visiting_price DECIMAL(10,2),
+        ADD COLUMN IF NOT EXISTS image_fit VARCHAR(20) DEFAULT 'icon',
+        ADD COLUMN IF NOT EXISTS color VARCHAR(20) DEFAULT 'blue'
     `);
 
     // Backfill icon_url and icon_type for legacy rows
@@ -68,6 +70,27 @@ const ensureQuickServiceSeoColumns = createInitializationGuard(async () => {
   }
 });
 
+const ensureQuickServiceSubcategoryImages = createInitializationGuard(
+  async () => pool.query(`ALTER TABLE quick_services ADD COLUMN IF NOT EXISTS sub_category_images JSONB NOT NULL DEFAULT '{}'::jsonb`),
+  undefined,
+  'quick-service-subcategory-images-v1'
+);
+
+function normalizeSubcategoryImages(images, subCategory) {
+  const source = images && typeof images === 'object' && !Array.isArray(images) ? images : {};
+  const names = String(subCategory || '').split(',').map((name) => name.trim()).filter(Boolean);
+  return Object.fromEntries(names.flatMap((name) => {
+    const value = source[name];
+    if (typeof value !== 'string' || !value.trim()) return [];
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && url.hostname === 'res.cloudinary.com' ? [[name, url.href]] : [];
+    } catch {
+      return [];
+    }
+  }));
+}
+
 // GET all quick services — public, no auth required
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
@@ -76,6 +99,7 @@ export async function GET(req) {
 
   try {
     await ensureQuickServiceSeoColumns();
+    await ensureQuickServiceSubcategoryImages();
     const slug = searchParams.get('slug');
 
     if (slug) {
@@ -104,7 +128,7 @@ export async function GET(req) {
       total: result.rowCount,
     });
   } catch (error) {
-    console.error('GET quick-services error:', error.message);
+    console.error('GET quick-services error:', error?.message || error?.code || error);
     if (isDatabaseConnectionError(error)) {
       if (adminView) {
         return jsonWithoutCache(
@@ -133,6 +157,7 @@ export async function POST(req) {
     if (!requireRole(req, 'admin')) return unauthorized();
 
     await ensureQuickServiceSeoColumns();
+    await ensureQuickServiceSubcategoryImages();
     const {
       icon,
       iconType: rawIconType,
@@ -144,6 +169,7 @@ export async function POST(req) {
       visiting_price,
       main_category,
       sub_category,
+      sub_category_images,
       slug,
       video_url,
       seo_title,
@@ -151,7 +177,13 @@ export async function POST(req) {
       coverage_details,
       how_to_use,
       cities,
+      image_fit,
+      imageFit,
+      color,
     } = await req.json();
+
+    const finalImageFit = image_fit || imageFit || 'icon';
+    const finalColor = color || 'blue';
 
     // Determine iconType, iconName, iconUrl
     let iconType = rawIconType;
@@ -199,10 +231,11 @@ export async function POST(req) {
       `INSERT INTO quick_services (
         icon, icon_type, icon_name, icon_url,
         label, description, base_price, duration, visiting_price,
-        main_category, sub_category,
-        slug, video_url, seo_title, seo_description, coverage_details, how_to_use, cities
+        main_category, sub_category, sub_category_images,
+        slug, video_url, seo_title, seo_description, coverage_details, how_to_use, cities,
+        image_fit, color
       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21)
        RETURNING *`,
       [
         legacyIconValue,
@@ -216,6 +249,7 @@ export async function POST(req) {
         parseFloat(visiting_price || 150),
         main_category || null,
         sub_category || null,
+        JSON.stringify(normalizeSubcategoryImages(sub_category_images, sub_category)),
         slug || label.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
         video_url || null,
         seo_title || null,
@@ -223,6 +257,8 @@ export async function POST(req) {
         coverage_details || null,
         how_to_use || null,
         normalizedCities,
+        finalImageFit,
+        finalColor,
       ]
     );
 
@@ -242,6 +278,7 @@ export async function PUT(req) {
     if (!requireRole(req, 'admin')) return unauthorized();
 
     await ensureQuickServiceSeoColumns();
+    await ensureQuickServiceSubcategoryImages();
     const {
       id,
       icon,
@@ -254,6 +291,7 @@ export async function PUT(req) {
       visiting_price,
       main_category,
       sub_category,
+      sub_category_images,
       slug,
       video_url,
       seo_title,
@@ -261,7 +299,13 @@ export async function PUT(req) {
       coverage_details,
       how_to_use,
       cities,
+      image_fit,
+      imageFit,
+      color,
     } = await req.json();
+
+    const finalImageFit = image_fit || imageFit || 'icon';
+    const finalColor = color || 'blue';
 
     // Determine iconType, iconName, iconUrl
     let iconType = rawIconType;
@@ -310,9 +354,11 @@ export async function PUT(req) {
        SET icon=$1, icon_type=$2, icon_name=$3, icon_url=$4,
            label=$5, description=$6, base_price=$7, duration=$8, visiting_price=$9,
            main_category=$10, sub_category=$11,
-           slug=$12, video_url=$13, seo_title=$14, seo_description=$15,
-           coverage_details=$16, how_to_use=$17, cities=$18
-       WHERE id=$19
+           sub_category_images=COALESCE($12::jsonb, sub_category_images),
+           slug=$13, video_url=$14, seo_title=$15, seo_description=$16,
+           coverage_details=$17, how_to_use=$18, cities=$19,
+           image_fit=$20, color=$21
+       WHERE id=$22
        RETURNING *`,
       [
         legacyIconValue,
@@ -326,6 +372,9 @@ export async function PUT(req) {
         parseFloat(visiting_price || 150),
         main_category || null,
         sub_category || null,
+        sub_category_images === undefined
+          ? null
+          : JSON.stringify(normalizeSubcategoryImages(sub_category_images, sub_category)),
         slug || label.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
         video_url || null,
         seo_title || null,
@@ -333,6 +382,8 @@ export async function PUT(req) {
         coverage_details || null,
         how_to_use || null,
         normalizedCities,
+        finalImageFit,
+        finalColor,
         id,
       ]
     );

@@ -2,8 +2,15 @@ import { NextResponse } from 'next/server';
 import pool from './db';
 
 export function isDatabaseConnectionError(error) {
-  const message = String(error?.message || error?.cause?.message || '').toLowerCase();
-  const code = error?.code || error?.cause?.code;
+  const nestedMessages = Array.isArray(error?.errors)
+    ? error.errors.map((entry) => String(entry?.message || '').toLowerCase()).join(' ')
+    : '';
+  const message = `${String(error?.message || error?.cause?.message || '').toLowerCase()} ${nestedMessages}`;
+  const codes = new Set(
+    [error?.code, error?.cause?.code]
+      .concat(Array.isArray(error?.errors) ? error.errors.map((entry) => entry?.code) : [])
+      .filter(Boolean)
+  );
 
   return (
     message.includes('connect') ||
@@ -15,11 +22,11 @@ export function isDatabaseConnectionError(error) {
     message.includes('etimedout') ||
     message.includes('ehostunreach') ||
     message.includes('timeout') ||
-    code === 'ECONNREFUSED' ||
-    code === 'ENOTFOUND' ||
-    code === 'ETIMEDOUT' ||
-    code === 'EHOSTUNREACH' ||
-    code === 'XX000'
+    codes.has('ECONNREFUSED') ||
+    codes.has('ENOTFOUND') ||
+    codes.has('ETIMEDOUT') ||
+    codes.has('EHOSTUNREACH') ||
+    codes.has('XX000')
   );
 }
 
@@ -75,51 +82,69 @@ export async function ensureTableWithTimeout(createTableSQL, timeoutMs = 5000) {
   ]);
 }
 
+const globalGuards = globalThis.__MTBOSS_schema_guards__ || (globalThis.__MTBOSS_schema_guards__ = new Map());
+
 /**
- * Deduplicate schema/bootstrap work within a warm server process.
- * The TTL keeps routes resilient to out-of-band schema resets while avoiding
- * CREATE/ALTER queries on every normal request.
+ * Deduplicate schema/bootstrap work across all routes and warm server processes.
+ * Shares guard state globally on globalThis so multiple API routes (e.g. profile and activity)
+ * do not concurrently execute conflicting DDL migrations.
  */
-export function createInitializationGuard(initializer, ttlMs = 5 * 60 * 1000) {
-  let inFlight = null;
-  let initializedAt = 0;
+export function createInitializationGuard(initializer, ttlMs = 24 * 60 * 60 * 1000, key = null) {
+  const guardKey = key || initializer.name || initializer.toString().slice(0, 100);
 
   return async function runInitialization() {
-    if (initializedAt && Date.now() - initializedAt < ttlMs) return;
-
-    if (!inFlight) {
-      inFlight = Promise.resolve()
-        .then(initializer)
-        .then(() => {
-          initializedAt = Date.now();
-        })
-        .catch((error) => {
-          initializedAt = 0;
-          throw error;
-        })
-        .finally(() => {
-          inFlight = null;
-        });
+    const entry = globalGuards.get(guardKey);
+    if (entry?.initializedAt && Date.now() - entry.initializedAt < ttlMs) {
+      return;
     }
+
+    if (entry?.inFlight) {
+      return entry.inFlight;
+    }
+
+    const inFlight = Promise.resolve()
+      .then(initializer)
+      .then(() => {
+        globalGuards.set(guardKey, { initializedAt: Date.now(), inFlight: null });
+      })
+      .catch((error) => {
+        globalGuards.delete(guardKey);
+        throw error;
+      });
+
+    globalGuards.set(guardKey, {
+      initializedAt: entry?.initializedAt || 0,
+      inFlight,
+    });
 
     return inFlight;
   };
 }
 
 /**
- * Execute query with timeout and error handling
+ * Execute query with timeout and error handling.
+ * Attaches a no-op catch so a timed-out query cannot become an unhandledRejection
+ * and exhaust the pg pool while retries are still in flight.
  */
 export async function queryWithTimeout(query, params = [], timeoutMs = 10000) {
+  let timer;
+  const queryPromise = pool.query(query, params);
+  // Prevent unhandledRejection if we abandon this promise after timeout.
+  queryPromise.catch(() => {});
+
   try {
-    return await Promise.race([
-      pool.query(query, params),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Query timeout')), timeoutMs)
-      ),
+    const result = await Promise.race([
+      queryPromise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Query timeout')), timeoutMs);
+      }),
     ]);
+    return result;
   } catch (error) {
     console.error('Query error:', error.message);
     throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

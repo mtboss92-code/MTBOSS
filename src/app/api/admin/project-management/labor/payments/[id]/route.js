@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { requireRole, unauthorized } from '@/lib/auth';
-import { ensureProjectManagementSchema, actorFromAdmin, writePmPhase2Audit, assertAgentAccess } from '@/lib/project-management';
+import { ensureProjectManagementSchema, actorFromAdmin, writePmPhase2Audit, assertAgentAccess, assertSameDayEditable } from '@/lib/project-management';
 
 const okDate = (x) => /^\d{4}-\d{2}-\d{2}$/.test(String(x || '')) && !Number.isNaN(Date.parse(x));
 
@@ -18,6 +18,7 @@ export async function PATCH(req, { params }) {
     const paymentDate = String(b.payment_date || '');
     const mode = b.mode !== undefined ? (b.mode ? String(b.mode).trim() : null) : undefined;
     const note = b.note !== undefined ? (b.note ? String(b.note).trim() : null) : undefined;
+    const paymentType = b.payment_type !== undefined ? (b.payment_type ? String(b.payment_type).trim().toLowerCase() : 'wage') : undefined;
 
     if (!Number.isFinite(amount) || amount <= 0) {
       return NextResponse.json({ success: false, error: 'Valid amount (> 0) is required' }, { status: 400 });
@@ -48,16 +49,23 @@ export async function PATCH(req, { params }) {
         return auth.response;
       }
 
+      const sameDay = assertSameDayEditable(old.created_at, auth.user, Boolean(b.admin_override));
+      if (!sameDay.allowed) {
+        await client.query('ROLLBACK');
+        return sameDay.response;
+      }
+
       const r = await client.query(
         `UPDATE pm_labor_payments
          SET amount = $1,
              payment_date = $2,
              mode = COALESCE($3, mode),
              note = CASE WHEN $4 = true THEN $5 ELSE note END,
+             payment_type = CASE WHEN $6 = true THEN $7 ELSE payment_type END,
              updated_at = NOW()
-         WHERE id = $6
+         WHERE id = $8
          RETURNING *`,
-        [amount, paymentDate, mode ?? null, note !== undefined, note ?? null, id]
+        [amount, paymentDate, mode ?? null, note !== undefined, note ?? null, paymentType !== undefined, paymentType ?? 'wage', id]
       );
 
       const actor = actorFromAdmin(auth.user);
@@ -99,6 +107,12 @@ export async function DELETE(req, { params }) {
       if (!old || old.is_deleted) {
         await client.query('ROLLBACK');
         return NextResponse.json({ success: false, error: 'Payment not found' }, { status: 404 });
+      }
+
+      const sameDay = assertSameDayEditable(old.created_at, admin, false);
+      if (!sameDay.allowed) {
+        await client.query('ROLLBACK');
+        return sameDay.response;
       }
 
       const r = await client.query(

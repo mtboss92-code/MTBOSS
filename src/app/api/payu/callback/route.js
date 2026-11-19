@@ -3,7 +3,7 @@ import pool from '@/lib/db';
 import { getPayUConfig, verifyPayUResponse } from '@/lib/payu';
 import { ensurePayUIntentSchema } from '@/lib/payu-intents';
 import { ensurePackageSchema, getPackageById } from '@/lib/packages';
-import { deliverPaymentInvoice, notifyAdminSubmission } from '@/lib/customer-communications';
+import { deliverPaymentInvoice, deliverMaterialOrderReceipt, notifyAdminSubmission } from '@/lib/customer-communications';
 
 function resultRedirect(req, status, reference, message, returnTo = '/userdashboard', receipt = null) {
   const configured = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '');
@@ -19,7 +19,7 @@ function resultRedirect(req, status, reference, message, returnTo = '/userdashbo
 }
 
 function withPaymentParams(path, status, message) {
-  const url = new URL(path, 'https://mtboss.local');
+  const url = new URL(path, 'https://MTBOSS.local');
   url.searchParams.set('payment', status);
   if (message) url.searchParams.set('message', message);
   return `${url.pathname}${url.search}`;
@@ -77,7 +77,7 @@ export async function POST(req) {
           || intent.purpose === 'supplier_registration'
         ) {
           await ensurePackageSchema();
-          const pkg = getPackageById(intent.package_id);
+          const pkg = await getPackageById(intent.package_id);
           if (!pkg) throw new Error('Paid package no longer exists');
           const table = intent.purpose.startsWith('vendor_') ? 'vendors' : 'suppliers';
           await client.query(
@@ -94,6 +94,63 @@ export async function POST(req) {
                WHERE id = $1 AND verification_status = 'payment_pending'`,
               [intent.entity_id]
             );
+          }
+        } else if (intent.purpose === 'shop_order') {
+          const orderIds = (intent.package_id ? intent.package_id.split(',') : [String(intent.entity_id)])
+            .map((id) => Number(id))
+            .filter((id) => Number.isInteger(id) && id > 0);
+
+          await client.query(
+            `UPDATE material_enquiries
+             SET payment_status = 'PAID',
+                 payment_gateway = 'PAYU',
+                 payment_gateway_id = $1,
+                 payment_completed_at = NOW()
+             WHERE id = ANY($2::int[])`,
+            [String(fields.mihpayid || fields.txnid || ''), orderIds]
+          );
+
+          for (const ordId of orderIds) {
+            await pool.query(
+              `INSERT INTO material_order_events (order_id, status, title, note, actor_role, actor_name)
+               VALUES ($1, 'open', 'Payment confirmed', $2, 'system', 'PayU Payment Gateway')`,
+              [ordId, `Online payment of ₹${Number(intent.amount).toLocaleString('en-IN')} confirmed via PayU (${fields.mode || 'Online'}). Txn ID: ${fields.mihpayid || fields.txnid}`]
+            ).catch(() => {});
+          }
+
+          const primaryOrder = await client.query(
+            `SELECT user_name, user_email, user_phone, order_reference, category_name, material_type,
+                    quantity_text, order_unit, selected_city, delivery_address, delivery_date
+             FROM material_enquiries WHERE id = $1`,
+            [intent.entity_id]
+          );
+
+          if (primaryOrder.rows[0]) {
+            const o = primaryOrder.rows[0];
+            paymentNotice = {
+              name: o.user_name,
+              email: o.user_email,
+              phone: o.user_phone,
+              reference: o.order_reference || fields.txnid,
+              service: `Material Order (${o.material_type || o.category_name})`,
+              amount: intent.amount,
+            };
+
+            await deliverMaterialOrderReceipt({
+              email: o.user_email,
+              customerName: o.user_name,
+              phone: o.user_phone,
+              category: o.category_name,
+              material: o.material_type,
+              quantity: o.quantity_text,
+              unit: o.order_unit,
+              city: o.selected_city,
+              orderReference: o.order_reference,
+              deliveryAddress: o.delivery_address,
+              amount: intent.amount,
+              paymentMethod: 'Online Payment (PAID - PayU)',
+              deliveryDate: o.delivery_date,
+            }).catch(() => {});
           }
         } else if (intent.purpose === 'franchise_registration') {
           await client.query(
@@ -130,15 +187,27 @@ export async function POST(req) {
             ? 'vendors' : intent.purpose.startsWith('supplier_') ? 'suppliers' : 'franchises';
           const nameColumn = table === 'vendors' ? 'vendor_name' : table === 'suppliers' ? 'shop_name' : 'name';
           const recipient = await client.query(`SELECT ${nameColumn} AS name, email, phone FROM ${table} WHERE id = $1`, [intent.entity_id]);
+          const packageName = intent.purpose === 'franchise_registration'
+            ? 'Franchise registration'
+            : ((await getPackageById(intent.package_id))?.name || intent.purpose.replaceAll('_', ' '));
           paymentNotice = {
             ...recipient.rows[0], amount: intent.amount, reference: fields.txnid,
-            service: intent.purpose === 'franchise_registration'
-              ? 'Franchise registration'
-              : (getPackageById(intent.package_id)?.name || intent.purpose.replaceAll('_', ' ')),
+            service: packageName,
           };
         }
       } else if (!succeeded && intent.status === 'PENDING') {
         await client.query(`UPDATE payu_payment_intents SET status = 'FAILED' WHERE id = $1`, [intent.id]);
+        if (intent.purpose === 'shop_order') {
+          const orderIds = (intent.package_id ? intent.package_id.split(',') : [String(intent.entity_id)])
+            .map((id) => Number(id))
+            .filter((id) => Number.isInteger(id) && id > 0);
+          await client.query(
+            `UPDATE material_enquiries
+             SET payment_status = 'FAILED'
+             WHERE id = ANY($1::int[]) AND payment_status <> 'PAID'`,
+            [orderIds]
+          );
+        }
         if (intent.purpose === 'franchise_registration') {
           await client.query(
             `UPDATE franchises

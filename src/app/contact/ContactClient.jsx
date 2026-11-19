@@ -1,4 +1,5 @@
 'use client';
+import RequiredAsterisk from '../components/RequiredAsterisk';
 
 import { useState, useEffect, useRef } from 'react';
 import { COMPANY_CONTACT } from '../lib/company';
@@ -27,7 +28,7 @@ function useInView(threshold = 0.1) {
     );
     if (ref.current) observer.observe(ref.current);
     return () => observer.disconnect();
-  }, []);
+  }, [threshold]);
   return [ref, inView];
 }
 
@@ -45,7 +46,7 @@ const DEFAULT_OFFICES = [
   city,
   address: `MTBOSS Office, ${city}, India`,
   phone: COMPANY_CONTACT.phone,
-  email: `${city.toLowerCase()}@mtboss.com`,
+  email: `${city.toLowerCase()}@MTBOSS.com`,
   hours: 'Mon - Sat: 9:00 AM - 6:00 PM',
   mapUrl: city.toLowerCase() === 'bareilly'
     ? 'https://www.google.com/maps?q=28.3975,79.452806&z=17&output=embed'
@@ -226,7 +227,7 @@ export default function ContactPage() {
               📞 Call Us
             </a>
             <a
-              href="mailto:mtboss2016@gmail.com"
+              href="mailto:MTBOSS2016@gmail.com"
               className="flex items-center gap-2 px-5 py-2.5 border-2 border-white text-white text-xs font-bold uppercase tracking-widest rounded-lg hover:bg-white hover:text-black transition-all"
             >
               ✉️ Email Us
@@ -292,7 +293,7 @@ export default function ContactPage() {
 
                 {/* Department Selector */}
                 <div className="mb-6">
-                  <label className={labelClass}>What can we help you with? *</label>
+                  <label className={labelClass}>What can we help you with? <RequiredAsterisk /></label>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {departments.map((dept) => (
                       <button
@@ -364,7 +365,7 @@ export default function ContactPage() {
                     {/* Name + Email */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className={labelClass}>Full Name *</label>
+                        <label className={labelClass}>Full Name <RequiredAsterisk /></label>
                         <input
                           type="text"
                           name="name"
@@ -390,23 +391,27 @@ export default function ContactPage() {
                     </div>
 
                     <div>
-                      <label className={labelClass}>City *</label>
-                      <select
+                      <label className={labelClass}>City <RequiredAsterisk /></label>
+                      <input
+                        type="text"
                         name="city"
                         value={form.city}
                         onChange={handleChange}
+                        placeholder="Enter your city"
                         className={inputClass}
-                      >
-                        <option value="">Select city</option>
-                        {cities.map((city) => <option key={city} value={city}>{city}</option>)}
-                      </select>
+                        required
+                        list="contact-city-list"
+                      />
+                      <datalist id="contact-city-list">
+                        {cities.map((city) => <option key={city} value={city} />)}
+                      </datalist>
                       {fieldErrors.city && <p className="text-red-500 text-xs mt-1 font-bold">{fieldErrors.city}</p>}
                     </div>
 
                     {/* Phone + Subject */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className={labelClass}>Phone Number *</label>
+                        <label className={labelClass}>Phone Number <RequiredAsterisk /></label>
                         <input
                           type="tel"
                           name="phone"
@@ -420,7 +425,7 @@ export default function ContactPage() {
                         {fieldErrors.phone && <p className="text-red-500 text-xs mt-1 font-bold">{fieldErrors.phone}</p>}
                       </div>
                       <div>
-                        <label className={labelClass}>Subject *</label>
+                        <label className={labelClass}>Subject <RequiredAsterisk /></label>
                         <input
                           type="text"
                           name="subject"
@@ -435,7 +440,7 @@ export default function ContactPage() {
 
                     {/* Message */}
                     <div>
-                      <label className={labelClass}>Message *</label>
+                      <label className={labelClass}>Message <RequiredAsterisk /></label>
                       <textarea
                         name="message"
                         rows={5}
@@ -507,13 +512,13 @@ export default function ContactPage() {
                       </div>
                     </a>
 
-                    <a href="mailto:mtboss2016@gmail.com" className="flex items-start gap-3 group">
+                    <a href="mailto:MTBOSS2016@gmail.com" className="flex items-start gap-3 group">
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 transition-all ${dark ? 'bg-[var(--brand-blue)]/20 group-hover:bg-[var(--brand-blue-dark)]' : 'bg-sky-100 group-hover:bg-[var(--brand-blue-dark)]'}`}>
                         <span className="text-lg">✉️</span>
                       </div>
                       <div>
                         <p className={`text-xs font-bold uppercase tracking-widest mb-1 ${dark ? 'text-gray-500' : 'text-gray-600'}`}>Email</p>
-                        <p className={`font-bold transition-colors ${textPrimaryClass}`}>mtboss2016@gmail.com</p>
+                        <p className={`font-bold transition-colors ${textPrimaryClass}`}>MTBOSS2016@gmail.com</p>
                       </div>
                     </a>
 
@@ -615,7 +620,7 @@ export default function ContactPage() {
                 rel="noopener noreferrer"
                 className="mt-6 flex items-center gap-2 px-5 py-2.5 bg-[var(--brand-blue)] text-black text-xs font-bold uppercase tracking-widest rounded-lg hover:bg-[var(--brand-blue-light)] transition-all"
               >
-                📍 Get Directions
+                Get Directions
               </a>
             </div>
 

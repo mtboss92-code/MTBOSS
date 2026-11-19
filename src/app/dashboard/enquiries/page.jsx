@@ -66,11 +66,11 @@ export default function EnquiriesPage() {
                 <option>Closed</option>
               </select>
             </div>
-            <div className="flex items-end">
+            {/* <div className="flex items-end">
               <button className="w-full px-4 py-2 bg-[var(--brand-blue)] text-black rounded-lg font-semibold hover:bg-sky-500 transition-colors">
                 Export CSV
               </button>
-            </div>
+            </div> */}
           </div>
         </div>
 

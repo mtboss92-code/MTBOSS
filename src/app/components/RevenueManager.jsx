@@ -357,7 +357,7 @@ export default function RevenueManager({ isDarkMode }) {
         {/* ── Header ── */}
         <div style={S.header}>
           <div>
-            <div style={S.title}>💰 Revenue &amp; Earnings</div>
+            <div style={S.title}>Revenue and earnings</div>
             <div style={S.subtitle}>Full financial transparency — every booking, every rupee</div>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -730,7 +730,7 @@ export default function RevenueManager({ isDarkMode }) {
                         )}
 
                         <div style={{ marginTop: '0.5rem', fontSize: '0.65rem', color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
-                          <span>📍 {b.service_city}</span>
+                          <span>{b.service_city}</span>
                           <span>{date(b.created_at)}</span>
                         </div>
                       </div>

@@ -1,4 +1,5 @@
 'use client';
+import RequiredAsterisk from '../../components/RequiredAsterisk';
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -6,20 +7,50 @@ import Link from 'next/link';
 import { useServiceCities } from '@/hooks/useServiceCities';
 import { redirectToPayU } from '@/lib/payu-client';
 
-export default function VendorSignupPage() {
+export default function ServiceProviderSignupPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [dark, setDark] = useState(false);
-  const { cities: managedCities, services, loading: loadingServices, error: serviceCityError } = useServiceCities();
+  const { cities: managedCities, cityRecords, services, loading: loadingServices, error: serviceCityError } = useServiceCities();
   const [step, setStep] = useState(1);
   const [registrationOtp, setRegistrationOtp] = useState('');
   const [otpSending, setOtpSending] = useState(false);
   const [otpMessage, setOtpMessage] = useState('');
   const [profilePreview, setProfilePreview] = useState(null);
   const [aadharPreview, setAadharPreview] = useState(null);
+  const [panPreview, setPanPreview] = useState(null);
+  const [gstPreview, setGstPreview] = useState(null);
   const profileRef = useRef();
   const aadharRef = useRef();
+  const panRef = useRef();
+  const gstRef = useRef();
+  const [plans, setPlans] = useState([
+    { id: 'free', name: 'Free Registration', duration: 'Free', price: 'Free', desc: 'Submit your service provider profile for admin approval without a paid package.' },
+    { id: 'pkg_6m', name: '6 Months Plan', duration: '6 Months', price: '₹100', desc: 'Perfect for getting started. Complete booking access.' },
+    { id: 'pkg_1y', name: '1 Year Plan', duration: '12 Months', price: '₹4,999', desc: 'Most popular. Great value with a full year of leads.' },
+    { id: 'pkg_2y', name: '2 Years Plan', duration: '24 Months', price: '₹7,999', desc: 'Best deal. Long-term peace of mind and maximum savings.' },
+  ]);
+
+  useEffect(() => {
+    fetch('/api/vendor/packages')
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d?.packages) && d.packages.length > 0) {
+          setPlans([
+            { id: 'free', name: 'Free Registration', duration: 'Free', price: 'Free', desc: 'Submit your service provider profile for admin approval without a paid package.' },
+            ...d.packages.map((pkg) => ({
+              id: pkg.id,
+              name: pkg.name,
+              duration: pkg.duration_months ? `${pkg.duration_months} Months` : 'Custom',
+              price: Number(pkg.price) === 0 ? 'Free' : `₹${Number(pkg.price).toLocaleString('en-IN')}`,
+              desc: pkg.description || `${pkg.name} subscription plan.`,
+            })),
+          ]);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const [formData, setFormData] = useState({
     vendor_name: '',
@@ -33,8 +64,16 @@ export default function VendorSignupPage() {
     postal_code: '',
     aadhar_number: '',
     aadhar_image: null,
+    pan_number: '',
+    pan_image: null,
+    gst_number: '',
+    gst_image: null,
     profile_photo: null,
     services: [],
+    is_contractor: false,
+    contractor_trade: '',
+    labor_roles: [],
+    labor_team_size: '',
     package_id: 'free',
   });
 
@@ -60,8 +99,16 @@ export default function VendorSignupPage() {
     if (name === 'phone') {
       const rawDigits = value.replace(/\D/g, '');
       setFormData(prev => ({ ...prev, phone: rawDigits && /^[6-9]/.test(rawDigits) ? rawDigits.slice(0, 10) : '' }));
+    } else if (name === 'vendor_name' || name === 'service provider_name') {
+      setFormData(prev => ({ ...prev, vendor_name: value }));
     } else if (name === 'city') {
-      setFormData(prev => ({ ...prev, city: value, services: [] }));
+      const record = cityRecords.find((row) => row.name === value);
+      setFormData(prev => ({
+        ...prev,
+        city: value,
+        state: record?.state || prev.state,
+        services: [],
+      }));
     } else {
       setFormData(prev => ({ ...prev, [name]: value }));
     }
@@ -75,6 +122,8 @@ export default function VendorSignupPage() {
     reader.onloadend = () => {
       if (field === 'profile_photo') setProfilePreview(reader.result);
       if (field === 'aadhar_image') setAadharPreview(reader.result);
+      if (field === 'pan_image') setPanPreview(reader.result);
+      if (field === 'gst_image') setGstPreview(reader.result);
     };
     reader.readAsDataURL(file);
     setFormData(prev => ({ ...prev, [field]: file }));
@@ -146,11 +195,17 @@ export default function VendorSignupPage() {
         if (!formData.aadhar_number || formData.aadhar_number.replace(/\s/g, '').length !== 12) {
           setError('Enter a valid 12-digit Aadhaar number'); return false;
         }
+        if (formData.pan_number && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(formData.pan_number.trim())) {
+          setError('Enter a valid 10-character PAN number (e.g., ABCDE1234F)'); return false;
+        }
+        if (formData.gst_number && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/i.test(formData.gst_number.trim())) {
+          setError('Enter a valid 15-character GST number (e.g., 07AAAAA0000A1Z5)'); return false;
+        }
         return true;
 
       case 3:
-        if (formData.services.length === 0) {
-          setError('Select at least one service'); return false;
+        if (formData.services.length === 0 && !formData.is_contractor) {
+          setError('Select at least one service or register as a contractor'); return false;
         }
         return true;
 
@@ -180,6 +235,7 @@ const handleSubmit = async (e) => {
       // Build FormData for file uploads
       const payload = new FormData();
       payload.append('vendor_name', formData.vendor_name);
+      payload.append('service provider_name', formData.vendor_name);
       payload.append('email', formData.email);
       payload.append('password', formData.password);
       payload.append('phone', formData.phone);
@@ -189,10 +245,18 @@ const handleSubmit = async (e) => {
       payload.append('postal_code', formData.postal_code);
       payload.append('aadhar_number', formData.aadhar_number);
       payload.append('services', JSON.stringify(formData.services));
+      payload.append('is_contractor', formData.is_contractor ? 'true' : 'false');
+      payload.append('contractor_trade', formData.contractor_trade);
+      payload.append('labor_roles', JSON.stringify(formData.labor_roles));
+      payload.append('labor_team_size', formData.labor_team_size);
       payload.append('package_id', formData.package_id);
       payload.append('registration_otp', registrationOtp);
+      if (formData.pan_number) payload.append('pan_number', formData.pan_number.trim().toUpperCase());
+      if (formData.gst_number) payload.append('gst_number', formData.gst_number.trim().toUpperCase());
       if (formData.profile_photo) payload.append('profile_photo', formData.profile_photo);
       if (formData.aadhar_image) payload.append('aadhar_image', formData.aadhar_image);
+      if (formData.pan_image) payload.append('pan_image', formData.pan_image);
+      if (formData.gst_image) payload.append('gst_image', formData.gst_image);
 
       const res = await fetch('/api/vendor/signup', {
         method: 'POST',
@@ -202,9 +266,9 @@ const handleSubmit = async (e) => {
       const data = await res.json();
 
       if (res.ok) {
-        // ✅ FIX: Don't store token - vendor is pending approval
+        // ✅ FIX: Don't store token - service provider is pending approval
         // Just save email for reference and redirect to pending page
-        localStorage.setItem('vendor-signup-email', formData.email);
+        localStorage.setItem('service provider-signup-email', formData.email);
         if (data.payment) {
           redirectToPayU(data.payment);
           return;
@@ -381,6 +445,63 @@ const handleSubmit = async (e) => {
         }
         .vs-input::placeholder { color: ${dark ? '#333' : '#bbb'}; }
 
+        .vs-otp-group {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+          width: 100%;
+        }
+        .vs-otp-input {
+          flex: 1;
+          min-width: 0;
+          letter-spacing: 0.08em;
+          font-weight: 600;
+        }
+        .vs-otp-btn {
+          flex-shrink: 0;
+          white-space: nowrap;
+          padding: 0 1.25rem !important;
+          height: 44px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 9px;
+          background: #22c55e !important;
+          background-color: #22c55e !important;
+          background-image: none !important;
+          color: #ffffff !important;
+          border: 1.5px solid #22c55e !important;
+          font-family: 'DM Sans', sans-serif;
+          font-weight: 700;
+          font-size: 0.8rem;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+          cursor: pointer;
+          box-shadow: 0 2px 6px rgba(34, 197, 94, 0.25) !important;
+          transition: all 0.2s ease;
+        }
+        .vs-otp-btn:hover:not(:disabled) {
+          background: #16a34a !important;
+          background-color: #16a34a !important;
+          border-color: #16a34a !important;
+          transform: translateY(-1px) !important;
+        }
+        .vs-otp-btn:disabled {
+          opacity: 0.55 !important;
+          cursor: not-allowed !important;
+          box-shadow: none !important;
+          transform: none !important;
+        }
+        .vs-otp-status {
+          margin-top: 0.4rem;
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: #16a34a;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+
         .vs-row {
           display: grid;
           grid-template-columns: 1fr 1fr;
@@ -547,7 +668,7 @@ const handleSubmit = async (e) => {
           {/* Brand */}
           <div className="vs-brand">
             <div className="vs-brand-dot"></div>
-            <div className="vs-brand-name">VENDOR<span>HUB</span></div>
+            <div className="vs-brand-name">SERVICE PROVIDER<span>HUB</span></div>
           </div>
 
           {/* Step tabs */}
@@ -584,7 +705,7 @@ const handleSubmit = async (e) => {
               {step === 1 && (
                 <>
                   <div className="vs-field">
-                    <label className="vs-label">Vendor Name *</label>
+                    <label className="vs-label">Service Provider Name <RequiredAsterisk /></label>
                     <input
                       className="vs-input"
                       type="text"
@@ -597,7 +718,7 @@ const handleSubmit = async (e) => {
                   </div>
 
                   <div className="vs-field">
-                    <label className="vs-label">Email Address *</label>
+                    <label className="vs-label">Email Address <RequiredAsterisk /></label>
                     <input
                       className="vs-input"
                       type="email"
@@ -610,7 +731,7 @@ const handleSubmit = async (e) => {
                   </div>
 
                   <div className="vs-field">
-                    <label className="vs-label">Mobile Number *</label>
+                    <label className="vs-label">Mobile Number <RequiredAsterisk /></label>
                     <input
                       className="vs-input"
                       type="tel"
@@ -623,10 +744,10 @@ const handleSubmit = async (e) => {
                   </div>
 
                   <div className="vs-field">
-                    <label className="vs-label">Email Verification OTP *</label>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <label className="vs-label">Email Verification OTP <RequiredAsterisk /></label>
+                    <div className="vs-otp-group">
                       <input
-                        className="vs-input"
+                        className="vs-input vs-otp-input"
                         type="text"
                         inputMode="numeric"
                         value={registrationOtp}
@@ -634,15 +755,20 @@ const handleSubmit = async (e) => {
                         placeholder="6-digit OTP"
                         maxLength={6}
                       />
-                      <button type="button" className="vs-btn" onClick={sendRegistrationOtp} disabled={otpSending}>
-                        {otpSending ? 'Sending...' : 'Send OTP'}
+                      <button
+                        type="button"
+                        className="vs-otp-btn no-global-btn"
+                        onClick={sendRegistrationOtp}
+                        disabled={otpSending}
+                      >
+                        {otpSending ? 'Sending…' : 'Send OTP'}
                       </button>
                     </div>
-                    {otpMessage && <small style={{ color: '#16a34a' }}>{otpMessage}</small>}
+                    {otpMessage && <div className="vs-otp-status">✓ {otpMessage}</div>}
                   </div>
 
                   <div className="vs-field">
-                    <label className="vs-label">Password *</label>
+                    <label className="vs-label">Password <RequiredAsterisk /></label>
                     <input
                       className="vs-input"
                       type="password"
@@ -655,7 +781,7 @@ const handleSubmit = async (e) => {
                   </div>
 
                   <div className="vs-field">
-                    <label className="vs-label">Confirm Password *</label>
+                    <label className="vs-label">Confirm Password <RequiredAsterisk /></label>
                     <input
                       className="vs-input"
                       type="password"
@@ -674,10 +800,11 @@ const handleSubmit = async (e) => {
                 <>
                   <div className="vs-row">
                     <div className="vs-field">
-                      <label className="vs-label">City *</label>
+                      <label className="vs-label">City <RequiredAsterisk /></label>
                       <select
                         className="vs-input"
                         name="city"
+                        required
                         value={formData.city}
                         onChange={handleChange}
                         disabled={loadingServices}
@@ -688,7 +815,7 @@ const handleSubmit = async (e) => {
                       {serviceCityError && <div className="vs-error" style={{ marginTop: '0.35rem' }}>{serviceCityError}</div>}
                     </div>
                     <div className="vs-field">
-                      <label className="vs-label">State *</label>
+                      <label className="vs-label">State <RequiredAsterisk /></label>
                       <input
                         className="vs-input"
                         type="text"
@@ -713,7 +840,7 @@ const handleSubmit = async (e) => {
                       />
                     </div>
                     <div className="vs-field">
-                      <label className="vs-label">Postal Code *</label>
+                      <label className="vs-label">Postal Code <RequiredAsterisk /></label>
                       <input
                         className="vs-input"
                         type="text"
@@ -727,7 +854,7 @@ const handleSubmit = async (e) => {
                   </div>
 
                   <div className="vs-field">
-                    <label className="vs-label">Aadhaar Number *</label>
+                    <label className="vs-label">Aadhaar Number <RequiredAsterisk /></label>
                     <input
                       className="vs-input"
                       type="text"
@@ -790,13 +917,119 @@ const handleSubmit = async (e) => {
                       </div>
                     </div>
                   </div>
+
+                  <div className="vs-row">
+                    <div className="vs-field">
+                      <label className="vs-label">PAN Number (Optional)</label>
+                      <input
+                        className="vs-input"
+                        type="text"
+                        name="pan_number"
+                        value={formData.pan_number}
+                        onChange={(e) => {
+                          const val = e.target.value.toUpperCase().slice(0, 10);
+                          setFormData(prev => ({ ...prev, pan_number: val }));
+                          if (error) setError('');
+                        }}
+                        placeholder="ABCDE1234F"
+                        maxLength={10}
+                        style={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}
+                      />
+                    </div>
+
+                    <div className="vs-field">
+                      <label className="vs-label">PAN Card Image (Optional)</label>
+                      <div className={`vs-upload-area ${panPreview ? 'has-file' : ''}`}>
+                        <input
+                          type="file"
+                          accept="image/*,.pdf"
+                          onChange={(e) => handleFileChange(e, 'pan_image')}
+                        />
+                        {panPreview ? (
+                          <>
+                            <img src={panPreview} alt="PAN" className="vs-upload-preview" />
+                            <div className="vs-file-name">✓ PAN Card uploaded</div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="vs-upload-icon">💳</div>
+                            <div className="vs-upload-text"><strong>Click to upload</strong><br />PAN Card</div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="vs-row">
+                    <div className="vs-field">
+                      <label className="vs-label">GST Number (Optional)</label>
+                      <input
+                        className="vs-input"
+                        type="text"
+                        name="gst_number"
+                        value={formData.gst_number}
+                        onChange={(e) => {
+                          const val = e.target.value.toUpperCase().slice(0, 15);
+                          setFormData(prev => ({ ...prev, gst_number: val }));
+                          if (error) setError('');
+                        }}
+                        placeholder="07AAAAA0000A1Z5"
+                        maxLength={15}
+                        style={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}
+                      />
+                    </div>
+
+                    <div className="vs-field">
+                      <label className="vs-label">GST Certificate (Optional)</label>
+                      <div className={`vs-upload-area ${gstPreview ? 'has-file' : ''}`}>
+                        <input
+                          type="file"
+                          accept="image/*,.pdf"
+                          onChange={(e) => handleFileChange(e, 'gst_image')}
+                        />
+                        {gstPreview ? (
+                          <>
+                            <img src={gstPreview} alt="GST" className="vs-upload-preview" />
+                            <div className="vs-file-name">✓ GST Certificate uploaded</div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="vs-upload-icon">🏢</div>
+                            <div className="vs-upload-text"><strong>Click to upload</strong><br />GST Document</div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </>
               )}
 
               {/* STEP 3 */}
               {step === 3 && (
                 <>
-                  <label className="vs-label">Select services you provide *</label>
+                  <label className={`vs-service-card ${formData.is_contractor ? 'selected' : ''}`} style={{ display: 'flex', gap: 12, marginBottom: 18, borderColor: formData.is_contractor ? '#16a34a' : undefined }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.is_contractor}
+                      onChange={(e) => setFormData((current) => ({ ...current, is_contractor: e.target.checked }))}
+                      style={{ width: 18, height: 18, marginTop: 3 }}
+                    />
+                    <div>
+                      <div className="vs-service-name">Register as a Contractor</div>
+                      <div className="vs-service-price">Enable contractor profile, labour team and project work access.</div>
+                    </div>
+                  </label>
+
+                  {formData.is_contractor && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, padding: 12, marginBottom: 18, border: '1px solid #bbf7d0', borderRadius: 10, background: dark ? '#16351f' : '#f0fdf4' }}>
+                      <input className="vs-input" value={formData.contractor_trade} onChange={(e) => setFormData((current) => ({ ...current, contractor_trade: e.target.value }))} placeholder="Contractor trade (Civil, Electrical...)" />
+                      <select className="vs-input" value={formData.labor_team_size} onChange={(e) => setFormData((current) => ({ ...current, labor_team_size: e.target.value }))}>
+                        <option value="">Labour team size</option>
+                        <option value="1-5">1-5</option><option value="6-15">6-15</option><option value="16-30">16-30</option><option value="30+">30+</option>
+                      </select>
+                    </div>
+                  )}
+                  <label className="vs-label">Select services you provide <RequiredAsterisk /></label>
                   {loadingServices ? (
                     <div style={{ textAlign: 'center', padding: '2rem', color: dark ? '#555' : '#aaa', fontSize: '0.85rem' }}>
                       Loading services...
@@ -836,14 +1069,9 @@ const handleSubmit = async (e) => {
               {/* STEP 4 */}
               {step === 4 && (
                 <>
-                  <label className="vs-label">Select a subscription plan *</label>
+                  <label className="vs-label">Select a subscription plan <RequiredAsterisk /></label>
                   <div className="grid grid-cols-1 gap-3 mt-2">
-                    {[
-                      { id: 'free', name: 'Free Registration', duration: 'Free', price: 'Free', desc: 'Submit your vendor profile for admin approval without a paid package.' },
-                      { id: 'pkg_6m', name: '6 Months Plan', duration: '6 Months', price: '₹100', desc: 'Perfect for getting started. Complete booking access.' },
-                      { id: 'pkg_1y', name: '1 Year Plan', duration: '12 Months', price: '₹4,999', desc: 'Most popular. Great value with a full year of leads.' },
-                      { id: 'pkg_2y', name: '2 Years Plan', duration: '24 Months', price: '₹7,999', desc: 'Best deal. Long-term peace of mind and maximum savings.' },
-                    ].map(pkg => (
+                    {plans.map(pkg => (
                       <div
                         key={pkg.id}
                         onClick={() => setFormData(prev => ({ ...prev, package_id: pkg.id }))}
@@ -884,7 +1112,7 @@ const handleSubmit = async (e) => {
             </form>
 
             <div className="vs-footer">
-              Already a vendor? <Link href="/vendor/login">Sign in</Link>
+              Already a service provider? <Link href="/vendor/login">Sign in</Link>
             </div>
           </div>
 

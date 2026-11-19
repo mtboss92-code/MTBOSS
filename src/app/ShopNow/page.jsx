@@ -1,13 +1,19 @@
 "use client";
+import RequiredAsterisk from '../components/RequiredAsterisk';
 
 import { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { MapPin, Plus, Check, Trash2, Home, Building2, Briefcase } from "lucide-react";
 import { useCities } from "@/hooks/useCities";
+import { useShopLocation } from "@/hooks/useShopLocation";
+import LocationPromptModal from "./LocationPromptModal";
 import Storefront, { displayUnit } from "./Storefront";
 import { defaultShopStorefront } from "@/lib/shop-storefront-defaults";
 import { calculateCoupon } from "@/lib/coupon-calculations";
 import { getCartStep } from "@/lib/cart-step";
+import { triggerFlyToCart } from "./flyToCart";
 // Dark-mode watcher
 function useDarkMode() {
   const [dark, setDark] = useState(false);
@@ -91,6 +97,7 @@ async function parseJsonResponse(response) {
 }
 
 export default function ShopPage() {
+  const router = useRouter();
   const isDarkMode = useDarkMode();
   const { cities: supportedCities } = useCities();
 
@@ -105,6 +112,7 @@ export default function ShopPage() {
   const [storeContent, setStoreContent] = useState(defaultShopStorefront);
   const [cart, setCart] = useState([]);
   const [coupons, setCoupons] = useState([]);
+  const [promotions, setPromotions] = useState([]);
   const [manualCoupon, setManualCoupon] = useState(null);
   const [shippingQuote, setShippingQuote] = useState(null);
   const [shippingQuoteError, setShippingQuoteError] = useState('');
@@ -113,12 +121,22 @@ export default function ShopPage() {
 
   useEffect(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem("mtboss-shop-cart") || "[]");
-      if (Array.isArray(saved)) setCart(saved.filter((item) => (
-        item?.product?.id
-        && Number.isInteger(item.quantity)
-        && item.quantity > 0
-      )));
+      const saved = JSON.parse(localStorage.getItem("MTBOSS-shop-cart") || "[]");
+      if (Array.isArray(saved)) {
+        const merged = new Map();
+        for (const item of saved) {
+          const id = item?.product?.id;
+          if (id && Number.isInteger(item.quantity) && item.quantity > 0) {
+            if (merged.has(id)) {
+              const existing = merged.get(id);
+              existing.quantity = Math.min(10000, existing.quantity + item.quantity);
+            } else {
+              merged.set(id, { ...item });
+            }
+          }
+        }
+        setCart([...merged.values()]);
+      }
     } catch { /* Ignore stale cart data. */ }
     setCartReady(true);
   }, []);
@@ -133,7 +151,30 @@ export default function ShopPage() {
   }, []);
 
   useEffect(() => {
-    if (cartReady) localStorage.setItem("mtboss-shop-cart", JSON.stringify(cart));
+    const loadPromos = () => {
+      fetch('/api/shop-promotions?t=' + Date.now())
+        .then(parseJsonResponse)
+        .then((data) => {
+          if (data?.success) setPromotions(data.data || []);
+        })
+        .catch(() => {});
+    };
+    loadPromos();
+    const handleStorage = (e) => {
+      if (e.key === 'MTBOSS-promotions-updated') loadPromos();
+    };
+    window.addEventListener('promotionsUpdated', loadPromos);
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('focus', loadPromos);
+    return () => {
+      window.removeEventListener('promotionsUpdated', loadPromos);
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('focus', loadPromos);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (cartReady) localStorage.setItem("MTBOSS-shop-cart", JSON.stringify(cart));
   }, [cart, cartReady]);
 
   useEffect(() => {
@@ -192,41 +233,57 @@ export default function ShopPage() {
     loadProducts();
 
     const refreshVisibleShop = () => {
-      if (document.visibilityState === "visible") loadProducts();
+      if (document.visibilityState === "visible") loadProducts(true);
     };
     const refreshFromProductChange = (event) => {
-      if (event.type !== "storage" || event.key === "mtboss-shop-products-updated") loadProducts(true);
+      if (event.type !== "storage" || event.key === "MTBOSS-shop-products-updated") loadProducts(true);
     };
 
     window.addEventListener("focus", refreshVisibleShop);
     window.addEventListener("storage", refreshFromProductChange);
-    window.addEventListener("mtbossShopProductsUpdated", refreshFromProductChange);
+    window.addEventListener("MTBOSSShopProductsUpdated", refreshFromProductChange);
     document.addEventListener("visibilitychange", refreshVisibleShop);
 
     return () => {
       window.removeEventListener("focus", refreshVisibleShop);
       window.removeEventListener("storage", refreshFromProductChange);
-      window.removeEventListener("mtbossShopProductsUpdated", refreshFromProductChange);
+      window.removeEventListener("MTBOSSShopProductsUpdated", refreshFromProductChange);
       document.removeEventListener("visibilitychange", refreshVisibleShop);
     };
   }, [loadProducts]);
 
   useEffect(() => {
     if (!cartReady || !productsLoaded || !categories.length) return;
-    setCart((previous) => previous.flatMap((item) => {
-      if (!item.product?.product_id) {
-        const category = categories.find((entry) => String(entry.id) === String(item.product?.category?.id))
-          || categories.find((entry) => entry.name.toLowerCase() === item.product?.category?.name?.toLowerCase());
-        const validNames = Array.isArray(category?.types) && category.types.length ? category.types : [category?.name];
-        if (!category || !validNames.some((name) => name?.toLowerCase() === item.product?.name?.toLowerCase())) return [];
-        return [{ product: { ...item.product, category }, quantity: Math.min(item.quantity, 10000) }];
+    setCart((previous) => {
+      const merged = new Map();
+      for (const item of previous) {
+        if (!item.product?.product_id) {
+          const category = categories.find((entry) => String(entry.id) === String(item.product?.category?.id))
+            || categories.find((entry) => entry.name.toLowerCase() === item.product?.category?.name?.toLowerCase());
+          const validNames = Array.isArray(category?.types) && category.types.length ? category.types : [category?.name];
+          if (!category || !validNames.some((name) => name?.toLowerCase() === item.product?.name?.toLowerCase())) continue;
+          const key = item.product.id || item.product.name;
+          if (merged.has(key)) {
+            merged.get(key).quantity = Math.min(10000, merged.get(key).quantity + item.quantity);
+          } else {
+            merged.set(key, { product: { ...item.product, category }, quantity: Math.min(item.quantity, 10000) });
+          }
+        } else {
+          const current = allProducts.find((product) => product.id === item.product.product_id);
+          const category = categories.find((entry) => entry.name.toLowerCase() === current?.category?.toLowerCase())
+            || categories.find((entry) => current?.name?.toLowerCase().includes(entry.name.toLowerCase()));
+          if (!current || !category || Number(current.quantity) < 1) continue;
+          const key = item.product.id || `supplier-${current.id}`;
+          const resolvedProduct = { ...item.product, ...current, category, image: current.image_url, fromSupplier: true, product_id: current.id };
+          if (merged.has(key)) {
+            merged.get(key).quantity = Math.min(merged.get(key).quantity + item.quantity, Number(current.quantity) || 10000, 10000);
+          } else {
+            merged.set(key, { product: resolvedProduct, quantity: Math.min(item.quantity, Number(current.quantity) || 10000) });
+          }
+        }
       }
-      const current = allProducts.find((product) => product.id === item.product.product_id);
-      const category = categories.find((entry) => entry.name.toLowerCase() === current?.category?.toLowerCase())
-        || categories.find((entry) => current?.name?.toLowerCase().includes(entry.name.toLowerCase()));
-      if (!current || !category || Number(current.quantity) < 1) return [];
-      return [{ product: { ...item.product, ...current, category, image: current.image_url, fromSupplier: true, product_id: current.id }, quantity: Math.min(item.quantity, current.quantity) }];
-    }));
+      return [...merged.values()];
+    });
   }, [allProducts, cartReady, categories, productsLoaded]);
 
   const [shippingSettings, setShippingSettings] = useState(null);
@@ -254,10 +311,10 @@ export default function ShopPage() {
     };
 
     window.addEventListener("focus", handleRefresh);
-    window.addEventListener("mtbossShopProductsUpdated", handleRefresh);
+    window.addEventListener("MTBOSSShopProductsUpdated", handleRefresh);
     return () => {
       window.removeEventListener("focus", handleRefresh);
-      window.removeEventListener("mtbossShopProductsUpdated", handleRefresh);
+      window.removeEventListener("MTBOSSShopProductsUpdated", handleRefresh);
     };
   }, []);
 
@@ -303,8 +360,17 @@ export default function ShopPage() {
   const [brandCompany, setBrandCompany]         = useState("");
   const [deliveryDate, setDeliveryDate]         = useState("");
 
-  // City selection
-  const [selectedCity, setSelectedCity] = useState("");
+  // City & Location selection
+  const {
+    selectedCity,
+    setSelectedCity,
+    isDetecting: isDetectingLocation,
+    detectionStatus: locationDetectionStatus,
+    showCityModal,
+    setShowCityModal,
+    detectLocation,
+    detectedInfo,
+  } = useShopLocation({ autoDetect: true });
   const [cityError, setCityError] = useState("");
   const [cityVerified, setCityVerified] = useState(false);
   const [checkingCity, setCheckingCity] = useState(false);
@@ -313,6 +379,17 @@ export default function ShopPage() {
   const [locationStatus, setLocationStatus] = useState("idle");
   const [locationCoords, setLocationCoords] = useState(null);
   const [locationError, setLocationError] = useState("");
+
+  // Address & Profile Management
+  const [savedAddresses, setSavedAddresses]             = useState([]);
+  const [loadingAddresses, setLoadingAddresses]         = useState(false);
+  const [addressMode, setAddressMode]                   = useState("new"); // "select" or "new"
+  const [selectedAddressId, setSelectedAddressId]       = useState("new");
+  const [newAddressLabel, setNewAddressLabel]           = useState("Home");
+  const [customAddressLabel, setCustomAddressLabel]     = useState("");
+  const [newAddressPincode, setNewAddressPincode]       = useState("");
+  const [saveAddressToProfile, setSaveAddressToProfile] = useState(true);
+  const [makeDefaultAddress, setMakeDefaultAddress]     = useState(false);
 
   // Wallet Redemption State
   const [useWallet, setUseWallet] = useState(false);
@@ -352,7 +429,29 @@ export default function ShopPage() {
     setSubmitError("");
     setCityError("");
     setCityVerified(false);
-    setFormData({ name: "", email: "", phone: "", quantity: product && mode !== "cart" ? "1" : "", address: "", message: "" });
+
+    // Prefill user details from storage if available
+    let prefillName = "";
+    let prefillEmail = "";
+    let prefillPhone = "";
+    try {
+      const stored = localStorage.getItem("user") || localStorage.getItem("admin");
+      if (stored) {
+        const u = JSON.parse(stored);
+        prefillName = u.name || "";
+        prefillEmail = u.email || "";
+        prefillPhone = u.phone || "";
+      }
+    } catch {}
+
+    setFormData({
+      name: prefillName,
+      email: prefillEmail,
+      phone: prefillPhone,
+      quantity: product && mode !== "cart" ? "1" : "",
+      address: "",
+      message: ""
+    });
     setMaterialType(product?.name || "");
     setCustomType(product?.name || "");
     setSubcategoryVal("");
@@ -371,7 +470,10 @@ export default function ShopPage() {
     setIsModalOpen(true);
   };
 
-  const addToCart = (product) => {
+  const addToCart = (product, event) => {
+    if (event) {
+      triggerFlyToCart(event, product);
+    }
     setCart((previous) => {
       const existing = previous.find((item) => item.product.id === product.id);
       const step = getCartStep(product);
@@ -493,6 +595,7 @@ export default function ShopPage() {
       });
 
     return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isModalOpen, modalMode, cart, selectedProduct, formData.quantity, activeCoupon, selectedCity, useWallet]);
 
   const fillAddressFromCoords = async (latitude, longitude) => {
@@ -507,6 +610,12 @@ export default function ShopPage() {
           ...prev,
           address: prev.address?.trim() ? prev.address : data.display_name,
         }));
+      }
+      if (data.address?.postcode) {
+        const rawPin = String(data.address.postcode).replace(/\D/g, "").slice(0, 6);
+        if (rawPin.length === 6) {
+          setNewAddressPincode((prev) => prev || rawPin);
+        }
       }
     } catch {
       // Keep the captured coordinates even if reverse geocoding is unavailable.
@@ -581,6 +690,184 @@ export default function ShopPage() {
     }
   };
 
+  const applyAddress = (addr) => {
+    if (!addr) return;
+    setSelectedAddressId(addr.id);
+    setFormData((prev) => ({
+      ...prev,
+      address: addr.address_line || "",
+    }));
+    if (addr.pincode) {
+      setNewAddressPincode(addr.pincode);
+    }
+    if (addr.city) {
+      setSelectedCity(addr.city);
+      setCityVerified(true);
+      setCityError("");
+      checkCityAvailability(addr.city);
+    }
+    if (addr.latitude && addr.longitude) {
+      setLocationCoords({
+        latitude: Number(addr.latitude),
+        longitude: Number(addr.longitude),
+      });
+      setLocationStatus("success");
+      setLocationError("");
+    } else {
+      setLocationCoords(null);
+      setLocationStatus("idle");
+    }
+  };
+
+  const loadAddresses = async () => {
+    setLoadingAddresses(true);
+    const token = localStorage.getItem("token") || localStorage.getItem("admin-token");
+    let list = [];
+    if (token) {
+      try {
+        const res = await fetch("/api/user/addresses", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) {
+          list = data.data;
+        }
+      } catch (e) {
+        console.warn("Could not fetch addresses:", e);
+      }
+    }
+
+    try {
+      const localAddrs = JSON.parse(localStorage.getItem("MTBOSS_saved_addresses") || "[]");
+      if (Array.isArray(localAddrs) && localAddrs.length > 0) {
+        const existingLines = new Set(list.map((a) => (a.address_line || "").trim().toLowerCase()));
+        for (const item of localAddrs) {
+          if (!existingLines.has((item.address_line || "").trim().toLowerCase())) {
+            list.push(item);
+          }
+        }
+      }
+    } catch {}
+
+    setSavedAddresses(list);
+    if (list.length > 0) {
+      const defaultAddr = list.find((a) => a.is_default) || list[0];
+      setAddressMode("select");
+      setSelectedAddressId(defaultAddr.id);
+      applyAddress(defaultAddr);
+    } else {
+      setAddressMode("new");
+      setSelectedAddressId("new");
+      setMakeDefaultAddress(true);
+    }
+    setLoadingAddresses(false);
+  };
+
+  useEffect(() => {
+    if (!isModalOpen) return;
+    loadAddresses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isModalOpen]);
+
+  const saveAddressToServerOrLocal = async (addressData) => {
+    const token = localStorage.getItem("token") || localStorage.getItem("admin-token");
+    let savedObj = null;
+    if (token) {
+      try {
+        const res = await fetch("/api/user/addresses", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(addressData),
+        });
+        const data = await res.json();
+        if (data.success && data.data) {
+          savedObj = data.data;
+        }
+      } catch (err) {
+        console.warn("Error saving address to API:", err);
+      }
+    }
+
+    if (!savedObj) {
+      savedObj = {
+        id: `local_${Date.now()}`,
+        ...addressData,
+        created_at: new Date().toISOString(),
+      };
+    }
+
+    try {
+      const existing = JSON.parse(localStorage.getItem("MTBOSS_saved_addresses") || "[]");
+      const updated = [savedObj, ...existing.filter((a) => a.address_line !== savedObj.address_line)].slice(0, 10);
+      localStorage.setItem("MTBOSS_saved_addresses", JSON.stringify(updated));
+    } catch {}
+
+    return savedObj;
+  };
+
+  const handleDeleteAddress = async (e, addressId) => {
+    e.stopPropagation();
+    if (!window.confirm("Are you sure you want to delete this address?")) return;
+    const token = localStorage.getItem("token") || localStorage.getItem("admin-token");
+    if (token && typeof addressId === "number") {
+      try {
+        await fetch(`/api/user/addresses?id=${addressId}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch (err) {
+        console.error("Failed to delete address:", err);
+      }
+    }
+    try {
+      const existing = JSON.parse(localStorage.getItem("MTBOSS_saved_addresses") || "[]");
+      const filtered = existing.filter((a) => a.id !== addressId);
+      localStorage.setItem("MTBOSS_saved_addresses", JSON.stringify(filtered));
+    } catch {}
+
+    const remaining = savedAddresses.filter((a) => a.id !== addressId);
+    setSavedAddresses(remaining);
+    if (selectedAddressId === addressId) {
+      if (remaining.length > 0) {
+        applyAddress(remaining[0]);
+      } else {
+        setSelectedAddressId("new");
+        setAddressMode("new");
+        setFormData((prev) => ({ ...prev, address: "" }));
+        setLocationCoords(null);
+        setLocationStatus("idle");
+      }
+    }
+  };
+
+  const handleSetDefaultAddress = async (e, addressId) => {
+    e.stopPropagation();
+    const token = localStorage.getItem("token") || localStorage.getItem("admin-token");
+    if (token && typeof addressId === "number") {
+      try {
+        await fetch("/api/user/addresses", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ id: addressId }),
+        });
+      } catch (err) {
+        console.error("Failed to set default address:", err);
+      }
+    }
+    setSavedAddresses((prev) =>
+      prev.map((a) => ({
+        ...a,
+        is_default: a.id === addressId,
+      }))
+    );
+  };
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     if (name === 'phone') {
@@ -623,8 +910,8 @@ export default function ShopPage() {
       }
     }
 
-    if (!locationCoords?.latitude || !locationCoords?.longitude) {
-      setSubmitError("Please click 'Get Live Location' before submitting this material enquiry.");
+    if (!formData.address?.trim()) {
+      setSubmitError("Please enter your delivery address.");
       setSubmitting(false);
       return;
     }
@@ -683,6 +970,20 @@ export default function ShopPage() {
       setSubmittedOrder(data.data);
       if (modalMode === "cart") setCart([]);
       setSubmitted(true);
+
+      // Save new address to profile / local storage if chosen
+      if (addressMode === "new" && saveAddressToProfile && formData.address?.trim()) {
+        const finalLabel = newAddressLabel === "Other" ? (customAddressLabel.trim() || "Other") : newAddressLabel;
+        saveAddressToServerOrLocal({
+          label: finalLabel,
+          address_line: formData.address.trim(),
+          city: selectedCity,
+          pincode: newAddressPincode?.trim() || null,
+          latitude: locationCoords?.latitude || null,
+          longitude: locationCoords?.longitude || null,
+          is_default: makeDefaultAddress || savedAddresses.length === 0,
+        }).catch(() => {});
+      }
     } catch (err) {
       setSubmitError(err.message);
     } finally {
@@ -735,7 +1036,7 @@ export default function ShopPage() {
   return (
     <div className={`min-h-screen ${pageBg} transition-colors duration-300`}>
 
-      <Storefront categories={categories} products={allProducts} content={storeContent} loading={catsLoading} cities={supportedCities} selectedCity={selectedCity} setSelectedCity={setSelectedCity} cart={cart} onAdd={addToCart} onChangeQty={changeCartQuantity} onQuote={(product) => openModal(product.category, product, "quote")} onBuy={(product) => openModal(product.category, product, "buy")} onCheckout={openCartCheckout} activeCoupon={activeCoupon} couponCalculation={couponCalculation} couponOffers={couponOffers} onApplyCoupon={applyCouponCode} onSelectCoupon={selectCoupon} onClearCoupon={clearCoupon} shippingSettings={shippingSettings} shippingQuote={shippingQuote} />
+      <Storefront categories={categories} products={allProducts} content={storeContent} loading={catsLoading} cities={supportedCities} selectedCity={selectedCity} setSelectedCity={setSelectedCity} cart={cart} onAdd={addToCart} onChangeQty={changeCartQuantity} onQuote={(product) => openModal(product.category, product, "quote")} onBuy={(product) => { const pId = product.product_id || (String(product.id).startsWith('supplier-') ? product.id.replace('supplier-', '') : product.id); router.push('/ShopNow/' + pId + '/checkout?from=shop'); }} onCheckout={() => router.push('/ShopNow/checkout?mode=cart&from=shop')} activeCoupon={activeCoupon} couponCalculation={couponCalculation} couponOffers={couponOffers} onApplyCoupon={applyCouponCode} onSelectCoupon={selectCoupon} onClearCoupon={clearCoupon} shippingSettings={shippingSettings} shippingQuote={shippingQuote} promotions={promotions} onOpenLocationModal={() => setShowCityModal(true)} />
 
       {isModalOpen && mounted && createPortal(
         <div className="shop-checkout-modal fixed inset-0 flex items-center justify-center overflow-hidden bg-black/70 p-2 backdrop-blur-sm sm:p-4" style={{ zIndex: 99999 }}>
@@ -820,7 +1121,7 @@ export default function ShopPage() {
             ) : (
               <form onSubmit={handleSubmit} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 font-sans sm:px-6">
                 <div className="mb-4">
-                  <label className={lbl}>Delivery City *</label>
+                  <label className={lbl}>Delivery City <RequiredAsterisk /></label>
                   <div className="flex gap-2 items-end">
                     <select
                       className={`flex-1 ${sel}`}
@@ -889,9 +1190,10 @@ export default function ShopPage() {
                 {modalMode === "cart" ? (
                   <div className={`rounded-xl border px-4 py-3 mb-4 ${isDarkMode ? "border-zinc-700 bg-zinc-800" : "border-gray-200 bg-gray-50"}`}>
                     <p className={`text-xs font-bold mb-2 ${headText}`}>Materials in your order</p>
-                    {cart.map((item) => {
+                    {cart.map((item, index) => {
                       const itemUnitPrice = getUnitPrice(item.product, item.quantity);
-                      return <p key={item.product.id} className={`text-xs py-1 ${subText}`}>{item.product.name} · {item.quantity} {displayUnit(item.product.unit)} · {itemUnitPrice > 0 ? `₹${(itemUnitPrice * item.quantity).toLocaleString("en-IN")}` : 'Price on confirmation'}</p>;
+                      const itemKey = item.product?.id ? `${item.product.id}-${index}` : `cart-item-${index}`;
+                      return <p key={itemKey} className={`text-xs py-1 ${subText}`}>{item.product.name} · {item.quantity} {displayUnit(item.product.unit)} · {itemUnitPrice > 0 ? `₹${(itemUnitPrice * item.quantity).toLocaleString("en-IN")}` : 'Price on confirmation'}</p>;
                     })}
                     {couponCalculation.offerAmount > 0 && <p className={`mt-2 text-xs ${subText}`}>Items with existing offers: ₹{couponCalculation.offerAmount.toLocaleString('en-IN')} <span className="text-amber-600">(offer already applied)</span></p>}
                     {couponCalculation.regularAmount > 0 && <p className={`mt-1 text-xs ${subText}`}>Other items: ₹{couponCalculation.regularAmount.toLocaleString('en-IN')}</p>}
@@ -966,7 +1268,7 @@ export default function ShopPage() {
                   <div className={`rounded-xl border-2 px-4 py-3 mb-4 ${isDarkMode ? "border-[var(--brand-blue-light)] bg-zinc-800" : "border-[var(--brand-blue)] bg-blue-50"}`}>
                     <div className={`flex items-center justify-between text-xs ${subText}`}>
                       <span>Product total{modalMode === 'cart' && couponCalculation.discount > 0 ? ' (after coupon)' : ''}</span>
-                      <span>{hasFixedOrderPrice ? `₹${orderProductTotal.toLocaleString('en-IN')}` : 'On confirmation'}</span>
+                      <span>{hasFixedOrderPrice ? `₹${orderProductTotal.toLocaleString('en-IN')}` : 'Price on confirmation'}</span>
                     </div>
                     <div className={`mt-1 flex items-center justify-between text-xs ${subText}`}>
                       <span>Shipping</span>
@@ -980,7 +1282,7 @@ export default function ShopPage() {
                     )}
                     <div className={`mt-3 flex items-center justify-between border-t pt-3 ${isDarkMode ? "border-zinc-700" : "border-blue-200"}`}>
                       <span className={`text-base font-black ${headText}`}>Payable Grand Total</span>
-                      <strong className={`text-xl font-black ${headText}`}>{orderGrandTotal !== null ? `₹${orderGrandTotal.toLocaleString('en-IN')}` : 'On confirmation'}</strong>
+                      <strong className={`text-xl font-black ${headText}`}>{orderGrandTotal !== null ? `₹${orderGrandTotal.toLocaleString('en-IN')}` : 'Price on confirmation'}</strong>
                     </div>
                   </div>
                 )}
@@ -996,7 +1298,7 @@ export default function ShopPage() {
                 {/* Material Type */}
                 {hasTypes && (
                   <div className="mb-3">
-                    <label className={lbl}>Type of Material *</label>
+                    <label className={lbl}>Type of Material <RequiredAsterisk /></label>
                     <select
                       value={materialType}
                       onChange={(e) => { setMaterialType(e.target.value); setCustomType(""); }}
@@ -1053,7 +1355,7 @@ export default function ShopPage() {
                 {/* Custom subcategory */}
                 {subcategoryVal === "Others" && (
                   <div className="mb-3">
-                    <label className={lbl}>Specify Sub-category *</label>
+                    <label className={lbl}>Specify Sub-category <RequiredAsterisk /></label>
                     <input
                       type="text"
                       value={customSubcategory}
@@ -1086,17 +1388,17 @@ export default function ShopPage() {
 
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   <div>
-                    <label className={lbl}>Full Name *</label>
+                    <label className={lbl}>Full Name <RequiredAsterisk /></label>
                     <input type="text" name="name" value={formData.name} onChange={handleInputChange} required placeholder="Your name" className={inp} />
                   </div>
                   <div>
-                    <label className={lbl}>Phone *</label>
+                    <label className={lbl}>Phone <RequiredAsterisk /></label>
                     <input type="tel" name="phone" value={formData.phone} onChange={handleInputChange} required placeholder="+91 XXXXX" className={inp} />
                   </div>
                 </div>
 
                 <div className="mb-3">
-                  <label className={lbl}>Email Address *</label>
+                  <label className={lbl}>Email Address <RequiredAsterisk /></label>
                   <input type="email" name="email" value={formData.email} onChange={handleInputChange} required placeholder="your@email.com" className={inp} />
                 </div>
 
@@ -1106,7 +1408,7 @@ export default function ShopPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
                   {modalMode !== "cart" && <>
                   <div>
-                    <label className={lbl}>Quantity Required *</label>
+                    <label className={lbl}>Quantity Required <RequiredAsterisk /></label>
                     <input type="number" min={modalMode === "buy" ? "1" : "0.01"} max={modalMode === "buy" ? "10000" : "100000000"} step={modalMode === "buy" ? "1" : "any"} name="quantity" value={formData.quantity} onChange={handleInputChange} required placeholder="e.g. 500" className={inp} />
                   </div>
                   <div>
@@ -1138,32 +1440,263 @@ export default function ShopPage() {
                   </div>
                 </div>
 
-                {/* Delivery Address */}
-                <div className="mb-3">
-                  <label className={lbl}>🏠 Delivery Address *</label>
-                  <textarea
-                    name="address"
-                    value={formData.address}
-                    onChange={handleInputChange}
-                    required
-                    rows={2}
-                    placeholder="Full delivery address (plot no., street, city, state, PIN)"
-                    className={`${inp} resize-none`}
-                  />
+                {/* ── SECTION 3.5 — Delivery Address ───────────────────── */}
+                <SectionLabel isDark={isDarkMode}>🏠 Delivery Address</SectionLabel>
+
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-[11px] font-black uppercase tracking-wider ${labelText}`}>
+                      {addressMode === "select" ? "Select Delivery Address *" : "Add New Delivery Address *"}
+                    </span>
+                    {savedAddresses.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (addressMode === "select") {
+                            setAddressMode("new");
+                            setSelectedAddressId("new");
+                            setFormData((prev) => ({ ...prev, address: "" }));
+                            setLocationCoords(null);
+                            setLocationStatus("idle");
+                          } else {
+                            setAddressMode("select");
+                            const def = savedAddresses.find((a) => a.is_default) || savedAddresses[0];
+                            applyAddress(def);
+                          }
+                        }}
+                        className="text-[11px] font-bold text-[var(--brand-blue)] hover:underline flex items-center gap-1 transition-all"
+                      >
+                        {addressMode === "select" ? (
+                          <>
+                            <Plus size={13} />
+                            <span>Add New Address</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>← Choose Saved ({savedAddresses.length})</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {addressMode === "select" && savedAddresses.length > 0 ? (
+                    <div className="space-y-2.5">
+                      {savedAddresses.map((addr) => {
+                        const isSelected = selectedAddressId === addr.id;
+                        const labelLower = (addr.label || "").toLowerCase();
+                        return (
+                          <div
+                            key={addr.id}
+                            onClick={() => applyAddress(addr)}
+                            className={`group relative p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                              isSelected
+                                ? isDarkMode
+                                  ? "border-[var(--brand-blue)] bg-[var(--brand-blue)]/10 shadow-md"
+                                  : "border-[var(--brand-blue)] bg-sky-50/80 shadow-sm"
+                                : isDarkMode
+                                  ? "border-zinc-800 bg-zinc-800/40 hover:border-zinc-700"
+                                  : "border-gray-200 bg-gray-50/80 hover:border-gray-300"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all ${
+                                  isSelected ? "border-[var(--brand-blue)] bg-[var(--brand-blue)]" : "border-gray-400"
+                                }`}>
+                                  {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                                </div>
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
+                                  labelLower.includes("home")
+                                    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                                    : labelLower.includes("office")
+                                    ? "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300"
+                                    : labelLower.includes("site")
+                                    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                                    : "bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200"
+                                }`}>
+                                  {labelLower.includes("home") && "🏠"}
+                                  {labelLower.includes("office") && "🏢"}
+                                  {labelLower.includes("site") && "🏗️"}
+                                  {!labelLower.includes("home") && !labelLower.includes("office") && !labelLower.includes("site") && "📍"}
+                                  <span>{addr.label || "Address"}</span>
+                                </span>
+                                {addr.is_default && (
+                                  <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                                    Default
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                                {!addr.is_default && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleSetDefaultAddress(e, addr.id)}
+                                    className="text-[9px] font-bold text-gray-400 hover:text-[var(--brand-blue)] transition-colors"
+                                  >
+                                    Set default
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDeleteAddress(e, addr.id)}
+                                  className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                                  title="Delete address"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            </div>
+
+                            <p className={`mt-2 text-xs font-semibold leading-relaxed line-clamp-2 ${headText}`}>
+                              {addr.address_line}
+                            </p>
+                            <div className="mt-1 flex items-center justify-between text-[10px] text-gray-500 dark:text-zinc-400 font-medium">
+                              <span>{addr.city}{addr.pincode ? ` • ${addr.pincode}` : ""}</span>
+                              {addr.latitude && addr.longitude ? (
+                                <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                                  <Check size={12} /> Live GPS Attached
+                                </span>
+                              ) : (
+                                <span className="text-amber-500">Live GPS needed</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {/* Add new address button card */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAddressMode("new");
+                          setSelectedAddressId("new");
+                          setFormData((prev) => ({ ...prev, address: "" }));
+                          setLocationCoords(null);
+                          setLocationStatus("idle");
+                        }}
+                        className={`w-full py-2.5 px-3 rounded-xl border-2 border-dashed flex items-center justify-center gap-2 text-xs font-bold transition-all ${
+                          isDarkMode
+                            ? "border-zinc-700 text-zinc-300 hover:border-[var(--brand-blue)] hover:text-[var(--brand-blue-light)] hover:bg-zinc-800/40"
+                            : "border-gray-300 text-gray-600 hover:border-[var(--brand-blue)] hover:text-[var(--brand-blue)] hover:bg-sky-50/50"
+                        }`}
+                      >
+                        <Plus size={14} /> Add Another Delivery Address
+                      </button>
+                    </div>
+                  ) : (
+                    <div className={`p-3.5 rounded-xl border-2 space-y-3 ${
+                      isDarkMode ? "bg-zinc-800/40 border-zinc-700" : "bg-gray-50/80 border-gray-200"
+                    }`}>
+                      {/* Address Tag Selector */}
+                      <div>
+                        <label className={lbl}>Address Type / Label</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[
+                            { label: "Home", icon: "🏠" },
+                            { label: "Office", icon: "🏢" },
+                            { label: "Site", icon: "🏗️" },
+                            { label: "Other", icon: "📍" },
+                          ].map((item) => (
+                            <button
+                              key={item.label}
+                              type="button"
+                              onClick={() => setNewAddressLabel(item.label)}
+                              className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all flex items-center gap-1.5 ${
+                                newAddressLabel === item.label
+                                  ? "border-[var(--brand-blue)] bg-[var(--brand-blue)] text-white shadow-sm"
+                                  : isDarkMode
+                                    ? "border-zinc-700 bg-zinc-800 text-zinc-300 hover:border-zinc-600"
+                                    : "border-gray-300 bg-white text-gray-700 hover:border-gray-400"
+                              }`}
+                            >
+                              <span>{item.icon}</span>
+                              <span>{item.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                        {newAddressLabel === "Other" && (
+                          <input
+                            type="text"
+                            value={customAddressLabel}
+                            onChange={(e) => setCustomAddressLabel(e.target.value)}
+                            placeholder="e.g. Warehouse, Farmhouse, Project B"
+                            className={`mt-2 ${inp}`}
+                          />
+                        )}
+                      </div>
+
+                      {/* Full delivery address */}
+                      <div>
+                        <label className={lbl}>Street Address / Plot / Flat No. <RequiredAsterisk /></label>
+                        <textarea
+                          name="address"
+                          value={formData.address}
+                          onChange={handleInputChange}
+                          required
+                          rows={2}
+                          placeholder="House/Plot/Shop no., Building name, Street, Area, Landmark"
+                          className={`${inp} resize-none`}
+                        />
+                      </div>
+
+                      {/* PIN Code */}
+                      <div>
+                        <label className={lbl}>PIN Code (Optional)</label>
+                        <input
+                          type="text"
+                          maxLength={6}
+                          value={newAddressPincode}
+                          onChange={(e) => setNewAddressPincode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                          placeholder="e.g. 244001"
+                          className={inp}
+                        />
+                      </div>
+
+                      {/* Save address toggle checkboxes */}
+                      <div className="pt-2 border-t border-gray-200 dark:border-zinc-700 space-y-2">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={saveAddressToProfile}
+                            onChange={(e) => setSaveAddressToProfile(e.target.checked)}
+                            className="w-4 h-4 rounded accent-[var(--brand-blue)]"
+                          />
+                          <span className={`text-xs font-bold ${headText}`}>
+                            Save this address for future orders
+                          </span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={makeDefaultAddress}
+                            onChange={(e) => setMakeDefaultAddress(e.target.checked)}
+                            className="w-4 h-4 rounded accent-[var(--brand-blue)]"
+                          />
+                          <span className={`text-[11px] ${subText}`}>
+                            Set as default address
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* ── SECTION 4 — GPS Location ────────────────────────── */}
-                <SectionLabel isDark={isDarkMode}>📍 Live Location</SectionLabel>
+                <SectionLabel isDark={isDarkMode}>Live Location (Optional)</SectionLabel>
 
-                <div className="mb-3">
-                  <div className="flex items-center justify-between mb-1">
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-1.5">
                     <span className={`text-[10px] font-bold ${isDarkMode ? "text-zinc-400" : "text-gray-500"}`}>
-                      Share your location for faster supplier matching
+                      {locationStatus === "success" && locationCoords
+                        ? "GPS Location attached for instant supplier matching"
+                        : "Optional: Detect live GPS location to link with your delivery address"}
                     </span>
                     {locationStatus === "success" && (
                       <button type="button" onClick={retryLocation}
                         className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-all ${isDarkMode ? "border-zinc-600 text-zinc-300 hover:border-[var(--brand-blue)] hover:text-[var(--brand-blue-light)]" : "border-gray-300 text-gray-500 hover:border-[var(--brand-blue)] hover:text-[var(--brand-blue-deep)]"}`}>
-                        🔄 Retry
+                        🔄 Update GPS
                       </button>
                     )}
                   </div>
@@ -1172,13 +1705,14 @@ export default function ShopPage() {
                     <button
                       type="button"
                       onClick={retryLocation}
-                      className={`w-full py-2.5 px-3 mb-2 text-[10px] font-black uppercase tracking-widest border transition-all ${
+                      className={`w-full py-2.5 px-3 mb-2 text-[10px] font-black uppercase tracking-widest border transition-all flex items-center justify-center gap-1.5 ${
                         isDarkMode
                           ? "border-[var(--brand-blue)] text-[var(--brand-blue)] hover:bg-[var(--brand-blue)]/10"
                           : "border-zinc-900 text-zinc-900 hover:bg-zinc-100"
                       }`}
                     >
-                      {locationStatus === "error" ? "Try Again - Get Live Location" : "Get Live Location"}
+                      <MapPin size={13} />
+                      <span>{locationStatus === "error" ? "Try Again - Get Live Location" : "Detect Current Live Location"}</span>
                     </button>
                   )}
 
@@ -1206,7 +1740,7 @@ export default function ShopPage() {
                       />
                       <div className={`flex items-center justify-between px-3 py-1.5 ${isDarkMode ? "bg-green-900/20" : "bg-green-50"}`}>
                         <span className={`text-[10px] font-mono font-bold ${isDarkMode ? "text-green-400" : "text-green-700"}`}>
-                          ✅ {locationCoords.latitude.toFixed(5)}, {locationCoords.longitude.toFixed(5)}
+                          ✅ {Number(locationCoords.latitude).toFixed(5)}, {Number(locationCoords.longitude).toFixed(5)}
                         </span>
                         <a href={`https://www.google.com/maps?q=${locationCoords.latitude},${locationCoords.longitude}`}
                           target="_blank" rel="noopener noreferrer"
@@ -1230,7 +1764,7 @@ export default function ShopPage() {
                 {/* ── SECTION 5 — Pay using Cashback Wallet ───────────── */}
                 {modalMode !== 'quote' && rawGrandTotal > 0 && (
                   <div className={`mb-5 p-4 rounded-xl border-2 transition-all ${
-                    isDarkMode ? "bg-zinc-800/80 border-zinc-700" : "bg-emerald-50/50 border-emerald-200"
+                    isDarkMode ? "bg-zinc-800/80 border-zinc-700" : "bg-blue-50/60 border-blue-200"
                   }`}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
@@ -1240,7 +1774,7 @@ export default function ShopPage() {
                             Use wallet balance
                           </label>
                           <p className={`text-[11px] ${subText}`}>
-                            Available Balance: <strong className="text-emerald-600">₹{Number(walletPreview?.balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                            Available Balance: <strong className="text-[#2196F3]">₹{Number(walletPreview?.balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
                           </p>
                         </div>
                       </div>
@@ -1256,7 +1790,7 @@ export default function ShopPage() {
                             setWalletAmount(String(walletPreview.maxAllowed));
                           }
                         }}
-                        className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+                        className="w-4 h-4 accent-[#2196F3] rounded cursor-pointer"
                       />
                     </div>
 
@@ -1265,7 +1799,7 @@ export default function ShopPage() {
                     )}
 
                     {useWallet && walletPreview && (
-                      <div className="mt-3 pt-3 border-t border-emerald-200/50 space-y-2">
+                      <div className="mt-3 pt-3 border-t border-blue-200/60 space-y-2">
                         <div>
                           <label htmlFor="wallet-redeem-input" className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1">
                             Redeem Amount (₹)
@@ -1282,13 +1816,13 @@ export default function ShopPage() {
                                 const val = e.target.value;
                                 setWalletAmount(val);
                               }}
-                              className={`${inp} font-bold text-sm text-emerald-700`}
+                              className={`${inp} font-bold text-sm text-[#12283F]`}
                               placeholder={`Max ₹${walletPreview.maxAllowed}`}
                             />
                             <button
                               type="button"
                               onClick={() => setWalletAmount(String(walletPreview.maxAllowed))}
-                              className="px-3 py-2 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors whitespace-nowrap"
+                              className="px-3 py-2 text-xs font-bold rounded-lg bg-[#2196F3] text-white hover:bg-[#1976D2] transition-colors whitespace-nowrap"
                             >
                               Max ₹{walletPreview.maxAllowed}
                             </button>
@@ -1301,7 +1835,7 @@ export default function ShopPage() {
                           </p>
                         )}
                         {appliedWalletAmount >= rawGrandTotal && rawGrandTotal > 0 && (
-                          <div className="p-2 rounded-lg bg-emerald-100/70 border border-emerald-300 text-emerald-800 text-[11px] font-bold">
+                          <div className="p-2 rounded-lg bg-blue-50 border border-blue-300 text-[#12283F] text-[11px] font-bold">
                             🎉 Your wallet covers 100% of this order! No payment gateway required.
                           </div>
                         )}
@@ -1365,6 +1899,21 @@ export default function ShopPage() {
         </div>,
         document.body
       )}
+
+      <LocationPromptModal
+        isOpen={showCityModal}
+        onClose={() => setShowCityModal(false)}
+        cities={supportedCities}
+        selectedCity={selectedCity}
+        onSelectCity={(city) => {
+          setSelectedCity(city);
+          setShowCityModal(false);
+        }}
+        onDetectLocation={detectLocation}
+        isDetecting={isDetectingLocation}
+        detectionStatus={locationDetectionStatus}
+        detectedInfo={detectedInfo}
+      />
     </div>
   );
 }

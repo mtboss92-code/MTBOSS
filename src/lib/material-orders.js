@@ -63,6 +63,7 @@ export const ensureMaterialOrderSchema = createInitializationGuard(async() => {
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
+   
     await pool.query(`
     ALTER TABLE material_enquiries
       ADD COLUMN IF NOT EXISTS user_id INTEGER,
@@ -71,13 +72,23 @@ export const ensureMaterialOrderSchema = createInitializationGuard(async() => {
       ADD COLUMN IF NOT EXISTS assigned_entity_id INTEGER,
       ADD COLUMN IF NOT EXISTS status_note TEXT,
       ADD COLUMN IF NOT EXISTS estimated_delivery_date DATE,
-      ADD COLUMN IF NOT EXISTS order_intent VARCHAR(20)
-      ,ADD COLUMN IF NOT EXISTS shipping_cost NUMERIC(12,2) DEFAULT 0
-      ,ADD COLUMN IF NOT EXISTS shipping_breakdown JSONB DEFAULT '[]'::jsonb
-      ,ADD COLUMN IF NOT EXISTS product_total NUMERIC(12,2) DEFAULT 0
-      ,ADD COLUMN IF NOT EXISTS grand_total NUMERIC(12,2) DEFAULT 0
-      ,ADD COLUMN IF NOT EXISTS wallet_used NUMERIC(12,2) NOT NULL DEFAULT 0
-      ,ADD COLUMN IF NOT EXISTS wallet_redeem_status VARCHAR(30) NOT NULL DEFAULT 'NONE'
+      ADD COLUMN IF NOT EXISTS order_intent VARCHAR(20),
+      ADD COLUMN IF NOT EXISTS shipping_cost NUMERIC(12,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS shipping_breakdown JSONB DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS product_total NUMERIC(12,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS grand_total NUMERIC(12,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS wallet_used NUMERIC(12,2) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS wallet_redeem_status VARCHAR(30) NOT NULL DEFAULT 'NONE',
+      ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'COD',
+      ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'PENDING',
+      ADD COLUMN IF NOT EXISTS payment_gateway VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS payment_gateway_id VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS payment_completed_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS return_status VARCHAR(40) DEFAULT 'NONE',
+      ADD COLUMN IF NOT EXISTS return_reason VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS return_action VARCHAR(30),
+      ADD COLUMN IF NOT EXISTS return_requested_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS return_details JSONB DEFAULT '{}'::jsonb
   `);
     await pool.query(`
     UPDATE material_enquiries
@@ -130,7 +141,7 @@ export const ensureMaterialOrderSchema = createInitializationGuard(async() => {
              WHEN 'cancelled' THEN 'Cancelled'
              ELSE 'Order placed'
            END,
-           me.status_note, 'system', 'MTBoss', COALESCE(me.created_at, NOW())
+           me.status_note, 'system', 'MTBOSS', COALESCE(me.created_at, NOW())
       FROM material_enquiries me
      WHERE NOT EXISTS (
        SELECT 1 FROM material_order_events event WHERE event.order_id = me.id

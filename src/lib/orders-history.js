@@ -158,8 +158,9 @@ export async function getAdminOrders({
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // Base queries for shop orders and service bookings with child subqueries
+    // List/summary: slim rows (no events / supplier / vendor JSON — those load on detail)
     const shopQuery = `
+
     SELECT
       me.id,
       COALESCE(me.order_reference, 'MO-' || me.id) AS order_id,
@@ -195,26 +196,22 @@ export async function getAdminOrders({
       me.order_intent,
       COALESCE(me.message, me.status_note) AS notes,
       me.accepted_by_supplier_id,
-      (
-        SELECT row_to_json(sup)
-        FROM (
-          SELECT s.id, s.shop_name, s.business_name, s.phone, s.email, s.city
-          FROM suppliers s
-          WHERE s.id = me.accepted_by_supplier_id
-        ) sup
-      ) AS supplier,
+      sm.supplier_id AS free_tier_vendor_id,
+      COALESCE(ps.shop_name, '') AS free_vendor_shop_name,
+      COALESCE(ps.phone, '') AS free_vendor_phone,
+      COALESCE(ps.email, '') AS free_vendor_email,
+      CASE 
+        WHEN sm.supplier_id > 0 AND (COALESCE(ps.package_price, 0) <= 0 OR ps.package_id = 'pkg_free_1m') THEN TRUE
+        ELSE FALSE
+      END AS is_free_tier_order,
+      NULL::JSON AS supplier,
       NULL::JSON AS vendor,
-      (
-        SELECT COALESCE(json_agg(ev ORDER BY ev.created_at ASC), '[]'::json)
-        FROM (
-          SELECT moe.id, moe.status, moe.title, moe.note, moe.actor_role, moe.actor_name, moe.created_at
-          FROM material_order_events moe
-          WHERE moe.order_id = me.id
-        ) ev
-      ) AS events,
+      '[]'::JSON AS events,
       1 AS type_sort_priority
     FROM material_enquiries me
     LEFT JOIN users u ON u.id = me.user_id
+    LEFT JOIN supplier_materials sm ON sm.id = me.product_id
+    LEFT JOIN suppliers ps ON ps.id = sm.supplier_id
   `;
 
     const serviceQuery = `
@@ -239,8 +236,8 @@ export async function getAdminOrders({
       NULL::TEXT AS coupon_code,
       0::NUMERIC AS coupon_discount,
       CAST(COALESCE(sb.total_amount, sb.final_amount, sb.base_amount, 0) AS NUMERIC) AS grand_total,
-      0::NUMERIC AS wallet_used,
-      'NONE' AS wallet_redeem_status,
+      CAST(0 AS NUMERIC) AS wallet_used,
+      'NONE'::TEXT AS wallet_redeem_status,
       sb.service_address AS delivery_address,
       COALESCE(sb.service_city, 'N/A') AS delivery_city,
       sb.booking_date AS delivery_date,
@@ -249,15 +246,13 @@ export async function getAdminOrders({
       'service' AS order_intent,
       COALESCE(sb.user_notes, sb.admin_notes, sb.vendor_notes) AS notes,
       NULL::INT AS accepted_by_supplier_id,
+      NULL::INT AS free_tier_vendor_id,
+      ''::TEXT AS free_vendor_shop_name,
+      ''::TEXT AS free_vendor_phone,
+      ''::TEXT AS free_vendor_email,
+      FALSE AS is_free_tier_order,
       NULL::JSON AS supplier,
-      (
-        SELECT row_to_json(v)
-        FROM (
-          SELECT id, vendor_name, shop_name, phone, email, city
-          FROM vendors
-          WHERE id = sb.vendor_id
-        ) v
-      ) AS vendor,
+      NULL::JSON AS vendor,
       '[]'::JSON AS events,
       2 AS type_sort_priority
     FROM service_bookings sb
@@ -265,12 +260,19 @@ export async function getAdminOrders({
     LEFT JOIN quick_services qs ON qs.id = sb.quick_service_id
   `;
 
-    // Combine based on type selection. Shop orders are prioritized first
-    const unionSql = `
-    WITH unified AS (
-      ${shopQuery}
+  // Skip the unused half of the UNION when the caller filters by type.
+  const unifiedBody =
+    type === 'shop_order'
+      ? shopQuery
+      : type === 'service_booking'
+        ? serviceQuery
+        : `${shopQuery}
       UNION ALL
-      ${serviceQuery}
+      ${serviceQuery}`;
+
+  const unionSql = `
+    WITH unified AS (
+      ${unifiedBody}
     )
   `;
 
@@ -297,38 +299,38 @@ export async function getAdminOrders({
     LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
   `;
 
-    const [summaryResult, itemsResult] = await Promise.all([
-        pool.query(summarySql, params),
-        pool.query(itemsSql, [...params, l, offset]),
-    ]);
+  // Sequential on purpose: Neon pooler max is small; twin heavy UNION queries
+  // in parallel often exhaust waitingCount during dashboard/orders loads.
+  const summaryResult = await pool.query(summarySql, params);
+  const itemsResult = await pool.query(itemsSql, [...params, l, offset]);
 
-    const summary = summaryResult.rows[0] || {
-        total_orders: 0,
-        pending_orders: 0,
-        delivered_orders: 0,
-        cancelled_orders: 0,
-        total_revenue: '0.00',
-    };
+  const summary = summaryResult.rows[0] || {
+    total_orders: 0,
+    pending_orders: 0,
+    delivered_orders: 0,
+    cancelled_orders: 0,
+    total_revenue: '0.00',
+  };
 
-    const totalCount = parseInt(summary.total_orders, 10) || 0;
-    const totalPages = Math.ceil(totalCount / l) || 1;
+  const totalCount = parseInt(summary.total_orders, 10) || 0;
+  const totalPages = Math.ceil(totalCount / l) || 1;
 
-    return {
-        orders: itemsResult.rows,
-        summary: {
-            total_orders: totalCount,
-            pending_orders: parseInt(summary.pending_orders, 10) || 0,
-            delivered_orders: parseInt(summary.delivered_orders, 10) || 0,
-            cancelled_orders: parseInt(summary.cancelled_orders, 10) || 0,
-            total_revenue: parseFloat(summary.total_revenue || 0),
-        },
-        pagination: {
-            page: p,
-            limit: l,
-            totalCount,
-            totalPages,
-        },
-    };
+  return {
+    orders: itemsResult.rows,
+    summary: {
+      total_orders: totalCount,
+      pending_orders: parseInt(summary.pending_orders, 10) || 0,
+      delivered_orders: parseInt(summary.delivered_orders, 10) || 0,
+      cancelled_orders: parseInt(summary.cancelled_orders, 10) || 0,
+      total_revenue: parseFloat(summary.total_revenue || 0),
+    },
+    pagination: {
+      page: p,
+      limit: l,
+      totalCount,
+      totalPages,
+    },
+  };
 }
 
 /**
@@ -380,6 +382,14 @@ export async function getAdminOrderById(orderId, { type } = {}) {
       me.order_intent,
       COALESCE(me.message, me.status_note) AS notes,
       me.accepted_by_supplier_id,
+      sm.supplier_id AS free_tier_vendor_id,
+      COALESCE(ps.shop_name, '') AS free_vendor_shop_name,
+      COALESCE(ps.phone, '') AS free_vendor_phone,
+      COALESCE(ps.email, '') AS free_vendor_email,
+      CASE 
+        WHEN sm.supplier_id > 0 AND (COALESCE(ps.package_price, 0) <= 0 OR ps.package_id = 'pkg_free_1m') THEN TRUE
+        ELSE FALSE
+      END AS is_free_tier_order,
       (
         SELECT row_to_json(sup)
         FROM (
@@ -407,6 +417,8 @@ export async function getAdminOrderById(orderId, { type } = {}) {
       ) AS events
     FROM material_enquiries me
     LEFT JOIN users u ON u.id = me.user_id
+    LEFT JOIN supplier_materials sm ON sm.id = me.product_id
+    LEFT JOIN suppliers ps ON ps.id = sm.supplier_id
     WHERE ${isNumber ? 'me.id = $1 OR me.order_reference = $2' : 'me.order_reference = $1'}
     LIMIT 1
   `;
@@ -678,24 +690,61 @@ export async function updateAdminOrderStatus({
             await client.query(
                 `INSERT INTO pm_audit_log
          (table_name, record_id, action, changed_by, old_data, new_data, created_at)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, NOW())`, [
-                    'material_enquiries',
-                    recordId,
-                    'status_change',
-                    adminIdentifier,
-                    JSON.stringify({ status: oldData.status, status_note: oldData.status_note }),
-                    JSON.stringify({ status: updatedRow.status, status_note: updatedRow.status_note }),
-                ]
-            );
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, NOW())`,
+        [
+          'material_enquiries',
+          recordId,
+          'status_change',
+          adminIdentifier,
+          JSON.stringify({ status: oldData.status, status_note: oldData.status_note }),
+          JSON.stringify({ status: updatedRow.status, status_note: updatedRow.status_note }),
+        ]
+      );
 
-            // Cashback & wallet redemption hook on delivery or cancellation/return
-            if (['delivered', 'fulfilled'].includes(normalizedStatus)) {
-                await creditDeliveredCashback({ orderId: recordId, client });
-            } else if (['cancelled', 'returned'].includes(normalizedStatus)) {
-                await reverseOrderCashback({ orderId: recordId, reason: `Order marked as ${normalizedStatus}`, client });
-                await releaseWalletRedeem(recordId, client);
+      // Cashback & wallet redemption hook on delivery or cancellation/return
+      if (['delivered', 'fulfilled'].includes(normalizedStatus)) {
+        await creditDeliveredCashback({ orderId: recordId, client });
+      } else if (['cancelled', 'returned'].includes(normalizedStatus)) {
+        await reverseOrderCashback({ orderId: recordId, reason: `Order marked as ${normalizedStatus}`, client });
+        await releaseWalletRedeem(recordId, client);
+
+        // Restore inventory if order was active and intent was 'buy'
+        if (oldData.product_id && oldData.order_intent === 'buy' && !['cancelled', 'returned'].includes(String(oldData.status || '').toLowerCase())) {
+          try {
+            const returnQty = Math.max(1, Math.round(Number.parseFloat(String(oldData.quantity_text || '1')) || 1));
+            const pRes = await client.query('SELECT id, quantity, low_stock_threshold FROM supplier_materials WHERE id = $1 FOR UPDATE', [oldData.product_id]);
+            if (pRes.rows.length > 0) {
+              const currentStock = Number(pRes.rows[0].quantity) || 0;
+              const newStock = currentStock + returnQty;
+              const threshold = Number(pRes.rows[0].low_stock_threshold) || 10;
+              const newStatus = newStock <= 0 ? 'out_of_stock' : (newStock <= threshold ? 'low_stock' : 'in_stock');
+              await client.query('UPDATE supplier_materials SET quantity = $1, stock_status = $2, updated_at = NOW() WHERE id = $3', [newStock, newStatus, oldData.product_id]);
+              await client.query(
+                `INSERT INTO stock_movements (
+                  product_id, movement_type, quantity, previous_stock, new_stock,
+                  reference_type, reference_id, reason, performed_by, performed_by_role, notes, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+                [
+                  oldData.product_id,
+                  'return',
+                  returnQty,
+                  currentStock,
+                  newStock,
+                  'order',
+                  String(recordId),
+                  `Order #${oldData.order_reference || recordId} marked as ${normalizedStatus}`,
+                  adminUser.id || 0,
+                  'admin',
+                  `Stock restored due to order ${normalizedStatus} by ${adminIdentifier}`,
+                ]
+              );
             }
+          } catch (rErr) {
+            console.warn('Could not restore stock for cancelled order:', rErr.message);
+          }
         }
+      }
+    }
 
         await client.query('COMMIT');
         return {
@@ -857,209 +906,525 @@ export async function getCustomerOrdersHistory(customerId, customerPhone = null)
     };
 }
 
+const INVOICE_PAGE_W = 595.28;
+const INVOICE_MARGIN = 40;
+const INVOICE_CONTENT_W = INVOICE_PAGE_W - INVOICE_MARGIN * 2;
+
+function companyInvoiceConfig() {
+  return {
+    name: process.env.COMPANY_NAME || 'MTBOSS',
+    tagline: process.env.COMPANY_TAGLINE || 'Building Materials & Services',
+    address: process.env.COMPANY_ADDRESS || 'Zentrix MTBOSS Technologies · Moradabad, Uttar Pradesh',
+    gstin: String(process.env.COMPANY_GSTIN || '').trim(),
+    pan: String(process.env.COMPANY_PAN || '').trim(),
+    phone: process.env.COMPANY_PHONE || process.env.NEXT_PUBLIC_COMPANY_PHONE || '+91 9410225039',
+    email: process.env.COMPANY_SUPPORT_EMAIL || process.env.SMTP_REPLY_TO || 'support@MTBOSS.in',
+    placeOfSupply: process.env.COMPANY_PLACE_OF_SUPPLY || 'Uttar Pradesh (09)',
+    productHsn: String(process.env.INVOICE_DEFAULT_PRODUCT_HSN || '2523').trim(),
+    shippingHsn: String(process.env.INVOICE_SHIPPING_HSN || '996812').trim(),
+    serviceHsn: String(process.env.INVOICE_SERVICE_HSN || '998599').trim(),
+  };
+}
+
+function hasInvoiceGstStructure(config) {
+  return Boolean(config.gstin);
+}
+
+function formatInvoiceMoney(val, { dashWhenEmpty = true } = {}) {
+  if (val === null || val === undefined || val === '' || Number.isNaN(Number(val))) {
+    return dashWhenEmpty ? '-' : '0.00';
+  }
+  return Number(val).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function splitInclusiveGst(totalInclusive) {
+  const total = Math.max(0, Number(totalInclusive) || 0);
+  if (total <= 0) return { taxable: 0, cgst: 0, sgst: 0, totalTax: 0 };
+  const taxable = Math.round((total / 1.18) * 100) / 100;
+  const totalTax = Math.round((total - taxable) * 100) / 100;
+  const cgst = Math.round((totalTax / 2) * 100) / 100;
+  const sgst = Math.round((totalTax - cgst) * 100) / 100;
+  return { taxable, cgst, sgst, totalTax };
+}
+
+function gstCellsForAmount(amountInclusive, hasGst) {
+  if (!hasGst) return { taxable: '-', cgst: '-', sgst: '-' };
+  const n = Number(amountInclusive);
+  if (!Number.isFinite(n) || n <= 0) return { taxable: '-', cgst: '-', sgst: '-' };
+  const split = splitInclusiveGst(n);
+  return {
+    taxable: formatInvoiceMoney(split.taxable, { dashWhenEmpty: false }),
+    cgst: formatInvoiceMoney(split.cgst, { dashWhenEmpty: false }),
+    sgst: formatInvoiceMoney(split.sgst, { dashWhenEmpty: false }),
+  };
+}
+
+function parseInvoiceQuantity(value) {
+  const raw = String(value ?? '').trim();
+  const match = raw.match(/^([\d.]+)/);
+  if (match) return { display: raw || '-', numeric: Number(match[1]) || 0 };
+  return { display: raw || '1', numeric: 1 };
+}
+
+function buildInvoiceTableRows(order, config, hasGst) {
+  const productTotal = Number(order.product_total) || 0;
+  const couponDiscount = Number(order.coupon_discount) || 0;
+  const shippingCost = Number(order.shipping_cost) || 0;
+  const feeLabel = order.type === 'service_booking' ? 'Visit / service charges' : 'Shipping / Delivery Charges';
+
+  const baseItems = order.items?.length
+    ? order.items
+    : [{
+      name: order.product_name || 'Material Item',
+      category: order.category_name,
+      unit: order.order_unit || 'unit',
+      quantity: order.quantity_text || '1',
+      rate: order.unit_price,
+      amount: order.product_total,
+    }];
+
+  const rows = [];
+  baseItems.forEach((item, index) => {
+    const qty = parseInvoiceQuantity(item.quantity);
+    const rate = item.rate != null ? Number(item.rate) : null;
+    const lineAmount = item.amount != null ? Number(item.amount) : productTotal;
+    const discount = index === 0 && couponDiscount > 0 ? couponDiscount : null;
+    const lineTitle = item.name || 'Item';
+    const subtitle = [item.category, item.brand].filter((part) => part && part !== 'N/A').join(' · ');
+    const description = subtitle ? `${lineTitle}\n${subtitle}` : lineTitle;
+    const hsn = hasGst ? config.productHsn : '-';
+    const gstBase = lineAmount - (discount || 0);
+    const gst = gstCellsForAmount(gstBase > 0 ? gstBase : lineAmount, hasGst);
+
+    rows.push({
+      description,
+      hsn,
+      qty: qty.display,
+      rate: rate != null ? formatInvoiceMoney(rate, { dashWhenEmpty: false }) : '-',
+      discount: discount != null ? formatInvoiceMoney(discount, { dashWhenEmpty: false }) : '-',
+      ...gst,
+      amount: formatInvoiceMoney(lineAmount, { dashWhenEmpty: false }),
+      hsnKey: hsn,
+      gstBase: gstBase > 0 ? gstBase : lineAmount,
+    });
+  });
+
+  if (shippingCost > 0) {
+    const hsn = hasGst ? config.shippingHsn : '-';
+    const gst = gstCellsForAmount(shippingCost, hasGst);
+    rows.push({
+      description: feeLabel,
+      hsn,
+      qty: '-',
+      rate: '-',
+      discount: '-',
+      ...gst,
+      amount: formatInvoiceMoney(shippingCost, { dashWhenEmpty: false }),
+      hsnKey: hsn,
+      gstBase: shippingCost,
+    });
+  }
+
+  return rows;
+}
+
+function buildHsnSummaryRows(tableRows, hasGst) {
+  if (!hasGst) {
+    return [{ hsn: '-', taxable: '-', cgst: '-', sgst: '-', totalTax: '-' }];
+  }
+  const buckets = new Map();
+  tableRows.forEach((row) => {
+    const key = row.hsnKey && row.hsnKey !== '-' ? row.hsnKey : '—';
+    const split = splitInclusiveGst(Number(row.gstBase) || 0);
+    const existing = buckets.get(key) || { taxable: 0, cgst: 0, sgst: 0, totalTax: 0 };
+    existing.taxable += split.taxable;
+    existing.cgst += split.cgst;
+    existing.sgst += split.sgst;
+    existing.totalTax += split.totalTax;
+    buckets.set(key, existing);
+  });
+  return [...buckets.entries()].map(([hsn, totals]) => ({
+    hsn,
+    taxable: formatInvoiceMoney(totals.taxable, { dashWhenEmpty: false }),
+    cgst: formatInvoiceMoney(totals.cgst, { dashWhenEmpty: false }),
+    sgst: formatInvoiceMoney(totals.sgst, { dashWhenEmpty: false }),
+    totalTax: formatInvoiceMoney(totals.totalTax, { dashWhenEmpty: false }),
+  }));
+}
+
+const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+function twoDigitWords(n) {
+  if (n < 20) return ONES[n];
+  const tens = Math.floor(n / 10);
+  const ones = n % 10;
+  return `${TENS[tens]}${ones ? ` ${ONES[ones]}` : ''}`.trim();
+}
+
+function chunkToWords(n) {
+  if (n === 0) return '';
+  if (n < 100) return twoDigitWords(n);
+  if (n < 1000) {
+    const hundreds = Math.floor(n / 100);
+    const rest = n % 100;
+    return `${ONES[hundreds]} Hundred${rest ? ` ${twoDigitWords(rest)}` : ''}`.trim();
+  }
+  return '';
+}
+
+function amountInWordsINR(amount) {
+  const value = Math.round(Number(amount) || 0);
+  if (value === 0) return 'Indian Rupees Zero Only';
+  let n = value;
+  const crore = Math.floor(n / 10000000);
+  n %= 10000000;
+  const lakh = Math.floor(n / 100000);
+  n %= 100000;
+  const thousand = Math.floor(n / 1000);
+  n %= 1000;
+  const parts = [];
+  if (crore) parts.push(`${chunkToWords(crore)} Crore`);
+  if (lakh) parts.push(`${chunkToWords(lakh)} Lakh`);
+  if (thousand) parts.push(`${chunkToWords(thousand)} Thousand`);
+  if (n) parts.push(chunkToWords(n));
+  return `Indian Rupees ${parts.join(' ').replace(/\s+/g, ' ').trim()} Only`;
+}
+
+function cleanPdfString(val) {
+  if (val === null || val === undefined) return '';
+  return String(val)
+    .replace(/₹/g, 'Rs. ')
+    .replace(/[^\x00-\xFF]/g, ' ')
+    .trim();
+}
+
+function drawInvoiceMetaCell(doc, x, y, w, h, label, value, { valueColor = '#0f172a', valueSize = 8.5 } = {}) {
+  doc.rect(x, y, w, h).fillAndStroke('#ffffff', '#e2e8f0');
+  doc.fillColor('#64748b').fontSize(7).font('Helvetica-Bold').text(label, x + 6, y + 5, { width: w - 12, lineBreak: false });
+  doc.fillColor(valueColor).fontSize(valueSize).font('Helvetica-Bold').text(cleanPdfString(value ?? '-'), x + 6, y + 17, { width: w - 12, lineBreak: false });
+}
+
+function drawInvoiceAddressBlock(doc, x, y, w, h, title, lines) {
+  doc.rect(x, y, w, h).fillAndStroke('#ffffff', '#e2e8f0');
+  doc.fillColor('#0284c7').fontSize(8).font('Helvetica-Bold').text(title, x + 8, y + 7, { lineBreak: false });
+  doc.fillColor('#0f172a').fontSize(7.5).font('Helvetica').text(lines.filter(Boolean).map(cleanPdfString).join('\n'), x + 8, y + 20, { width: w - 16, lineGap: 1.2 });
+}
+
+function drawStatusPill(doc, x, y, statusText) {
+  const normalized = cleanPdfString(statusText || 'OPEN').toUpperCase().replace(/_/g, ' ');
+  const pillW = Math.min(78, doc.widthOfString(normalized) + 16);
+  doc.roundedRect(x, y, pillW, 14, 7).fill('#fef3c7');
+  doc.fillColor('#b45309').fontSize(7.5).font('Helvetica-Bold').text(normalized, x + 8, y + 3, { width: pillW - 16, lineBreak: false });
+}
+
 /**
- * Generate PDF Invoice Buffer using pdfkit
+ * Generate PDF Invoice Buffer using pdfkit (GST tax-invoice layout)
  */
 export async function generateOrderInvoicePdf(order) {
-    return new Promise((resolve, reject) => {
-        try {
-            const doc = new PDFDocument({ margin: 40, size: 'A4' });
-            const buffers = [];
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({
+        margin: 0,
+        size: 'A4',
+        autoFirstPage: true,
+        bufferPages: true,
+      });
+      const buffers = [];
+      const company = companyInvoiceConfig();
+      const hasGst = hasInvoiceGstStructure(company);
 
-            doc.on('data', (data) => buffers.push(data));
-            doc.on('end', () => resolve(Buffer.concat(buffers)));
-            doc.on('error', (err) => reject(err));
+      doc.on('data', (data) => buffers.push(data));
+      doc.on('end', () => resolve(Buffer.concat(buffers)));
+      doc.on('error', (err) => reject(err));
 
-            const primaryColor = '#0284c7'; // Brand Blue
-            const darkColor = '#0f172a';
-            const grayColor = '#64748b';
-            const lightBg = '#f8fafc';
-            const borderColor = '#e2e8f0';
+      const darkColor = '#0f172a';
+      const grayColor = '#64748b';
+      const lightBg = '#f8fafc';
+      const borderColor = '#e2e8f0';
+      const primaryColor = '#0284c7';
 
-            // ── Header ──
-            doc.rect(0, 0, 595.28, 80).fill('#0f172a');
+      const invoiceNo = cleanPdfString(order.order_id || '-');
+      const productTotal = Number(order.product_total) || 0;
+      const couponDiscount = Number(order.coupon_discount) || 0;
+      const shippingCost = Number(order.shipping_cost) || 0;
+      const walletUsed = Number(order.wallet_used) || 0;
+      const grandTotal = Number(order.grand_total) || Math.max(0, productTotal - couponDiscount + shippingCost - walletUsed);
+      const gstSummary = hasGst ? splitInclusiveGst(grandTotal) : null;
+      const tableRows = buildInvoiceTableRows(order, company, hasGst);
+      const hsnSummaryRows = buildHsnSummaryRows(tableRows, hasGst);
 
-            doc.fillColor('#ffffff').fontSize(22).font('Helvetica-Bold').text('MT-BOSS', 40, 24);
-            doc.fontSize(10).font('Helvetica').fillColor('#94a3b8').text('BUILDING MATERIALS & SERVICES', 40, 48);
+      const tableTotals = tableRows.reduce(
+        (acc, row) => {
+          if (hasGst) {
+            const split = splitInclusiveGst(Number(row.gstBase) || 0);
+            acc.taxable += split.taxable;
+            acc.cgst += split.cgst;
+            acc.sgst += split.sgst;
+            acc.amount += Number(String(row.amount).replace(/,/g, '')) || 0;
+          }
+          return acc;
+        },
+        { taxable: 0, cgst: 0, sgst: 0, amount: 0 },
+      );
 
-            doc.fillColor('#ffffff').fontSize(16).font('Helvetica-Bold').text('TAX INVOICE / BILL', 360, 26, { align: 'right', width: 195 });
-            doc.fontSize(9).font('Helvetica').fillColor('#cbd5e1').text(`Invoice #: ${order.order_id}`, 360, 48, { align: 'right', width: 195 });
+      // ── Header band ──
+      const headerH = 88;
+      doc.rect(0, 0, INVOICE_PAGE_W, headerH).fill('#0f172a');
+      doc.fillColor('#ffffff').fontSize(22).font('Helvetica-Bold').text(company.name, INVOICE_MARGIN, 16, { lineBreak: false });
+      doc.fontSize(8.5).font('Helvetica').fillColor('#cbd5e1').text(company.tagline, INVOICE_MARGIN, 40, { lineBreak: false });
+      doc.fontSize(7.5).fillColor('#94a3b8').text(company.address, INVOICE_MARGIN, 54, { width: 300, lineBreak: false });
+      const gstLine = hasGst
+        ? `GSTIN: ${company.gstin}${company.pan ? ` | PAN: ${company.pan}` : ''}`
+        : `GSTIN: -${company.pan ? ` | PAN: ${company.pan}` : ''}`;
+      doc.text(gstLine, INVOICE_MARGIN, 68, { width: 300, lineBreak: false });
 
-            doc.moveDown(2);
+      doc.fillColor('#ffffff').fontSize(18).font('Helvetica-Bold').text('TAX INVOICE', INVOICE_MARGIN + 320, 18, { align: 'right', width: 200, lineBreak: false });
+      doc.fontSize(8.5).font('Helvetica').fillColor('#cbd5e1').text(`Invoice No: ${invoiceNo}`, INVOICE_MARGIN + 320, 42, { align: 'right', width: 200, lineBreak: false });
+      doc.fontSize(7).text('Original for Recipient', INVOICE_MARGIN + 320, 56, { align: 'right', width: 200, lineBreak: false });
 
-            // ── Metadata Grid ──
-            const startY = 100;
-            doc.rect(40, startY, 515.28, 65).fillAndStroke(lightBg, borderColor);
+      // ── Metadata strip ──
+      const metaY = headerH + 10;
+      const metaCellW = INVOICE_CONTENT_W / 6;
+      const metaH = 38;
+      const statusText = String(order.status || 'open').toUpperCase().replace(/_/g, ' ');
+      drawInvoiceMetaCell(doc, INVOICE_MARGIN, metaY, metaCellW, metaH, 'Invoice Date', formatDateDDMMYYYY(order.created_at));
+      drawInvoiceMetaCell(doc, INVOICE_MARGIN + metaCellW, metaY, metaCellW, metaH, 'Order ID', invoiceNo);
+      drawInvoiceMetaCell(doc, INVOICE_MARGIN + metaCellW * 2, metaY, metaCellW, metaH, 'Delivery Date', formatDateDDMMYYYY(order.delivery_date));
+      drawInvoiceMetaCell(doc, INVOICE_MARGIN + metaCellW * 3, metaY, metaCellW, metaH, 'Place of Supply', hasGst ? company.placeOfSupply : '-');
+      drawInvoiceMetaCell(doc, INVOICE_MARGIN + metaCellW * 4, metaY, metaCellW, metaH, 'Payment Mode', order.payment_mode || 'Cash on Delivery');
+      doc.rect(INVOICE_MARGIN + metaCellW * 5, metaY, metaCellW, metaH).fillAndStroke('#ffffff', borderColor);
+      doc.fillColor(grayColor).fontSize(7).font('Helvetica-Bold').text('Order Status', INVOICE_MARGIN + metaCellW * 5 + 6, metaY + 5, { lineBreak: false });
+      drawStatusPill(doc, INVOICE_MARGIN + metaCellW * 5 + 6, metaY + 18, statusText);
 
-            doc.fillColor(grayColor).fontSize(8).font('Helvetica-Bold').text('ORDER ID', 55, startY + 12);
-            doc.fillColor(darkColor).fontSize(9).font('Helvetica').text(order.order_id, 55, startY + 24);
+      // ── Bill / Ship / Fulfilled ──
+      const addrY = metaY + metaH + 8;
+      const addrW = (INVOICE_CONTENT_W - 16) / 3;
+      const addrH = 82;
+      const customerAddress = order.delivery_address || '-';
+      const customerGst = hasGst ? 'Unregistered / Consumer' : '-';
+      drawInvoiceAddressBlock(doc, INVOICE_MARGIN, addrY, addrW, addrH, 'BILL TO', [
+        order.customer_name || 'Customer',
+        customerAddress,
+        `Phone: ${formatIndianPhone(order.customer_phone)}`,
+        `Email: ${order.customer_email && order.customer_email !== 'N/A' ? order.customer_email : '-'}`,
+        `GSTIN: ${customerGst}`,
+      ]);
+      drawInvoiceAddressBlock(doc, INVOICE_MARGIN + addrW + 8, addrY, addrW, addrH, 'SHIP TO', [
+        order.customer_name || 'Customer',
+        customerAddress,
+        `Delivery City: ${order.delivery_city || '-'}`,
+        `Phone: ${formatIndianPhone(order.customer_phone)}`,
+      ]);
 
-            doc.fillColor(grayColor).fontSize(8).font('Helvetica-Bold').text('ORDER DATE', 180, startY + 12);
-            doc.fillColor(darkColor).fontSize(9).font('Helvetica').text(formatDateDDMMYYYY(order.created_at), 180, startY + 24);
+      let fulfilledLines;
+      if (order.supplier) {
+        fulfilledLines = [
+          order.supplier.shop_name || order.supplier.business_name || 'Verified Supplier',
+          `Phone: ${formatIndianPhone(order.supplier.phone)}`,
+          `City: ${order.supplier.city || '-'}`,
+          order.supplier.email ? `Email: ${order.supplier.email}` : null,
+        ];
+      } else if (order.vendor || order.service_provider) {
+        const prov = order.vendor || order.service_provider;
+        fulfilledLines = [
+          prov.vendor_name || prov.service_provider_name || prov.shop_name || 'Verified Service Provider',
+          `Phone: ${formatIndianPhone(prov.phone)}`,
+          `City: ${prov.city || '-'}`,
+          prov.email ? `Email: ${prov.email}` : null,
+        ];
+      } else {
+        fulfilledLines = [
+          'MTBOSS Direct Operations',
+          `Helpline: ${company.phone}`,
+          `Email: ${company.email}`,
+        ];
+      }
+      drawInvoiceAddressBlock(doc, INVOICE_MARGIN + (addrW + 8) * 2, addrY, addrW, addrH, 'FULFILLED BY', fulfilledLines);
 
-            doc.fillColor(grayColor).fontSize(8).font('Helvetica-Bold').text('DELIVERY DATE', 290, startY + 12);
-            doc.fillColor(darkColor).fontSize(9).font('Helvetica').text(formatDateDDMMYYYY(order.delivery_date), 290, startY + 24);
+      // ── Line items table ──
+      const cols = [
+        { key: 'idx', label: '#', x: INVOICE_MARGIN, w: 16 },
+        { key: 'description', label: 'Item Description', x: INVOICE_MARGIN + 16, w: 112 },
+        { key: 'hsn', label: 'HSN/SAC', x: INVOICE_MARGIN + 128, w: 42 },
+        { key: 'qty', label: 'Qty', x: INVOICE_MARGIN + 170, w: 38 },
+        { key: 'rate', label: 'Rate (Rs.)', x: INVOICE_MARGIN + 208, w: 44 },
+        { key: 'discount', label: 'Discount (Rs.)', x: INVOICE_MARGIN + 252, w: 48 },
+        { key: 'taxable', label: 'Taxable Value', x: INVOICE_MARGIN + 300, w: 52 },
+        { key: 'cgst', label: 'CGST 9%', x: INVOICE_MARGIN + 352, w: 44 },
+        { key: 'sgst', label: 'SGST 9%', x: INVOICE_MARGIN + 396, w: 44 },
+        { key: 'amount', label: 'Amount (Rs.)', x: INVOICE_MARGIN + 440, w: INVOICE_CONTENT_W - (440 - INVOICE_MARGIN) },
+      ];
 
-            doc.fillColor(grayColor).fontSize(8).font('Helvetica-Bold').text('DELIVERY CITY', 400, startY + 12);
-            doc.fillColor(darkColor).fontSize(9).font('Helvetica').text(order.delivery_city || 'N/A', 400, startY + 24);
+      let tableY = addrY + addrH + 10;
+      doc.rect(INVOICE_MARGIN, tableY, INVOICE_CONTENT_W, 18).fill('#1e293b');
+      doc.fillColor('#ffffff').fontSize(6.5).font('Helvetica-Bold');
+      cols.forEach((col) => {
+        doc.text(col.label, col.x + 2, tableY + 5, { width: col.w - 4, align: col.key === 'amount' || col.key === 'rate' || col.key === 'discount' || col.key === 'taxable' || col.key === 'cgst' || col.key === 'sgst' ? 'right' : 'left', lineBreak: false });
+      });
 
-            doc.fillColor(grayColor).fontSize(8).font('Helvetica-Bold').text('STATUS', 55, startY + 42);
-            const statusText = String(order.status || 'open').toUpperCase().replace(/_/g, ' ');
-            doc.fillColor(order.status === 'delivered' || order.status === 'completed' ? '#16a34a' : '#d97706')
-                .fontSize(9).font('Helvetica-Bold').text(statusText, 55, startY + 52);
+      tableY += 18;
+      tableRows.forEach((row, index) => {
+        const rowH = 30;
+        doc.rect(INVOICE_MARGIN, tableY, INVOICE_CONTENT_W, rowH).fillAndStroke(index % 2 === 0 ? '#ffffff' : lightBg, borderColor);
+        doc.fillColor(darkColor).fontSize(7).font('Helvetica');
+        doc.text(String(index + 1), cols[0].x + 2, tableY + 7, { width: cols[0].w - 4, lineBreak: false });
+        doc.font('Helvetica-Bold').text(cleanPdfString(row.description), cols[1].x + 2, tableY + 5, { width: cols[1].w - 4, lineGap: 0.5 });
+        doc.font('Helvetica');
+        doc.text(row.hsn, cols[2].x + 2, tableY + 9, { width: cols[2].w - 4, lineBreak: false });
+        doc.text(row.qty, cols[3].x + 2, tableY + 9, { width: cols[3].w - 4, lineBreak: false });
+        doc.text(row.rate, cols[4].x + 2, tableY + 9, { width: cols[4].w - 4, align: 'right', lineBreak: false });
+        doc.text(row.discount, cols[5].x + 2, tableY + 9, { width: cols[5].w - 4, align: 'right', lineBreak: false });
+        doc.text(row.taxable, cols[6].x + 2, tableY + 9, { width: cols[6].w - 4, align: 'right', lineBreak: false });
+        doc.text(row.cgst, cols[7].x + 2, tableY + 9, { width: cols[7].w - 4, align: 'right', lineBreak: false });
+        doc.text(row.sgst, cols[8].x + 2, tableY + 9, { width: cols[8].w - 4, align: 'right', lineBreak: false });
+        doc.font('Helvetica-Bold').text(row.amount, cols[9].x + 2, tableY + 9, { width: cols[9].w - 4, align: 'right', lineBreak: false });
+        tableY += rowH;
+      });
 
-            doc.fillColor(grayColor).fontSize(8).font('Helvetica-Bold').text('PAYMENT MODE', 180, startY + 42);
-            doc.fillColor(darkColor).fontSize(9).font('Helvetica').text(order.payment_mode || 'Cash on Delivery / Standard', 180, startY + 52);
+      doc.rect(INVOICE_MARGIN, tableY, INVOICE_CONTENT_W, 18).fillAndStroke('#eef2ff', borderColor);
+      doc.fillColor(darkColor).fontSize(7).font('Helvetica-Bold').text('Total', cols[1].x + 2, tableY + 5, { lineBreak: false });
+      if (hasGst) {
+        doc.text(formatInvoiceMoney(tableTotals.taxable, { dashWhenEmpty: false }), cols[6].x + 2, tableY + 5, { width: cols[6].w - 4, align: 'right', lineBreak: false });
+        doc.text(formatInvoiceMoney(tableTotals.cgst, { dashWhenEmpty: false }), cols[7].x + 2, tableY + 5, { width: cols[7].w - 4, align: 'right', lineBreak: false });
+        doc.text(formatInvoiceMoney(tableTotals.sgst, { dashWhenEmpty: false }), cols[8].x + 2, tableY + 5, { width: cols[8].w - 4, align: 'right', lineBreak: false });
+      } else {
+        doc.text('-', cols[6].x + 2, tableY + 5, { width: cols[6].w - 4, align: 'right', lineBreak: false });
+        doc.text('-', cols[7].x + 2, tableY + 5, { width: cols[7].w - 4, align: 'right', lineBreak: false });
+        doc.text('-', cols[8].x + 2, tableY + 5, { width: cols[8].w - 4, align: 'right', lineBreak: false });
+      }
+      doc.text(formatInvoiceMoney(grandTotal, { dashWhenEmpty: false }), cols[9].x + 2, tableY + 5, { width: cols[9].w - 4, align: 'right', lineBreak: false });
+      tableY += 22;
 
-            // ── Customer & Supplier Blocks ──
-            const customerY = startY + 80;
+      const footerTop = tableY + 6;
+      const leftW = 270;
+      const rightX = INVOICE_MARGIN + leftW + 10;
+      const rightW = INVOICE_CONTENT_W - leftW - 10;
 
-            // Customer Block
-            doc.rect(40, customerY, 250, 95).fillAndStroke('#ffffff', borderColor);
-            doc.fillColor(primaryColor).fontSize(9).font('Helvetica-Bold').text('CUSTOMER DETAILS', 52, customerY + 10);
-            doc.fillColor(darkColor).fontSize(10).font('Helvetica-Bold').text(order.customer_name || 'Customer', 52, customerY + 24);
-            doc.fillColor(grayColor).fontSize(8.5).font('Helvetica').text(`Phone: ${formatIndianPhone(order.customer_phone)}`, 52, customerY + 38);
-            doc.fillColor(grayColor).fontSize(8.5).font('Helvetica').text(`Email: ${order.customer_email || 'N/A'}`, 52, customerY + 50);
-            doc.fillColor(grayColor).fontSize(8).font('Helvetica').text(
-                `Address: ${order.delivery_address || 'N/A'}`,
-                52, customerY + 62, { width: 226, height: 26, ellipsis: true }
-            );
+      doc.fillColor(darkColor).fontSize(7.5).font('Helvetica-Bold').text('Amount in Words', INVOICE_MARGIN, footerTop, { lineBreak: false });
+      doc.font('Helvetica').fontSize(7.5).text(amountInWordsINR(grandTotal), INVOICE_MARGIN, footerTop + 12, { width: leftW });
 
-            // Supplier / Vendor Block
-            doc.rect(305.28, customerY, 250, 95).fillAndStroke('#ffffff', borderColor);
-            const partnerTitle = order.supplier ? 'ASSIGNED SUPPLIER' : (order.vendor ? 'ASSIGNED VENDOR' : 'FULFILLMENT HUB');
-            doc.fillColor(primaryColor).fontSize(9).font('Helvetica-Bold').text(partnerTitle, 317, customerY + 10);
+      const hsnY = footerTop + 30;
+      doc.fillColor(primaryColor).fontSize(7.5).font('Helvetica-Bold').text('HSN / SAC Summary', INVOICE_MARGIN, hsnY, { lineBreak: false });
+      const hsnTableY = hsnY + 11;
+      const hsnCols = [
+        { label: 'HSN/SAC', w: 50 },
+        { label: 'Taxable Value', w: 60 },
+        { label: 'CGST', w: 46 },
+        { label: 'SGST', w: 46 },
+        { label: 'Total Tax', w: 50 },
+      ];
+      let hx = INVOICE_MARGIN;
+      doc.rect(INVOICE_MARGIN, hsnTableY, leftW, 15).fill('#1e293b');
+      doc.fillColor('#ffffff').fontSize(6.5).font('Helvetica-Bold');
+      hsnCols.forEach((col) => {
+        doc.text(col.label, hx + 3, hsnTableY + 4, { width: col.w - 6, lineBreak: false });
+        hx += col.w;
+      });
+      let hy = hsnTableY + 15;
+      hsnSummaryRows.forEach((row) => {
+        hx = INVOICE_MARGIN;
+        doc.rect(INVOICE_MARGIN, hy, leftW, 13).strokeColor(borderColor).stroke();
+        doc.fillColor(darkColor).fontSize(6.5).font('Helvetica');
+        [row.hsn, row.taxable, row.cgst, row.sgst, row.totalTax].forEach((cell, i) => {
+          doc.text(String(cell), hx + 3, hy + 3, { width: hsnCols[i].w - 6, align: i === 0 ? 'left' : 'right', lineBreak: false });
+          hx += hsnCols[i].w;
+        });
+        hy += 13;
+      });
 
-            if (order.supplier) {
-                doc.fillColor(darkColor).fontSize(10).font('Helvetica-Bold').text(order.supplier.shop_name || order.supplier.business_name || 'Verified Supplier', 317, customerY + 24);
-                doc.fillColor(grayColor).fontSize(8.5).font('Helvetica').text(`Phone: ${formatIndianPhone(order.supplier.phone)}`, 317, customerY + 38);
-                doc.fillColor(grayColor).fontSize(8.5).font('Helvetica').text(`City: ${order.supplier.city || 'N/A'}`, 317, customerY + 50);
-            } else if (order.vendor) {
-                doc.fillColor(darkColor).fontSize(10).font('Helvetica-Bold').text(order.vendor.vendor_name || order.vendor.shop_name || 'Verified Vendor', 317, customerY + 24);
-                doc.fillColor(grayColor).fontSize(8.5).font('Helvetica').text(`Phone: ${formatIndianPhone(order.vendor.phone)}`, 317, customerY + 38);
-                doc.fillColor(grayColor).fontSize(8.5).font('Helvetica').text(`City: ${order.vendor.city || 'N/A'}`, 317, customerY + 50);
-            } else {
-                doc.fillColor(darkColor).fontSize(10).font('Helvetica-Bold').text('MT-Boss Direct Operations', 317, customerY + 24);
-                doc.fillColor(grayColor).fontSize(8.5).font('Helvetica').text('Helpline: +91 9410225039', 317, customerY + 38);
-                doc.fillColor(grayColor).fontSize(8.5).font('Helvetica').text('Email: support@mtboss.in', 317, customerY + 50);
-            }
+      const termsY = hy + 8;
+      doc.rect(INVOICE_MARGIN, termsY, leftW, 64).fillAndStroke(lightBg, borderColor);
+      doc.fillColor(primaryColor).fontSize(7.5).font('Helvetica-Bold').text('TERMS & NOTES', INVOICE_MARGIN + 8, termsY + 6, { lineBreak: false });
+      const gstNote = hasGst
+        ? 'Prices are inclusive of applicable GST unless stated otherwise.'
+        : 'GST details are not applicable on this invoice.';
+      const terms = [
+        order.notes || null,
+        gstNote,
+        'Materials once delivered are subject to supplier return policies.',
+        'Disputes are subject to Moradabad jurisdiction.',
+      ].filter(Boolean).map(cleanPdfString).join('\n');
+      doc.fillColor(darkColor).fontSize(6.8).font('Helvetica').text(terms, INVOICE_MARGIN + 8, termsY + 18, { width: leftW - 16, lineGap: 1.1 });
 
-            // ── Items Table ──
-            const tableY = customerY + 115;
-            doc.rect(40, tableY, 515.28, 24).fill('#1e293b');
+      // ── Totals box ──
+      let lineY = footerTop;
+      doc.rect(rightX, lineY, rightW, 158).fillAndStroke('#ffffff', borderColor);
+      lineY += 8;
+      const printTotalLine = (label, val, { bold = false, accent = false, discount = false } = {}) => {
+        doc.fillColor(grayColor).fontSize(7.5).font(bold ? 'Helvetica-Bold' : 'Helvetica').text(label, rightX + 8, lineY, { width: rightW - 16, lineBreak: false });
+        let valColor = darkColor;
+        if (accent) valColor = primaryColor;
+        if (discount) valColor = '#16a34a';
+        doc.fillColor(valColor).fontSize(bold ? 9.5 : 7.5).font(bold ? 'Helvetica-Bold' : 'Helvetica')
+          .text(val, rightX + 8, lineY, { width: rightW - 16, align: 'right', lineBreak: false });
+        lineY += 16;
+      };
 
-            doc.fillColor('#ffffff').fontSize(8.5).font('Helvetica-Bold');
-            doc.text('ITEM DESCRIPTION', 52, tableY + 7);
-            doc.text('UNIT', 260, tableY + 7);
-            doc.text('QUANTITY', 320, tableY + 7);
-            doc.text('RATE (Rs.)', 390, tableY + 7, { align: 'right', width: 60 });
-            doc.text('AMOUNT (Rs.)', 480, tableY + 7, { align: 'right', width: 65 });
+      const qtyMeta = parseInvoiceQuantity(order.items?.[0]?.quantity || order.quantity_text);
+      const rateMeta = order.unit_price ?? order.items?.[0]?.rate;
+      const productLabel = rateMeta != null && qtyMeta.numeric
+        ? `Product Total (${qtyMeta.numeric} x ${formatInvoiceMoney(rateMeta, { dashWhenEmpty: false })}):`
+        : 'Product Total:';
+      printTotalLine(productLabel, formatInvoiceMoney(productTotal, { dashWhenEmpty: false }));
+      if (couponDiscount > 0) {
+        const couponLabel = order.coupon_code ? `Coupon (${order.coupon_code}):` : 'Coupon Discount:';
+        printTotalLine(couponLabel, `- ${formatInvoiceMoney(couponDiscount, { dashWhenEmpty: false })}`, { discount: true });
+      }
+      const feeLabel = order.type === 'service_booking' ? 'Visit / Service Fee:' : 'Shipping Cost:';
+      printTotalLine(feeLabel, shippingCost > 0 ? formatInvoiceMoney(shippingCost, { dashWhenEmpty: false }) : '-');
+      if (walletUsed > 0) {
+        printTotalLine('Wallet redeemed:', `- ${formatInvoiceMoney(walletUsed, { dashWhenEmpty: false })}`, { discount: true });
+      }
+      if (hasGst && gstSummary) {
+        printTotalLine('Taxable Value:', formatInvoiceMoney(gstSummary.taxable, { dashWhenEmpty: false }));
+        printTotalLine('CGST @ 9%:', formatInvoiceMoney(gstSummary.cgst, { dashWhenEmpty: false }));
+        printTotalLine('SGST @ 9%:', formatInvoiceMoney(gstSummary.sgst, { dashWhenEmpty: false }));
+      } else {
+        printTotalLine('Taxable Value:', '-');
+        printTotalLine('CGST @ 9%:', '-');
+        printTotalLine('SGST @ 9%:', '-');
+      }
 
-            let currentY = tableY + 24;
-            const items = order.items && order.items.length > 0 ? order.items : [{
-                name: order.product_name || 'Material Item',
-                category: order.category_name,
-                unit: order.order_unit || 'unit',
-                quantity: order.quantity_text || '1',
-                rate: order.unit_price,
-                amount: order.product_total,
-            }, ];
+      doc.rect(rightX + 6, lineY + 2, rightW - 12, 20).fill('#eff6ff');
+      doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('Grand Total:', rightX + 10, lineY + 6, { lineBreak: false });
+      doc.fillColor(primaryColor).fontSize(10).font('Helvetica-Bold')
+        .text(`Rs. ${formatInvoiceMoney(grandTotal, { dashWhenEmpty: false })}`, rightX + 8, lineY + 6, { width: rightW - 16, align: 'right', lineBreak: false });
+      lineY += 28;
+      doc.fillColor(grayColor).fontSize(7).font('Helvetica').text('Authorised Signatory for MTBOSS', rightX + 8, lineY, { width: rightW - 16, align: 'right', lineBreak: false });
 
-            items.forEach((item, idx) => {
-                const rowBg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
-                doc.rect(40, currentY, 515.28, 30).fillAndStroke(rowBg, borderColor);
+      // ── Page bottom footer (Safely positioned above page boundary) ──
+      const pageFooterY = 780;
+      doc.moveTo(INVOICE_MARGIN, pageFooterY).lineTo(INVOICE_PAGE_W - INVOICE_MARGIN, pageFooterY).strokeColor(borderColor).stroke();
+      doc.fillColor(grayColor).fontSize(7).font('Helvetica')
+        .text('Thank you for choosing MTBOSS! This is a computer-generated tax invoice and requires no physical signature.', INVOICE_MARGIN, pageFooterY + 6, { align: 'center', width: INVOICE_CONTENT_W, lineBreak: false });
+      doc.text(`${company.address} | Contact: ${company.email}`, INVOICE_MARGIN, pageFooterY + 18, { align: 'center', width: INVOICE_CONTENT_W, lineBreak: false });
 
-                doc.fillColor(darkColor).fontSize(9).font('Helvetica-Bold').text(item.name || 'N/A', 52, currentY + 7);
-                if (item.category && item.category !== 'N/A') {
-                    doc.fillColor(grayColor).fontSize(7.5).font('Helvetica').text(item.category, 52, currentY + 18);
-                }
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
 
-                doc.fillColor(darkColor).fontSize(8.5).font('Helvetica').text(item.unit || 'N/A', 260, currentY + 10);
-                doc.fillColor(darkColor).fontSize(8.5).font('Helvetica').text(String(item.quantity || '1'), 320, currentY + 10);
-
-                const rateStr = item.rate !== null && item.rate !== undefined ?
-                    Number(item.rate).toLocaleString('en-IN', { minimumFractionDigits: 2 }) :
-                    'N/A';
-                doc.fillColor(darkColor).fontSize(8.5).font('Helvetica').text(rateStr, 390, currentY + 10, { align: 'right', width: 60 });
-
-                const amountStr = item.amount !== null && item.amount !== undefined ?
-                    Number(item.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 }) :
-                    'N/A';
-                doc.fillColor(darkColor).fontSize(9).font('Helvetica-Bold').text(amountStr, 480, currentY + 10, { align: 'right', width: 65 });
-
-                currentY += 30;
-            });
-
-            // ── Totals Calculation ──
-            const totalsY = currentY + 15;
-            const totalBoxX = 330;
-            const totalBoxW = 225.28;
-
-            doc.rect(totalBoxX, totalsY, totalBoxW, 110).fillAndStroke('#ffffff', borderColor);
-
-            let lineY = totalsY + 10;
-            const printTotalLine = (label, val, isBold = false, isAccent = false, isDiscount = false) => {
-                doc.fillColor(grayColor).fontSize(8.5).font(isBold ? 'Helvetica-Bold' : 'Helvetica').text(label, totalBoxX + 15, lineY);
-                let valColor = darkColor;
-                if (isAccent) valColor = primaryColor;
-                if (isDiscount) valColor = '#16a34a';
-
-                doc.fillColor(valColor).fontSize(isBold ? 10 : 8.5).font(isBold ? 'Helvetica-Bold' : 'Helvetica')
-                    .text(val, totalBoxX + 100, lineY, { align: 'right', width: 110 });
-                lineY += 20;
-            };
-
-            const productTotalStr = order.product_total !== null && order.product_total !== undefined ?
-                `Rs. ${Number(order.product_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` :
-                'N/A';
-            printTotalLine('Product Total:', productTotalStr);
-
-            if (Number(order.coupon_discount || 0) > 0) {
-                const couponLabel = order.coupon_code ? `Coupon (${order.coupon_code}):` : 'Coupon Discount:';
-                printTotalLine(couponLabel, `-Rs. ${Number(order.coupon_discount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, false, false, true);
-            }
-
-            const feeLabel = order.type === 'service_booking' ? 'Visit / Service Fee:' : 'Shipping Cost:';
-            const shippingStr = Number(order.shipping_cost || 0) > 0 ?
-                `Rs. ${Number(order.shipping_cost).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` :
-                'Free / N/A';
-            printTotalLine(feeLabel, shippingStr);
-
-            if (Number(order.wallet_used || 0) > 0) {
-                printTotalLine(
-                    'Wallet redeemed:',
-                    `-Rs. ${Number(order.wallet_used).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
-                    false,
-                    false,
-                    true
-                );
-            }
-
-            doc.moveTo(totalBoxX + 10, lineY - 5).lineTo(totalBoxX + totalBoxW - 10, lineY - 5).strokeColor(borderColor).stroke();
-
-            const grandTotalStr = order.grand_total !== null && order.grand_total !== undefined ?
-                `Rs. ${Number(order.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` :
-                'N/A';
-            printTotalLine('Grand Total:', grandTotalStr, true, true);
-
-            // Notes & Instructions
-            if (order.notes) {
-                doc.rect(40, totalsY, 270, 75).fillAndStroke(lightBg, borderColor);
-                doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('ORDER NOTES & REMARKS', 52, totalsY + 10);
-                doc.fillColor(darkColor).fontSize(8).font('Helvetica').text(order.notes, 52, totalsY + 24, { width: 246, height: 42, ellipsis: true });
-            }
-
-            // ── Footer ──
-            const footerY = 750;
-            doc.moveTo(40, footerY).lineTo(555.28, footerY).strokeColor(borderColor).stroke();
-            doc.fillColor(grayColor).fontSize(8).font('Helvetica')
-                .text('Thank you for choosing MT-Boss! This is a computer-generated tax invoice and requires no physical signature.', 40, footerY + 12, { align: 'center', width: 515.28 });
-            doc.fillColor(grayColor).fontSize(7.5).font('Helvetica')
-                .text('Zentrix MT-Boss Technologies · Moradabad, Uttar Pradesh · Contact: support@mtboss.in', 40, footerY + 24, { align: 'center', width: 515.28 });
-
-            doc.end();
-        } catch (err) {
-            reject(err);
-        }
-    });
+/**
+ * Get distinct delivery cities from shop orders and service bookings
+ */
+export async function getDistinctDeliveryCities() {
+  try {
+    const query = `
+      SELECT DISTINCT TRIM(city) AS city FROM (
+        SELECT selected_city AS city FROM material_enquiries WHERE selected_city IS NOT NULL AND TRIM(selected_city) != ''
+        UNION
+        SELECT service_city AS city FROM service_bookings WHERE service_city IS NOT NULL AND TRIM(service_city) != ''
+      ) sub
+      WHERE city IS NOT NULL AND TRIM(city) != '' AND LOWER(TRIM(city)) != 'n/a'
+      ORDER BY city ASC
+    `;
+    const res = await pool.query(query);
+    return res.rows.map((r) => r.city).filter(Boolean);
+  } catch (err) {
+    console.error('getDistinctDeliveryCities error:', err);
+    return [];
+  }
 }

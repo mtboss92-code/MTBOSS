@@ -46,6 +46,7 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
   const [settlingRecordId, setSettlingRecordId] = useState(null);
   const [settleModalRecord, setSettleModalRecord] = useState(null);
   const [settleNote, setSettleNote] = useState('');
+  const [selectedRecord, setSelectedRecord] = useState(null);
 
   const authHeaders = useMemo(() => {
     const token = typeof window === 'undefined'
@@ -137,11 +138,15 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
     }
   }, [authHeaders, filterStatus, filterVendorId, filterStartDate, filterEndDate, recordPagination.limit]);
 
+  // Settings + rules are stable; do not re-fetch them when record filters change.
   useEffect(() => {
     loadSettings();
     loadRules();
+  }, [loadSettings, loadRules]);
+
+  useEffect(() => {
     loadCommissionRecords(1);
-  }, [loadSettings, loadRules, loadCommissionRecords]);
+  }, [loadCommissionRecords]);
 
   // Mark Commission Row as Paid
   const handleMarkRowAsPaid = async (record, note = '') => {
@@ -859,8 +864,15 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
                             fontSize: '10px',
                             fontWeight: 800,
                             textTransform: 'uppercase',
-                            background: isCat ? '#e0f2fe' : '#f3e8ff',
-                            color: isCat ? '#0369a1' : '#7e22ce',
+                            background: isCat
+                              ? isDarkMode ? 'rgba(56, 189, 248, 0.15)' : '#e0f2fe'
+                              : isDarkMode ? 'rgba(168, 85, 247, 0.15)' : '#f3e8ff',
+                            color: isCat
+                              ? isDarkMode ? '#38bdf8' : '#0369a1'
+                              : isDarkMode ? '#c084fc' : '#7e22ce',
+                            border: isCat
+                              ? isDarkMode ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid #bae6fd'
+                              : isDarkMode ? '1px solid rgba(168, 85, 247, 0.3)' : '1px solid #e9d5ff',
                           }}
                         >
                           {rule.scope_type}
@@ -875,7 +887,7 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
                         )}
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <span style={{ fontSize: '11px', color: isCat ? 'var(--shop-admin-muted)' : '#7e22ce', fontWeight: 600 }}>
+                        <span style={{ fontSize: '11px', color: isCat ? 'var(--shop-admin-muted)' : (isDarkMode ? '#c084fc' : '#7e22ce'), fontWeight: 600 }}>
                           {isCat ? 'Category (2)' : 'Product (1 - Highest)'}
                         </span>
                       </td>
@@ -887,9 +899,15 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
                           type="button"
                           onClick={() => handleToggleRule(rule)}
                           style={{
-                            background: rule.is_active ? '#dcfce7' : '#fee2e2',
-                            color: rule.is_active ? '#15803d' : '#b91c1c',
-                            border: 'none',
+                            background: rule.is_active
+                              ? isDarkMode ? 'rgba(16, 185, 129, 0.15)' : '#dcfce7'
+                              : isDarkMode ? 'rgba(239, 68, 68, 0.15)' : '#fee2e2',
+                            color: rule.is_active
+                              ? isDarkMode ? '#34d399' : '#15803d'
+                              : isDarkMode ? '#f87171' : '#b91c1c',
+                            border: rule.is_active
+                              ? isDarkMode ? '1px solid rgba(16, 185, 129, 0.3)' : 'none'
+                              : isDarkMode ? '1px solid rgba(239, 68, 68, 0.3)' : 'none',
                             padding: '3px 10px',
                             borderRadius: '999px',
                             fontSize: '11px',
@@ -1064,7 +1082,7 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
           {/* Platform Fee Amount */}
           <div style={{ padding: '14px', background: 'var(--bg, #f8fafc)', border: '1px solid var(--shop-admin-border)', borderRadius: '8px' }}>
             <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--shop-admin-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
-              Platform Fee (MT-Boss)
+              Platform Fee (MTBOSS)
             </div>
             <div style={{ fontSize: '1.35rem', fontWeight: 900, color: '#16a34a' }}>
               ₹{resolvedPreview.fee.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
@@ -1173,7 +1191,7 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
             gap: '12px',
-            background: 'var(--bg, #f8fafc)',
+            background: 'var(--shop-admin-spec-box-bg, #f8fafc)',
             border: '1px solid var(--shop-admin-border)',
             borderRadius: '8px',
             padding: '14px',
@@ -1315,7 +1333,7 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
             style={{
               padding: '30px',
               textAlign: 'center',
-              background: 'var(--bg, #f8fafc)',
+              background: 'var(--shop-admin-spec-box-bg, #f8fafc)',
               borderRadius: '8px',
               border: '1px solid var(--shop-admin-border)',
               color: 'var(--shop-admin-muted)',
@@ -1326,37 +1344,43 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
           </div>
         ) : (
           <>
-            <div className="shop-admin-table-wrap">
-              <table>
+            <div className="shop-admin-table-wrap" style={{ overflowX: 'auto', borderRadius: '8px' }}>
+              <table style={{ width: '100%', minWidth: '1240px', borderCollapse: 'collapse', fontSize: '12px' }}>
                 <thead>
                   <tr>
-                    <th style={{ width: '135px' }}>Date</th>
-                    <th style={{ width: '120px' }}>Order ID</th>
-                    <th>Vendor</th>
-                    <th>Product</th>
+                    <th style={{ width: '115px' }}>Date</th>
+                    <th style={{ width: '160px' }}>Order ID</th>
+                    <th style={{ width: '145px' }}>Vendor</th>
+                    <th style={{ minWidth: '240px', maxWidth: '320px' }}>Product</th>
                     <th style={{ textAlign: 'right', width: '110px' }}>Order Amount</th>
-                    <th style={{ textAlign: 'center', width: '110px' }}>Rate Applied</th>
-                    <th style={{ textAlign: 'right', width: '125px' }}>Commission</th>
-                    <th style={{ textAlign: 'center', width: '95px' }}>Status</th>
-                    <th style={{ width: '135px' }}>Paid At</th>
-                    <th style={{ textAlign: 'right', width: '120px' }}>Action</th>
+                    <th style={{ textAlign: 'center', width: '100px' }}>Rate Applied</th>
+                    <th style={{ textAlign: 'right', width: '115px' }}>Commission</th>
+                    <th style={{ textAlign: 'center', width: '110px' }}>Status</th>
+                    <th style={{ width: '110px' }}>Paid At</th>
+                    <th style={{ textAlign: 'right', width: '160px' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {records.map((r) => {
                     const isPending = r.status === 'pending';
                     return (
-                      <tr key={r.id}>
+                      <tr
+                        key={r.id}
+                        onClick={() => setSelectedRecord(r)}
+                        className="commission-record-row"
+                        style={{ cursor: 'pointer', transition: 'background-color 0.15s ease' }}
+                        title="Click to view full commission record details"
+                      >
                         {/* Date */}
-                        <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
-                          <div style={{ fontWeight: 600 }}>
+                        <td style={{ width: '115px', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontWeight: 600, fontSize: '12px' }}>
                             {new Date(r.created_at).toLocaleDateString('en-IN', {
                               day: '2-digit',
                               month: 'short',
                               year: 'numeric',
                             })}
                           </div>
-                          <div style={{ fontSize: '10px', color: 'var(--shop-admin-muted)' }}>
+                          <div style={{ fontSize: '10.5px', color: 'var(--shop-admin-muted)', marginTop: '2px' }}>
                             {new Date(r.created_at).toLocaleTimeString('en-IN', {
                               hour: '2-digit',
                               minute: '2-digit',
@@ -1365,37 +1389,87 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
                         </td>
 
                         {/* Order ID */}
-                        <td>
-                          <div style={{ fontWeight: 700, fontSize: '12px' }}>
+                        <td style={{ width: '160px', whiteSpace: 'nowrap' }}>
+                          <div
+                            style={{
+                              fontWeight: 700,
+                              fontSize: '11.5px',
+                              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                              letterSpacing: '-0.01em',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              maxWidth: '155px',
+                            }}
+                            title={r.order_reference || `#${r.order_id}`}
+                          >
                             {r.order_reference || `#${r.order_id}`}
                           </div>
-                          <div style={{ fontSize: '10px', color: 'var(--shop-admin-muted)' }}>
+                          <div style={{ fontSize: '10.5px', color: 'var(--shop-admin-muted)', marginTop: '2px' }}>
                             Order #{r.order_id}
                           </div>
                         </td>
 
                         {/* Vendor */}
-                        <td>
-                          <div style={{ fontWeight: 700 }}>{r.vendor_name}</div>
-                          <div style={{ fontSize: '10px', color: 'var(--shop-admin-muted)' }}>
+                        <td style={{ width: '145px' }}>
+                          <div
+                            style={{
+                              fontWeight: 700,
+                              fontSize: '12.5px',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              maxWidth: '140px',
+                            }}
+                            title={r.vendor_name}
+                          >
+                            {r.vendor_name}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: '10.5px',
+                              color: 'var(--shop-admin-muted)',
+                              marginTop: '2px',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              maxWidth: '140px',
+                            }}
+                          >
                             Vendor #{r.vendor_id} {r.vendor_phone ? `· ${r.vendor_phone}` : ''}
                           </div>
                         </td>
 
                         {/* Product */}
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{r.product_name}</div>
+                        <td style={{ minWidth: '240px', maxWidth: '320px' }}>
+                          <div
+                            style={{
+                              fontWeight: 600,
+                              fontSize: '12.5px',
+                              lineHeight: '1.4',
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              wordBreak: 'break-word',
+                            }}
+                            title={r.product_name}
+                          >
+                            {r.product_name}
+                          </div>
                           {r.product_category && (
                             <span
                               style={{
                                 display: 'inline-block',
                                 fontSize: '10px',
                                 fontWeight: 700,
-                                padding: '1px 6px',
+                                padding: '2px 7px',
                                 borderRadius: '4px',
-                                background: 'var(--shop-admin-subtle, #f3f4f6)',
+                                background: 'var(--shop-admin-pill-bg, #f1f5f9)',
+                                border: '1px solid var(--shop-admin-pill-border, #cbd5e1)',
                                 color: 'var(--shop-admin-muted)',
-                                marginTop: '2px',
+                                marginTop: '4px',
+                                whiteSpace: 'nowrap',
                               }}
                             >
                               {r.product_category}
@@ -1404,12 +1478,12 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
                         </td>
 
                         {/* Order Amount */}
-                        <td style={{ textAlign: 'right', fontWeight: 700, fontSize: '12px' }}>
+                        <td style={{ textAlign: 'right', fontWeight: 700, fontSize: '12.5px', width: '110px', whiteSpace: 'nowrap' }}>
                           ₹{Number(r.order_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </td>
 
                         {/* Rate Applied */}
-                        <td style={{ textAlign: 'center' }}>
+                        <td style={{ textAlign: 'center', width: '100px', whiteSpace: 'nowrap' }}>
                           <span style={{ fontWeight: 800, fontSize: '12px', color: 'var(--brand-blue, #2563eb)' }}>
                             {Number(r.commission_percent_applied).toFixed(2)}%
                           </span>
@@ -1427,29 +1501,61 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
                         </td>
 
                         {/* Commission Amount */}
-                        <td style={{ textAlign: 'right', fontWeight: 900, fontSize: '13px', color: '#16a34a' }}>
+                        <td
+                          style={{
+                            textAlign: 'right',
+                            fontWeight: 900,
+                            fontSize: '13px',
+                            color: isDarkMode ? '#34d399' : '#16a34a',
+                            width: '115px',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
                           ₹{Number(r.commission_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </td>
 
                         {/* Status */}
-                        <td style={{ textAlign: 'center' }}>
+                        <td style={{ textAlign: 'center', width: '110px' }}>
                           <span
                             style={{
-                              display: 'inline-block',
-                              padding: '2px 8px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '3px 9px',
                               borderRadius: '999px',
                               fontSize: '11px',
                               fontWeight: 700,
-                              background: isPending ? '#fef3c7' : '#dcfce7',
-                              color: isPending ? '#b45309' : '#15803d',
+                              whiteSpace: 'nowrap',
+                              background: isPending
+                                ? isDarkMode
+                                  ? 'rgba(245, 158, 11, 0.15)'
+                                  : '#fef3c7'
+                                : isDarkMode
+                                ? 'rgba(16, 185, 129, 0.15)'
+                                : '#dcfce7',
+                              color: isPending
+                                ? isDarkMode
+                                  ? '#fbbf24'
+                                  : '#b45309'
+                                : isDarkMode
+                                ? '#34d399'
+                                : '#15803d',
+                              border: isPending
+                                ? isDarkMode
+                                  ? '1px solid rgba(245, 158, 11, 0.35)'
+                                  : '1px solid #fde68a'
+                                : isDarkMode
+                                ? '1px solid rgba(16, 185, 129, 0.35)'
+                                : '1px solid #bbf7d0',
                             }}
                           >
-                            {isPending ? '⏳ Pending' : '✓ Paid'}
+                            <span style={{ fontSize: '9px' }}>{isPending ? '⏳' : '✓'}</span>
+                            <span>{isPending ? 'Pending' : 'Paid'}</span>
                           </span>
                         </td>
 
                         {/* Paid At */}
-                        <td style={{ fontSize: '11px' }}>
+                        <td style={{ width: '110px', fontSize: '11.5px', whiteSpace: 'nowrap' }}>
                           {r.paid_at ? (
                             <div>
                               <div style={{ fontWeight: 600 }}>
@@ -1459,15 +1565,26 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
                                   year: 'numeric',
                                 })}
                               </div>
-                              <div style={{ fontSize: '10px', color: 'var(--shop-admin-muted)' }}>
+                              <div style={{ fontSize: '10px', color: 'var(--shop-admin-muted)', marginTop: '2px' }}>
                                 {new Date(r.paid_at).toLocaleTimeString('en-IN', {
                                   hour: '2-digit',
                                   minute: '2-digit',
                                 })}
                               </div>
                               {r.paid_note && (
-                                <div style={{ fontSize: '10px', color: 'var(--shop-admin-muted)', marginTop: '2px', fontStyle: 'italic' }}>
-                                  Note: {r.paid_note}
+                                <div
+                                  style={{
+                                    fontSize: '10px',
+                                    color: 'var(--shop-admin-muted)',
+                                    marginTop: '2px',
+                                    fontStyle: 'italic',
+                                    maxWidth: '105px',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                  }}
+                                  title={r.paid_note}
+                                >
+                                  {r.paid_note}
                                 </div>
                               )}
                             </div>
@@ -1477,34 +1594,73 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
                         </td>
 
                         {/* Action */}
-                        <td style={{ textAlign: 'right' }}>
-                          {isPending ? (
+                        <td style={{ textAlign: 'right', width: '160px', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
                             <button
                               type="button"
-                              onClick={() => {
-                                setSettleModalRecord(r);
-                                setSettleNote(`Settled offline via admin on ${new Date().toLocaleDateString('en-IN')}`);
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedRecord(r);
                               }}
-                              disabled={settlingRecordId === r.id}
+                              title="View full commission record details"
                               style={{
-                                padding: '4px 9px',
+                                padding: '5px 10px',
                                 fontSize: '11px',
                                 fontWeight: 700,
                                 borderRadius: '6px',
-                                border: '1px solid #16a34a',
-                                background: '#16a34a',
-                                color: '#fff',
-                                cursor: settlingRecordId === r.id ? 'not-allowed' : 'pointer',
-                                opacity: settlingRecordId === r.id ? 0.6 : 1,
+                                border: '1px solid var(--shop-admin-border, #3f3f46)',
+                                background: 'var(--shop-admin-card-bg, transparent)',
+                                color: 'var(--brand-blue, #38bdf8)',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
                               }}
                             >
-                              {settlingRecordId === r.id ? 'Saving...' : 'Mark as Paid'}
+                              Details
                             </button>
-                          ) : (
-                            <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 700 }}>
-                              ✓ Settled
-                            </span>
-                          )}
+                            {isPending ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSettleModalRecord(r);
+                                  setSettleNote(`Settled offline via admin on ${new Date().toLocaleDateString('en-IN')}`);
+                                }}
+                                disabled={settlingRecordId === r.id}
+                                style={{
+                                  padding: '5px 10px',
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  borderRadius: '6px',
+                                  border: 'none',
+                                  background: '#16a34a',
+                                  color: '#fff',
+                                  cursor: settlingRecordId === r.id ? 'not-allowed' : 'pointer',
+                                  opacity: settlingRecordId === r.id ? 0.6 : 1,
+                                  whiteSpace: 'nowrap',
+                                  transition: 'all 0.15s ease',
+                                }}
+                              >
+                                {settlingRecordId === r.id ? 'Saving...' : 'Mark as Paid'}
+                              </button>
+                            ) : (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                  padding: '4px 8px',
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  borderRadius: '6px',
+                                  background: isDarkMode ? 'rgba(16, 185, 129, 0.12)' : '#dcfce7',
+                                  color: isDarkMode ? '#34d399' : '#15803d',
+                                  border: isDarkMode ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid #bbf7d0',
+                                }}
+                              >
+                                ✓ Settled
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1643,7 +1799,7 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
 
               <div
                 style={{
-                  background: 'var(--bg, #f8fafc)',
+                  background: 'var(--shop-admin-spec-box-bg, #f8fafc)',
                   border: '1px solid var(--shop-admin-border)',
                   borderRadius: '8px',
                   padding: '12px',
@@ -1725,6 +1881,262 @@ export default function ShopCommissionSettingsManager({ isDarkMode = false }) {
             </div>
           </div>
         )}
+
+        {/* Modal: Full Commission Record Details */}
+        {selectedRecord && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0, 0, 0, 0.55)',
+              zIndex: 9998,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '16px',
+              backdropFilter: 'blur(2px)',
+            }}
+            onClick={() => setSelectedRecord(null)}
+          >
+            <div
+              style={{
+                background: 'var(--shop-admin-bg, #fff)',
+                border: '1px solid var(--shop-admin-border, #e2e8f0)',
+                borderRadius: '14px',
+                padding: '24px',
+                maxWidth: '640px',
+                width: '100%',
+                maxHeight: '90vh',
+                overflowY: 'auto',
+                boxShadow: '0 25px 35px -5px rgba(0, 0, 0, 0.2), 0 15px 15px -5px rgba(0, 0, 0, 0.08)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', borderBottom: '1px solid var(--shop-admin-border, #e2e8f0)', paddingBottom: '14px', marginBottom: '18px' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '18px' }}>🧾</span>
+                    <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--shop-admin-text, #111)' }}>
+                      Commission Record #{selectedRecord.id}
+                    </h3>
+                    <span
+                      style={{
+                        padding: '2px 8px',
+                        borderRadius: '999px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        background: selectedRecord.status === 'pending' ? '#fef3c7' : '#dcfce7',
+                        color: selectedRecord.status === 'pending' ? '#b45309' : '#15803d',
+                      }}
+                    >
+                      {selectedRecord.status === 'pending' ? '⏳ Pending' : '✓ Paid'}
+                    </span>
+                  </div>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--shop-admin-muted, #64748b)' }}>
+                    Tracked on {new Date(selectedRecord.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRecord(null)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '22px',
+                    fontWeight: 700,
+                    color: 'var(--shop-admin-muted, #64748b)',
+                    cursor: 'pointer',
+                    lineHeight: 1,
+                    padding: '2px 6px',
+                  }}
+                  title="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Financial KPI Cards */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                  gap: '10px',
+                  marginBottom: '20px',
+                }}
+              >
+                <div style={{ background: 'var(--shop-admin-spec-box-bg, #f8fafc)', padding: '12px', borderRadius: '8px', border: '1px solid var(--shop-admin-border, #e2e8f0)' }}>
+                  <div style={{ fontSize: '10px', textTransform: 'uppercase', fontWeight: 700, color: 'var(--shop-admin-muted)' }}>Order Amount</div>
+                  <div style={{ fontSize: '16px', fontWeight: 800, marginTop: '4px', color: 'var(--shop-admin-text)' }}>
+                    ₹{Number(selectedRecord.order_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+
+                <div style={{ background: 'var(--shop-admin-spec-box-bg, #f8fafc)', padding: '12px', borderRadius: '8px', border: '1px solid var(--shop-admin-border, #e2e8f0)' }}>
+                  <div style={{ fontSize: '10px', textTransform: 'uppercase', fontWeight: 700, color: 'var(--shop-admin-muted)' }}>Rate Applied</div>
+                  <div style={{ fontSize: '16px', fontWeight: 800, marginTop: '4px', color: 'var(--brand-blue, #2563eb)' }}>
+                    {Number(selectedRecord.commission_percent_applied).toFixed(2)}%
+                  </div>
+                  <div style={{ fontSize: '9px', textTransform: 'uppercase', color: 'var(--shop-admin-muted)', fontWeight: 600 }}>
+                    {selectedRecord.rate_source} rule
+                  </div>
+                </div>
+
+                <div style={{ background: 'rgba(16, 185, 129, 0.12)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                  <div style={{ fontSize: '10px', textTransform: 'uppercase', fontWeight: 700, color: '#047857' }}>Commission (MTBOSS)</div>
+                  <div style={{ fontSize: '16px', fontWeight: 900, marginTop: '4px', color: '#16a34a' }}>
+                    ₹{Number(selectedRecord.commission_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+
+                <div style={{ background: 'var(--shop-admin-spec-box-bg, #f8fafc)', padding: '12px', borderRadius: '8px', border: '1px solid var(--shop-admin-border, #e2e8f0)' }}>
+                  <div style={{ fontSize: '10px', textTransform: 'uppercase', fontWeight: 700, color: 'var(--shop-admin-muted)' }}>Vendor Net Payout</div>
+                  <div style={{ fontSize: '16px', fontWeight: 800, marginTop: '4px', color: 'var(--shop-admin-text)' }}>
+                    ₹{(Number(selectedRecord.order_amount) - Number(selectedRecord.commission_amount)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Order & Product Information */}
+              <div style={{ background: 'var(--shop-admin-spec-box-bg, #f8fafc)', borderRadius: '8px', border: '1px solid var(--shop-admin-border, #e2e8f0)', padding: '14px', marginBottom: '14px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--brand-blue, #2563eb)', marginBottom: '10px' }}>
+                  📦 Order &amp; Product Details
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '12px' }}>
+                  <div>
+                    <span style={{ color: 'var(--shop-admin-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Order Reference</span>
+                    <strong style={{ fontSize: '13px' }}>{selectedRecord.order_reference}</strong>
+                    <div style={{ fontSize: '10px', color: 'var(--shop-admin-muted)' }}>Internal ID #{selectedRecord.order_id}</div>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--shop-admin-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Product Name</span>
+                    <strong style={{ fontSize: '13px' }}>{selectedRecord.product_name}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--shop-admin-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Product Category</span>
+                    <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '4px', background: '#e0e7ff', color: '#3730a3', fontWeight: 700, fontSize: '11px', marginTop: '2px' }}>
+                      {selectedRecord.product_category || 'General'}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--shop-admin-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Product ID</span>
+                    <strong style={{ fontSize: '13px' }}>{selectedRecord.product_id ? `#${selectedRecord.product_id}` : 'Direct Item'}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Vendor Information */}
+              <div style={{ background: 'var(--shop-admin-spec-box-bg, #f8fafc)', borderRadius: '8px', border: '1px solid var(--shop-admin-border, #e2e8f0)', padding: '14px', marginBottom: '14px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#c2410c', marginBottom: '10px' }}>
+                  🧑‍💼 Vendor Information
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '12px' }}>
+                  <div>
+                    <span style={{ color: 'var(--shop-admin-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Shop / Vendor Name</span>
+                    <strong style={{ fontSize: '13px' }}>{selectedRecord.vendor_name}</strong>
+                    <div style={{ fontSize: '10px', color: 'var(--shop-admin-muted)' }}>Vendor ID #{selectedRecord.vendor_id}</div>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--shop-admin-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Phone</span>
+                    <strong style={{ fontSize: '13px' }}>{selectedRecord.vendor_phone || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--shop-admin-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Email</span>
+                    <strong style={{ fontSize: '13px' }}>{selectedRecord.vendor_email || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--shop-admin-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>City / Region</span>
+                    <strong style={{ fontSize: '13px' }}>{selectedRecord.vendor_city || '—'}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Settlement Status & Audit Info */}
+              <div style={{ background: 'var(--shop-admin-spec-box-bg, #f8fafc)', borderRadius: '8px', border: '1px solid var(--shop-admin-border, #e2e8f0)', padding: '14px', marginBottom: '20px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#047857', marginBottom: '10px' }}>
+                  ⚖️ Settlement &amp; Audit Details
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '12px' }}>
+                  <div>
+                    <span style={{ color: 'var(--shop-admin-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Settlement Status</span>
+                    <span style={{ fontWeight: 700, color: selectedRecord.status === 'paid' ? '#16a34a' : '#b45309' }}>
+                      {selectedRecord.status === 'paid' ? '✓ Paid & Settled' : '⏳ Pending (Awaiting Offline Settlement)'}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--shop-admin-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Paid Timestamp</span>
+                    <span style={{ fontWeight: 600 }}>
+                      {selectedRecord.paid_at ? new Date(selectedRecord.paid_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}
+                    </span>
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <span style={{ color: 'var(--shop-admin-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Settlement Note</span>
+                    <span style={{ fontWeight: 600, fontStyle: selectedRecord.paid_note ? 'normal' : 'italic', color: selectedRecord.paid_note ? 'inherit' : 'var(--shop-admin-muted)' }}>
+                      {selectedRecord.paid_note || 'None recorded'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer Actions */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRecord(null)}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    borderRadius: '6px',
+                    border: '1px solid var(--shop-admin-border, #cbd5e1)',
+                    background: 'transparent',
+                    color: 'var(--shop-admin-text, #334155)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Close
+                </button>
+                {selectedRecord.status === 'pending' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const rec = selectedRecord;
+                      setSelectedRecord(null);
+                      setSettleModalRecord(rec);
+                      setSettleNote(`Settled offline via admin on ${new Date().toLocaleDateString('en-IN')}`);
+                    }}
+                    style={{
+                      padding: '8px 18px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: '#16a34a',
+                      color: '#fff',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Mark as Paid
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <style jsx>{`
+          .commission-record-row:hover td {
+            background-color: var(--shop-admin-bg-hover, #f8fafc) !important;
+          }
+          :is(html.dark-mode, html.dark, .dark-mode, .dark) .commission-record-row:hover td,
+          .shop-admin-root.dark-mode .commission-record-row:hover td,
+          .shop-admin-root.dark .commission-record-row:hover td {
+            background-color: var(--shop-admin-bg-hover, #27272a) !important;
+          }
+        `}</style>
       </div>
     </section>
   );

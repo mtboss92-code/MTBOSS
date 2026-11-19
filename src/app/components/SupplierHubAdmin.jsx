@@ -26,6 +26,22 @@ function StatusBadge({ s }) {
   return null;
 }
 
+function SubscriptionBadge({ s }) {
+  const isFree = s.is_free_tier || Number(s.package_price || 0) <= 0 || s.package_id === 'pkg_free_1m';
+  if (isFree) {
+    return (
+      <span style={{ display:'inline-flex', alignItems:'center', gap:'0.2rem', background:'#fffbeb', color:'#b45309', border:'1px solid #fcd34d', padding:'0.2rem 0.55rem', borderRadius:20, fontSize:'0.68rem', fontWeight:800, textTransform:'uppercase', whiteSpace:'nowrap' }}>
+        🟡 Free Plan (₹0)
+      </span>
+    );
+  }
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:'0.2rem', background:'#f0fdf4', color:'#15803d', border:'1px solid #86efac', padding:'0.2rem 0.55rem', borderRadius:20, fontSize:'0.68rem', fontWeight:800, textTransform:'uppercase', whiteSpace:'nowrap' }}>
+      🟢 Paid ({s.package_name || 'Paid'} · ₹{Number(s.package_price || 0).toLocaleString('en-IN')})
+    </span>
+  );
+}
+
 function EnqStatusBadge({ status }) {
   const map = {
     open:      { bg:'var(--brand-blue-soft)', color:'#92400e', label:'Open'      },
@@ -234,7 +250,10 @@ export default function SupplierHubAdmin({ isDarkMode }) {
   const activeCount  = suppliers.filter(s => s.status === 'approved' && s.is_active).length;
 
   const filteredSups = suppliers.filter(s => {
+    const isFree = s.is_free_tier || Number(s.package_price || 0) <= 0 || s.package_id === 'pkg_free_1m';
     const mf = supFilter === 'all' ? true
+      : supFilter === 'paid'     ? !isFree
+      : supFilter === 'free'     ? isFree
       : supFilter === 'active'   ? s.status === 'approved' && s.is_active
       : supFilter === 'inactive' ? s.is_active === false
       : s.status === supFilter;
@@ -286,7 +305,7 @@ export default function SupplierHubAdmin({ isDarkMode }) {
       {showRejectModal && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:70, padding:'1rem' }}>
           <div style={{ background:surface, border:`1px solid ${border}`, borderRadius:12, padding:'1.75rem', width:'100%', maxWidth:460 }}>
-            <h3 style={{ margin:'0 0 0.5rem', fontSize:'1rem', fontWeight:700, color:text }}>Reject Supplier</h3>
+            <h3 style={{ margin:'0 0 0.5rem', fontSize:'1rem', fontWeight:700, color:text }}>Reject Vendor</h3>
             <p style={{ margin:'0 0 1rem', fontSize:'0.8125rem', color:muted }}>Rejecting <strong style={{ color:text }}>{rejectTarget?.shop_name}</strong>. Reason (optional):</p>
             <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} rows={3} placeholder="e.g., Incomplete info, invalid documents…"
               style={{ width:'100%', padding:'0.7rem', border:`1px solid ${border}`, borderRadius:8, background:inputBg, color:text, fontFamily:'inherit', fontSize:'0.875rem', resize:'vertical', boxSizing:'border-box' }} />
@@ -304,34 +323,126 @@ export default function SupplierHubAdmin({ isDarkMode }) {
         </div>
       )}
 
-      {/* ── Supplier Detail Modal ─────────────────────────────────────────── */}
-      {selectedSupplier && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:65, padding:'1rem' }} onClick={() => setSelectedSupplier(null)}>
-          <div style={{ background:surface, border:`1px solid ${border}`, borderRadius:14, padding:'1.75rem', width:'100%', maxWidth:660, maxHeight:'90vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'1.25rem' }}>
+      {/* ── Supplier / Enquiry Detail In-Page View ─────────────────────── */}
+      {selectedSupplier ? (
+        <div style={{ width: '100%', padding: '0.25rem 0 2rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <button
+              onClick={() => setSelectedSupplier(null)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                background: 'transparent',
+                border: `1px solid ${border}`,
+                color: text,
+                padding: '0.5rem 1rem',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontWeight: 700,
+                fontSize: '0.875rem'
+              }}
+            >
+              ← Back to Vendors
+            </button>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <StatusBadge s={selectedSupplier} />
+            </div>
+          </div>
+
+          <div style={{ background: surface, border: `1px solid ${border}`, borderRadius: 14, padding: '1.75rem', width: '100%', width: '100%', boxShadow: '0 2px 12px rgba(0,0,0,0.05)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem' }}>
               <div>
-                <h2 style={{ margin:0, fontSize:'1.15rem', fontWeight:700, color:text }}>{selectedSupplier.shop_name}</h2>
-                <p style={{ margin:'0.25rem 0 0', fontSize:'0.8125rem', color:muted }}>{selectedSupplier.email}</p>
-              </div>
-              <div style={{ display:'flex', gap:'0.5rem', alignItems:'center' }}>
-                <StatusBadge s={selectedSupplier} />
-                <button onClick={() => setSelectedSupplier(null)} style={{ background:'none', border:'none', cursor:'pointer', color:muted, fontSize:'1.25rem', lineHeight:1 }}>✕</button>
+                <h2 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 800, color: text }}>{selectedSupplier.shop_name}</h2>
+                <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: muted }}>{selectedSupplier.email}</p>
               </div>
             </div>
 
-            {/* Aadhaar */}
-            <div style={{ background: selectedSupplier.aadhaar_number ? (isDarkMode?'#0a1f0a':'#f0fdf4') : (isDarkMode?'#2a1a0a':'#fff7ed'), border:`2px solid ${selectedSupplier.aadhaar_number ? '#16a34a' : '#f97316'}`, borderRadius:10, padding:'1rem 1.25rem', marginBottom:'1.25rem', display:'flex', alignItems:'center', gap:'1rem' }}>
-              <span style={{ fontSize:'2rem' }}>🪪</span>
-              <div>
-                <div style={{ fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.07em', color:muted, marginBottom:'0.25rem' }}>Aadhaar — Verify before approving</div>
-                <div style={{ fontSize:'1.35rem', fontWeight:800, letterSpacing:'0.18em', color: selectedSupplier.aadhaar_number ? text : '#f97316', fontFamily:'monospace' }}>
-                  {selectedSupplier.aadhaar_number ? selectedSupplier.aadhaar_number.replace(/(\d{4})(\d{4})(\d{4})/, '$1 $2 $3') : 'Not provided'}
+            {/* Verification Documents & Numbers Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
+              {/* Aadhaar */}
+              <div style={{
+                background: selectedSupplier.aadhaar_number ? (isDarkMode ? '#0a1f0a' : '#f0fdf4') : (isDarkMode ? '#2a1a0a' : '#fff7ed'),
+                border: `1.5px solid ${selectedSupplier.aadhaar_number ? '#16a34a' : '#f97316'}`,
+                borderRadius: 10, padding: '0.875rem',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                  <span style={{ fontSize: '1.2rem' }}>🪪</span>
+                  <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: muted }}>
+                    Aadhaar Details
+                  </div>
                 </div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, letterSpacing: '0.12em', color: selectedSupplier.aadhaar_number ? text : '#f97316', fontFamily: 'monospace', marginBottom: '0.4rem' }}>
+                  {selectedSupplier.aadhaar_number
+                    ? selectedSupplier.aadhaar_number.replace(/(\d{4})(\d{4})(\d{4})/, '$1 $2 $3')
+                    : 'Not provided'}
+                </div>
+                {selectedSupplier.aadhaar_document ? (
+                  <div>
+                    <a href={selectedSupplier.aadhaar_document} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem', fontWeight: 700, color: '#16a34a', textDecoration: 'none', background: isDarkMode ? '#1a2a1a' : '#dcfce7', padding: '0.25rem 0.55rem', borderRadius: 6 }}>
+                      👁️ View Aadhaar Doc
+                    </a>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: '0.7rem', color: muted }}>No document uploaded</span>
+                )}
+              </div>
+
+              {/* PAN */}
+              <div style={{
+                background: selectedSupplier.pan_number ? (isDarkMode ? '#0a1f1a' : '#f0fdfa') : (isDarkMode ? '#222' : '#f9f9f9'),
+                border: `1.5px solid ${selectedSupplier.pan_number ? '#0d9488' : border}`,
+                borderRadius: 10, padding: '0.875rem',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                  <span style={{ fontSize: '1.2rem' }}>💳</span>
+                  <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: muted }}>
+                    PAN Card Details
+                  </div>
+                </div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, letterSpacing: '0.12em', color: selectedSupplier.pan_number ? text : muted, fontFamily: 'monospace', marginBottom: '0.4rem' }}>
+                  {selectedSupplier.pan_number || 'Not provided'}
+                </div>
+                {selectedSupplier.pan_document ? (
+                  <div>
+                    <a href={selectedSupplier.pan_document} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem', fontWeight: 700, color: '#0d9488', textDecoration: 'none', background: isDarkMode ? '#0d2824' : '#ccfbf1', padding: '0.25rem 0.55rem', borderRadius: 6 }}>
+                      👁️ View PAN Doc
+                    </a>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: '0.7rem', color: muted }}>No document uploaded</span>
+                )}
+              </div>
+
+              {/* GST */}
+              <div style={{
+                background: selectedSupplier.gst_number ? (isDarkMode ? '#0a1829' : '#eff6ff') : (isDarkMode ? '#222' : '#f9f9f9'),
+                border: `1.5px solid ${selectedSupplier.gst_number ? '#2563eb' : border}`,
+                borderRadius: 10, padding: '0.875rem',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                  <span style={{ fontSize: '1.2rem' }}>🏢</span>
+                  <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: muted }}>
+                    GST Details
+                  </div>
+                </div>
+                <div style={{ fontSize: '1rem', fontWeight: 800, letterSpacing: '0.1em', color: selectedSupplier.gst_number ? text : muted, fontFamily: 'monospace', marginBottom: '0.4rem' }}>
+                  {selectedSupplier.gst_number || 'Not registered'}
+                </div>
+                {selectedSupplier.gst_document ? (
+                  <div>
+                    <a href={selectedSupplier.gst_document} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem', fontWeight: 700, color: '#2563eb', textDecoration: 'none', background: isDarkMode ? '#172554' : '#dbeafe', padding: '0.25rem 0.55rem', borderRadius: 6 }}>
+                      👁️ View GST Cert
+                    </a>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: '0.7rem', color: muted }}>No certificate</span>
+                )}
               </div>
             </div>
 
             {/* Info grid */}
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1rem', marginBottom:'1.25rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
               {[
                 ['Phone',        selectedSupplier.phone],
                 ['City',         selectedSupplier.city],
@@ -341,104 +452,174 @@ export default function SupplierHubAdmin({ isDarkMode }) {
                 ['Registered',   fmtD(selectedSupplier.created_at)],
               ].map(([label, value]) => (
                 <div key={label}>
-                  <div style={{ fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:muted, marginBottom:'0.2rem' }}>{label}</div>
-                  <div style={{ fontSize:'0.875rem', fontWeight:600, color:text }}>{value || '—'}</div>
+                  <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: muted, marginBottom: '0.2rem' }}>{label}</div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 600, color: text }}>{value || '—'}</div>
                 </div>
               ))}
             </div>
 
             {/* Categories */}
             {selectedSupplier.product_categories?.length > 0 && (
-              <div style={{ marginBottom:'1.25rem' }}>
-                <div style={{ fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:muted, marginBottom:'0.5rem' }}>Products Sold</div>
-                <div style={{ display:'flex', flexWrap:'wrap', gap:'0.4rem' }}>
+              <div style={{ marginBottom: '1.25rem' }}>
+                <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: muted, marginBottom: '0.5rem' }}>Products Sold</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
                   {selectedSupplier.product_categories.map(cat => (
-                    <span key={cat} style={{ background: isDarkMode?'#1a2a1a':'#f0fdf4', color:'#16a34a', border:'1px solid #16a34a44', padding:'0.25rem 0.75rem', borderRadius:20, fontSize:'0.78rem', fontWeight:700 }}>{cat}</span>
+                    <span key={cat} style={{ background: isDarkMode?'#1a2a1a':'#f0fdf4', color: '#16a34a', border: '1px solid #16a34a44', padding: '0.25rem 0.75rem', borderRadius: 20, fontSize: '0.78rem', fontWeight: 700 }}>{cat}</span>
                   ))}
                 </div>
               </div>
             )}
 
-            <div style={{ background:isDarkMode?'#102019':'#f0fdf4', border:'1px solid #16a34a55', borderRadius:8, padding:'1rem', marginBottom:'1.25rem' }}>
-              <div style={{ fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:muted, marginBottom:'0.75rem' }}>Registration / Package Payment</div>
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:'0.75rem' }}>
-                <div><div style={{ fontSize:'0.65rem', color:muted }}>Status</div><div style={{ fontWeight:800, color:selectedSupplier.payment_status === 'PAID' ? '#16a34a' : '#f97316' }}>{selectedSupplier.payment_status || 'No online payment record'}</div></div>
-                <div><div style={{ fontSize:'0.65rem', color:muted }}>Amount</div><div style={{ fontWeight:800, color:text }}>{selectedSupplier.payment_amount ? fmt(selectedSupplier.payment_amount) : '—'}</div></div>
-                <div><div style={{ fontSize:'0.65rem', color:muted }}>Reference</div><div style={{ fontSize:'0.78rem', fontWeight:700, color:text }}>{selectedSupplier.payment_reference || '—'}</div></div>
-                <div><div style={{ fontSize:'0.65rem', color:muted }}>Received</div><div style={{ fontSize:'0.78rem', fontWeight:700, color:text }}>{selectedSupplier.payment_completed_at ? fmtD(selectedSupplier.payment_completed_at) : '—'}</div></div>
+            {/* Subscription Tier & Plan Card */}
+            {(() => {
+              const isFree = selectedSupplier.is_free_tier || Number(selectedSupplier.package_price || 0) <= 0 || selectedSupplier.package_id === 'pkg_free_1m';
+              return (
+                <div style={{
+                  background: isFree ? (isDarkMode ? '#2a1a05' : '#fffbeb') : (isDarkMode ? '#052a15' : '#f0fdf4'),
+                  border: `2px solid ${isFree ? '#f59e0b' : '#22c55e'}`,
+                  borderRadius: 10,
+                  padding: '1.15rem 1.25rem',
+                  marginBottom: '1.25rem'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <div>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', color: isFree ? '#b45309' : '#15803d', marginBottom: '0.25rem' }}>
+                        SUBSCRIPTION TIER
+                      </div>
+                      <div style={{ fontSize: '1.15rem', fontWeight: 800, color: text }}>
+                        {isFree ? '🟡 1-Month Free Trial Vendor' : `🟢 Paid Vendor — ${selectedSupplier.package_name || 'Active Plan'}`}
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: isFree ? (isDarkMode ? '#fde68a' : '#92400e') : (isDarkMode ? '#bbf7d0' : '#166534'), marginTop: '0.35rem', lineHeight: 1.5 }}>
+                        {isFree
+                          ? '⚠️ Free Trial: Customer leads are locked & buy product payouts held until vendor purchases a Paid Plan.'
+                          : `✓ Paid Plan Active (₹${Number(selectedSupplier.package_price || 0).toLocaleString('en-IN')}) — All customer leads unlocked & payouts enabled.`
+                        }
+                      </div>
+                    </div>
+                    <span style={{
+                      background: isFree ? '#b45309' : '#16a34a',
+                      color: '#fff',
+                      padding: '0.35rem 0.85rem',
+                      borderRadius: 20,
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em'
+                    }}>
+                      {isFree ? 'FREE TIER (₹0)' : 'PAID PLAN'}
+                    </span>
+                  </div>
+                  {selectedSupplier.package_expires_at && (
+                    <div style={{ marginTop: '0.75rem', paddingTop: '0.6rem', borderTop: `1px solid ${isFree ? '#fde68a44' : '#86efac44'}`, fontSize: '0.78rem', color: muted }}>
+                      Plan Expiry: <strong style={{ color: text }}>{fmtD(selectedSupplier.package_expires_at)}</strong> (Status: {selectedSupplier.package_status || 'active'})
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Registration / Package Payment */}
+            <div style={{ background: isDarkMode?'#102019':'#f0fdf4', border: '1px solid #16a34a55', borderRadius: 8, padding: '1rem', marginBottom: '1.25rem' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: muted, marginBottom: '0.75rem' }}>Registration / Package Payment</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '0.75rem' }}>
+                <div><div style={{ fontSize: '0.65rem', color: muted }}>Status</div><div style={{ fontWeight: 800, color: selectedSupplier.payment_status === 'PAID' ? '#16a34a' : '#f97316' }}>{selectedSupplier.payment_status || 'No online payment record'}</div></div>
+                <div><div style={{ fontSize: '0.65rem', color: muted }}>Amount</div><div style={{ fontWeight: 800, color: text }}>{selectedSupplier.payment_amount ? fmt(selectedSupplier.payment_amount) : '—'}</div></div>
+                <div><div style={{ fontSize: '0.65rem', color: muted }}>Reference</div><div style={{ fontSize: '0.78rem', fontWeight: 700, color: text }}>{selectedSupplier.payment_reference || '—'}</div></div>
+                <div><div style={{ fontSize: '0.65rem', color: muted }}>Received</div><div style={{ fontSize: '0.78rem', fontWeight: 700, color: text }}>{selectedSupplier.payment_completed_at ? fmtD(selectedSupplier.payment_completed_at) : '—'}</div></div>
               </div>
             </div>
 
             {/* Earnings */}
-            <div style={{ background:bg, borderRadius:8, padding:'1rem', marginBottom:'1.25rem' }}>
-              <div style={{ fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:muted, marginBottom:'0.75rem' }}>Earnings Summary</div>
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'0.75rem' }}>
+            <div style={{ background: bg, borderRadius: 8, padding: '1rem', marginBottom: '1.25rem' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: muted, marginBottom: '0.75rem' }}>Earnings Summary</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.75rem' }}>
                 {[
                   ['Orders Fulfilled', selectedSupplier.total_fulfilled || 0, text],
                   ['Total Revenue',    fmt(selectedSupplier.total_earned),    '#16a34a'],
                   ['Commission (15%)', fmt(selectedSupplier.total_commission), '#f97316'],
                 ].map(([l, v, c]) => (
-                  <div key={l}><div style={{ fontSize:'0.65rem', color:muted }}>{l}</div><div style={{ fontSize:'1.05rem', fontWeight:800, color:c }}>{v}</div></div>
+                  <div key={l}><div style={{ fontSize: '0.65rem', color: muted }}>{l}</div><div style={{ fontSize: '1.05rem', fontWeight: 800, color: c }}>{v}</div></div>
                 ))}
               </div>
             </div>
 
             {/* Rejection reason */}
             {selectedSupplier.status === 'rejected' && selectedSupplier.rejection_reason && (
-              <div style={{ marginBottom:'1.25rem', background:'#fef2f2', borderRadius:8, padding:'0.75rem', fontSize:'0.8125rem', color:'#b91c1c' }}>
+              <div style={{ marginBottom: '1.25rem', background: '#fef2f2', borderRadius: 8, padding: '0.75rem', fontSize: '0.8125rem', color: '#b91c1c' }}>
                 <strong>Rejection reason:</strong> {selectedSupplier.rejection_reason}
               </div>
             )}
 
             {/* Action buttons */}
-            <div style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '1.5rem', borderTop: `1px solid ${border}`, paddingTop: '1.25rem' }}>
               {selectedSupplier.status === 'pending' && (<>
                 <button onClick={() => handleApprove(selectedSupplier.id)} disabled={!!actionLoading}
-                  style={{ flex:1, minWidth:120, padding:'0.65rem', background:'#16a34a', color:'#fff', border:'none', borderRadius:8, fontWeight:700, fontSize:'0.875rem', cursor:'pointer', opacity:actionLoading ? 0.6 : 1, fontFamily:'inherit' }}>
+                  style={{ flex: 1, minWidth: 120, padding: '0.65rem', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: '0.875rem', cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, fontFamily: 'inherit' }}>
                   ✓ Approve
                 </button>
                 <button onClick={() => { setSelectedSupplier(null); openRejectModal(selectedSupplier); }} disabled={!!actionLoading}
-                  style={{ flex:1, minWidth:120, padding:'0.65rem', background:'#dc2626', color:'#fff', border:'none', borderRadius:8, fontWeight:700, fontSize:'0.875rem', cursor:'pointer', opacity:actionLoading ? 0.6 : 1, fontFamily:'inherit' }}>
+                  style={{ flex: 1, minWidth: 120, padding: '0.65rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: '0.875rem', cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, fontFamily: 'inherit' }}>
                   ✕ Reject
                 </button>
               </>)}
               {selectedSupplier.status === 'approved' && (
                 selectedSupplier.is_active ? (
                   <button onClick={() => handleDeactivate(selectedSupplier.id)} disabled={!!actionLoading}
-                    style={{ flex:1, padding:'0.65rem', background:'#f97316', color:'#fff', border:'none', borderRadius:8, fontWeight:700, fontSize:'0.875rem', cursor:'pointer', opacity:actionLoading ? 0.6 : 1, fontFamily:'inherit' }}>
+                    style={{ flex: 1, padding: '0.65rem', background: '#f97316', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: '0.875rem', cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, fontFamily: 'inherit' }}>
                     ⏸ Deactivate
                   </button>
                 ) : (
                   <button onClick={() => handleActivate(selectedSupplier.id)} disabled={!!actionLoading}
-                    style={{ flex:1, padding:'0.65rem', background:'#16a34a', color:'#fff', border:'none', borderRadius:8, fontWeight:700, fontSize:'0.875rem', cursor:'pointer', opacity:actionLoading ? 0.6 : 1, fontFamily:'inherit' }}>
+                    style={{ flex: 1, padding: '0.65rem', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: '0.875rem', cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, fontFamily: 'inherit' }}>
                     ▶ Reactivate
                   </button>
                 )
               )}
+              <button onClick={() => setSelectedSupplier(null)}
+                style={{ padding: '0.65rem 1.25rem', background: 'transparent', color: muted, border: `1px solid ${border}`, borderRadius: 8, fontWeight: 700, fontSize: '0.875rem', cursor: 'pointer', fontFamily: 'inherit' }}>
+                Back to List
+              </button>
             </div>
           </div>
         </div>
-      )}
+      ) : selectedEnq ? (
+        <div style={{ width: '100%', padding: '0.25rem 0 2rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <button
+              onClick={() => setSelectedEnq(null)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                background: 'transparent',
+                border: `1px solid ${border}`,
+                color: text,
+                padding: '0.5rem 1rem',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontWeight: 700,
+                fontSize: '0.875rem'
+              }}
+            >
+              ← Back to Enquiries
+            </button>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <EnqStatusBadge status={selectedEnq.status} />
+            </div>
+          </div>
 
-      {/* ── Enquiry Detail Modal ──────────────────────────────────────────── */}
-      {selectedEnq && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:65, padding:'1rem' }} onClick={() => setSelectedEnq(null)}>
-          <div style={{ background:surface, border:`1px solid ${border}`, borderRadius:14, padding:'1.75rem', width:'100%', maxWidth:640, maxHeight:'90vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'1.25rem' }}>
+          <div style={{ background: surface, border: `1px solid ${border}`, borderRadius: 14, padding: '1.75rem', width: '100%', width: '100%', boxShadow: '0 2px 12px rgba(0,0,0,0.05)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem' }}>
               <div>
-                <div style={{ fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.07em', color:muted }}>Enquiry #{selectedEnq.id}</div>
-                <h2 style={{ margin:'0.25rem 0 0', fontSize:'1.1rem', fontWeight:700, color:text }}>{selectedEnq.category_emoji} {selectedEnq.category_name}</h2>
-              </div>
-              <div style={{ display:'flex', gap:'0.5rem', alignItems:'center' }}>
-                <EnqStatusBadge status={selectedEnq.status} />
-                <button onClick={() => setSelectedEnq(null)} style={{ background:'none', border:'none', cursor:'pointer', color:muted, fontSize:'1.25rem', lineHeight:1 }}>✕</button>
+                <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: muted }}>Enquiry #{selectedEnq.id}</div>
+                <h2 style={{ margin: '0.25rem 0 0', fontSize: '1.25rem', fontWeight: 800, color: text }}>{selectedEnq.category_emoji} {selectedEnq.category_name}</h2>
               </div>
             </div>
 
             {/* Material details */}
-            <div style={{ background:bg, borderRadius:8, padding:'1rem', marginBottom:'1rem' }}>
-              <div style={{ fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:muted, marginBottom:'0.6rem' }}>Material Details</div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.75rem' }}>
+            <div style={{ background: bg, borderRadius: 8, padding: '1rem', marginBottom: '1rem' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: muted, marginBottom: '0.6rem' }}>Material Details</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 {[
                   ['Category',      selectedEnq.category_name],
                   ['Material Type', selectedEnq.material_type || '—'],
@@ -447,69 +628,69 @@ export default function SupplierHubAdmin({ isDarkMode }) {
                   ['Quantity',      selectedEnq.quantity_text || '—'],
                   ['Delivery Date', fmtD(selectedEnq.delivery_date)],
                 ].map(([l, v]) => (
-                  <div key={l}><div style={{ fontSize:'0.65rem', color:muted, marginBottom:'0.2rem' }}>{l}</div><div style={{ fontSize:'0.875rem', fontWeight:600, color:text }}>{v}</div></div>
+                  <div key={l}><div style={{ fontSize: '0.65rem', color: muted, marginBottom: '0.2rem' }}>{l}</div><div style={{ fontSize: '0.875rem', fontWeight: 600, color: text }}>{v}</div></div>
                 ))}
               </div>
             </div>
 
             {/* Customer details */}
-            <div style={{ background:bg, borderRadius:8, padding:'1rem', marginBottom:'1rem' }}>
-              <div style={{ fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:muted, marginBottom:'0.6rem' }}>Customer Details</div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.75rem' }}>
+            <div style={{ background: bg, borderRadius: 8, padding: '1rem', marginBottom: '1rem' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: muted, marginBottom: '0.6rem' }}>Customer Details</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 {[
                   ['Name',    selectedEnq.user_name],
                   ['Phone',   selectedEnq.user_phone],
                   ['Email',   selectedEnq.user_email || '—'],
                   ['Enquiry Placed', fmtDT(selectedEnq.created_at)],
                 ].map(([l, v]) => (
-                  <div key={l}><div style={{ fontSize:'0.65rem', color:muted, marginBottom:'0.2rem' }}>{l}</div><div style={{ fontSize:'0.875rem', fontWeight:600, color:text }}>{v}</div></div>
+                  <div key={l}><div style={{ fontSize: '0.65rem', color: muted, marginBottom: '0.2rem' }}>{l}</div><div style={{ fontSize: '0.875rem', fontWeight: 600, color: text }}>{v}</div></div>
                 ))}
               </div>
             </div>
 
             {/* Address + GPS */}
             {selectedEnq.delivery_address && (
-              <div style={{ marginBottom:'0.75rem' }}>
-                <div style={{ fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:muted, marginBottom:'0.35rem' }}>Delivery Address</div>
-                <div style={{ fontSize:'0.875rem', color:text }}>{selectedEnq.delivery_address}</div>
+              <div style={{ marginBottom: '0.75rem' }}>
+                <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: muted, marginBottom: '0.35rem' }}>Delivery Address</div>
+                <div style={{ fontSize: '0.875rem', color: text }}>{selectedEnq.delivery_address}</div>
               </div>
             )}
             {selectedEnq.latitude && selectedEnq.longitude && (
-              <div style={{ marginBottom:'0.75rem' }}>
+              <div style={{ marginBottom: '0.75rem' }}>
                 <a href={`https://www.google.com/maps?q=${selectedEnq.latitude},${selectedEnq.longitude}`} target="_blank" rel="noopener noreferrer"
-                  style={{ fontSize:'0.8125rem', color:'#3b82f6', fontWeight:700, textDecoration:'underline' }}>
+                  style={{ fontSize: '0.8125rem', color: '#3b82f6', fontWeight: 700, textDecoration: 'underline' }}>
                   🗺 Open GPS Location in Google Maps
                 </a>
-                <span style={{ fontSize:'0.72rem', color:muted, marginLeft:'0.5rem' }}>({parseFloat(selectedEnq.latitude).toFixed(5)}, {parseFloat(selectedEnq.longitude).toFixed(5)})</span>
+                <span style={{ fontSize: '0.72rem', color: muted, marginLeft: '0.5rem' }}>({parseFloat(selectedEnq.latitude).toFixed(5)}, {parseFloat(selectedEnq.longitude).toFixed(5)})</span>
               </div>
             )}
 
             {/* Notes */}
             {selectedEnq.message && (
-              <div style={{ background:bg, borderRadius:8, padding:'0.875rem', marginBottom:'0.75rem' }}>
-                <div style={{ fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:muted, marginBottom:'0.35rem' }}>Additional Requirements</div>
-                <div style={{ fontSize:'0.875rem', color:text, lineHeight:1.6 }}>{selectedEnq.message}</div>
+              <div style={{ background: bg, borderRadius: 8, padding: '0.875rem', marginBottom: '0.75rem' }}>
+                <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: muted, marginBottom: '0.35rem' }}>Additional Requirements</div>
+                <div style={{ fontSize: '0.875rem', color: text, lineHeight: 1.6 }}>{selectedEnq.message}</div>
               </div>
             )}
 
             {/* Fulfilment info */}
             {selectedEnq.status === 'fulfilled' && (
-              <div style={{ background: isDarkMode?'#0a2a14':'#f0fdf4', border:'1px solid #16a34a33', borderRadius:8, padding:'0.875rem', marginBottom:'0.75rem' }}>
-                <div style={{ fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#16a34a', marginBottom:'0.35rem' }}>Fulfilment</div>
-                <div style={{ display:'flex', gap:'1.5rem', flexWrap:'wrap' }}>
-                  <span style={{ fontSize:'0.875rem', color:text }}>Amount: <strong style={{ color:'#16a34a' }}>{fmt(selectedEnq.amount_received)}</strong></span>
-                  <span style={{ fontSize:'0.875rem', color:text }}>Commission (15%): <strong style={{ color:'#f97316' }}>{fmt(selectedEnq.admin_commission)}</strong></span>
+              <div style={{ background: isDarkMode?'#0a2a14':'#f0fdf4', border: '1px solid #16a34a33', borderRadius: 8, padding: '0.875rem', marginBottom: '0.75rem' }}>
+                <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#16a34a', marginBottom: '0.35rem' }}>Fulfilment</div>
+                <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.875rem', color: text }}>Amount: <strong style={{ color: '#16a34a' }}>{fmt(selectedEnq.amount_received)}</strong></span>
+                  <span style={{ fontSize: '0.875rem', color: text }}>Commission (15%): <strong style={{ color: '#f97316' }}>{fmt(selectedEnq.admin_commission)}</strong></span>
                 </div>
-                {selectedEnq.accepted_by_shop && <div style={{ fontSize:'0.8rem', color:muted, marginTop:'0.35rem' }}>Fulfilled by: {selectedEnq.accepted_by_shop}</div>}
-                {selectedEnq.supplier_notes && <div style={{ fontSize:'0.8rem', color:muted, marginTop:'0.25rem' }}>Note: {selectedEnq.supplier_notes}</div>}
+                {selectedEnq.accepted_by_shop && <div style={{ fontSize: '0.8rem', color: muted, marginTop: '0.35rem' }}>Fulfilled by: {selectedEnq.accepted_by_shop}</div>}
+                {selectedEnq.supplier_notes && <div style={{ fontSize: '0.8rem', color: muted, marginTop: '0.25rem' }}>Note: {selectedEnq.supplier_notes}</div>}
               </div>
             )}
 
-            <div style={{ background:bg, borderRadius:8, padding:'1rem', marginBottom:'1rem' }}>
-              <div style={{ fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:muted, marginBottom:'0.6rem' }}>Assign Order</div>
-              <div style={{ display:'flex', gap:'0.5rem', flexWrap:'wrap' }}>
+            <div style={{ background: bg, borderRadius: 8, padding: '1rem', marginBottom: '1rem' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: muted, marginBottom: '0.6rem' }}>Assign Order</div>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <select value={assignmentValue} onChange={e => setAssignmentValue(e.target.value)}
-                  style={{ ...inpStyle, flex:'1 1 280px' }}>
+                  style={{ ...inpStyle, flex: '1 1 280px' }}>
                   <option value="">Select approved supplier, vendor or franchise</option>
                   {assignees.map(person => (
                     <option key={`${person.role}:${person.id}`} value={`${person.role}:${person.id}`}>
@@ -518,16 +699,16 @@ export default function SupplierHubAdmin({ isDarkMode }) {
                   ))}
                 </select>
                 <button onClick={assignMaterialOrder} disabled={!assignmentValue || orderActionLoading}
-                  style={{ padding:'0.55rem 1rem', background:accent, color:'#fff', border:'none', borderRadius:7, fontWeight:700, cursor:'pointer', opacity:(!assignmentValue || orderActionLoading) ? 0.55 : 1 }}>
+                  style={{ padding: '0.55rem 1rem', background: accent, color: '#fff', border: 'none', borderRadius: 7, fontWeight: 700, cursor: 'pointer', opacity: (!assignmentValue || orderActionLoading) ? 0.55 : 1 }}>
                   {orderActionLoading ? 'Saving…' : selectedEnq.assigned_entity_id ? 'Reassign' : 'Assign'}
                 </button>
               </div>
-              {selectedEnq.assigned_name && <div style={{ marginTop:'0.5rem', fontSize:'0.75rem', color:muted }}>Currently assigned to: <strong style={{ color:text }}>{selectedEnq.assigned_name}</strong></div>}
+              {selectedEnq.assigned_name && <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: muted }}>Currently assigned to: <strong style={{ color: text }}>{selectedEnq.assigned_name}</strong></div>}
             </div>
 
-            <div style={{ background:bg, borderRadius:8, padding:'1rem', marginBottom:'1rem' }}>
-              <div style={{ fontSize:'0.65rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:muted, marginBottom:'0.6rem' }}>Update Tracking Status</div>
-              <div style={{ display:'grid', gridTemplateColumns:'minmax(160px, .7fr) minmax(220px, 1.3fr)', gap:'0.5rem' }}>
+            <div style={{ background: bg, borderRadius: 8, padding: '1rem', marginBottom: '1rem' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: muted, marginBottom: '0.6rem' }}>Update Tracking Status</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, .7fr) minmax(220px, 1.3fr)', gap: '0.5rem' }}>
                 <select value={orderStatus} onChange={e => setOrderStatus(e.target.value)} style={inpStyle}>
                   {[
                     ['accepted','Accepted'], ['confirmed','Confirmed'], ['processing','Processing'],
@@ -539,28 +720,30 @@ export default function SupplierHubAdmin({ isDarkMode }) {
                   placeholder="Update note visible to customer" style={inpStyle} />
               </div>
               <button onClick={updateMaterialOrder} disabled={orderActionLoading}
-                style={{ marginTop:'0.6rem', padding:'0.55rem 1rem', background:'#16a34a', color:'#fff', border:'none', borderRadius:7, fontWeight:700, cursor:'pointer', opacity:orderActionLoading ? 0.55 : 1 }}>
+                style={{ marginTop: '0.6rem', padding: '0.55rem 1rem', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 7, fontWeight: 700, cursor: 'pointer', opacity: orderActionLoading ? 0.55 : 1 }}>
                 Post Status Update
               </button>
             </div>
 
-            <button onClick={() => setSelectedEnq(null)}
-              style={{ width:'100%', padding:'0.6rem', background:accent, color:'#fff', border:'none', borderRadius:8, fontWeight:700, fontSize:'0.875rem', cursor:'pointer', fontFamily:'inherit' }}>
-              Close
-            </button>
+            <div style={{ marginTop: '1.5rem', borderTop: `1px solid ${border}`, paddingTop: '1.25rem' }}>
+              <button onClick={() => setSelectedEnq(null)}
+                style={{ width: '100%', padding: '0.65rem', background: accent, color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: '0.875rem', cursor: 'pointer', fontFamily: 'inherit' }}>
+                Back to Enquiries
+              </button>
+            </div>
           </div>
         </div>
-      )}
-
+      ) : (
+        <>
       {/* ════════════════════════════════════════════════════════════════════
           PAGE SHELL
       ════════════════════════════════════════════════════════════════════ */}
       {/* Page Header */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.25rem', flexWrap:'wrap', gap:'0.75rem' }}>
         <div>
-          <h2 style={{ margin:0, fontSize:'1.1rem', fontWeight:800, color:text }}>📦 Supplier Hub</h2>
+          <h2 style={{ margin:0, fontSize:'1.1rem', fontWeight:800, color:text }}>Vendor hub</h2>
           <p style={{ margin:'0.2rem 0 0', fontSize:'0.8125rem', color:muted }}>
-            {pendingCount} pending · {activeCount} active · {suppliers.length} total suppliers · {enquiries.length} enquiries
+            {pendingCount} pending · {activeCount} active · {suppliers.length} total vendors · {enquiries.length} enquiries
           </p>
         </div>
         <button onClick={() => { fetchSuppliers(); fetchEnquiries(); }}
@@ -575,7 +758,7 @@ export default function SupplierHubAdmin({ isDarkMode }) {
         {[
           { id:'overview',   label:'Overview'   },
           { id:'enquiries',  label:'Enquiries'  },
-          { id:'suppliers',  label:'Suppliers'  },
+          { id:'suppliers',  label:'Vendors'  },
           { id:'revenue',    label:'Revenue'    },
         ].map(t => (
           <button key={t.id} style={tabBtn(t.id)} onClick={() => setTab(t.id)}>{t.label}</button>
@@ -588,28 +771,28 @@ export default function SupplierHubAdmin({ isDarkMode }) {
           {/* Stat cards */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(175px,1fr))', gap:'0.875rem', marginBottom:'1.5rem' }}>
             <StatCard label="Pending Approval"  value={pendingCount}                  sub="Awaiting review"           color="#f97316" bg={isDarkMode?'#2a1a0a':'#fff7ed'} border={isDarkMode?'#a3590033':'#fdba7433'} />
-            <StatCard label="Active Suppliers"  value={activeCount}                   sub="Currently serving"         color="#16a34a" bg={isDarkMode?'#0a2a14':'#f0fdf4'} border={isDarkMode?'#16a34a33':'#bbf7d0'} />
-            <StatCard label="Open Enquiries"    value={commission.open}               sub="Waiting for supplier"      color="var(--brand-blue-dark)" bg={isDarkMode?'#1a1a0a':'var(--brand-blue-faint)'} border={isDarkMode?'#92400e33':'#fde68a'} />
+            <StatCard label="Active Vendors"  value={activeCount}                   sub="Currently serving"         color="#16a34a" bg={isDarkMode?'#0a2a14':'#f0fdf4'} border={isDarkMode?'#16a34a33':'#bbf7d0'} />
+            <StatCard label="Open Enquiries"    value={commission.open}               sub="Waiting for vendor"      color="var(--brand-blue-dark)" bg={isDarkMode?'#1a1a0a':'var(--brand-blue-faint)'} border={isDarkMode?'#92400e33':'#fde68a'} />
             <StatCard label="Orders Fulfilled"  value={commission.fulfilled}          sub="Completed deliveries"      color="#3b82f6" bg={isDarkMode?'#0a1a2a':'#eff6ff'} border={isDarkMode?'#1e40af33':'#bfdbfe'} />
             <StatCard label="Today's Commission" value={fmt(commission.today)}        sub="15% of today's fulfil."   color="var(--brand-blue-dark)" bg={isDarkMode?'#1a1a0a':'var(--brand-blue-faint)'} border={isDarkMode?'#92400e33':'#fde68a'} />
             <StatCard label="Total Commission"   value={fmt(commission.total)}        sub="All-time 15% earned"      color="#16a34a" bg={isDarkMode?'#0a2a14':'#f0fdf4'} border={isDarkMode?'#16a34a33':'#bbf7d0'} />
-            <StatCard label="Supplier Payments"  value={fmt(commission.subscriptionRevenue)} sub={`${commission.paidSupplierPayments} successful online payment${commission.paidSupplierPayments === 1 ? '' : 's'}`} color="#7c3aed" bg={isDarkMode?'#1f1536':'#f5f3ff'} border={isDarkMode?'#7c3aed55':'#ddd6fe'} />
+            <StatCard label="Vendor Payments"  value={fmt(commission.subscriptionRevenue)} sub={`${commission.paidSupplierPayments} successful online payment${commission.paidSupplierPayments === 1 ? '' : 's'}`} color="#7c3aed" bg={isDarkMode?'#1f1536':'#f5f3ff'} border={isDarkMode?'#7c3aed55':'#ddd6fe'} />
           </div>
 
           {/* Pending suppliers */}
           {pendingCount > 0 && (
             <div style={{ background:surface, border:`2px solid #f9731644`, borderRadius:10, marginBottom:'1.25rem', overflow:'hidden' }}>
               <div style={{ padding:'0.875rem 1.25rem', borderBottom:`1px solid ${border}`, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <span style={{ fontWeight:700, fontSize:'0.875rem', color:'#f97316' }}>{pendingCount} Supplier{pendingCount > 1 ? 's' : ''} Awaiting Approval</span>
+                <span style={{ fontWeight:700, fontSize:'0.875rem', color:'#f97316' }}>{pendingCount} Vendor{pendingCount > 1 ? 's' : ''} Awaiting Approval</span>
                 <button onClick={() => setTab('suppliers')} style={{ background:'#f97316', border:'none', borderRadius:6, padding:'0.35rem 0.875rem', color:'#fff', fontSize:'0.78rem', fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>
                   Review Now →
                 </button>
               </div>
-              <div style={{ overflowX:'auto' }}>
-                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8125rem' }}>
+              <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch', width:'100%' }}>
+                <table style={{ width:'100%', minWidth:'720px', borderCollapse:'collapse', fontSize:'0.8125rem' }}>
                   <thead>
                     <tr>
-                      {['Shop Name', 'Phone', 'City', 'Registered', 'Action'].map(c => <th key={c} style={th}>{c}</th>)}
+                      {['Shop Name', 'Plan / Tier', 'Phone', 'City', 'Registered', 'Action'].map(c => <th key={c} style={th}>{c}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -619,6 +802,7 @@ export default function SupplierHubAdmin({ isDarkMode }) {
                           <div style={{ fontWeight:600, color:text }}>{s.shop_name}</div>
                           <div style={{ fontSize:'0.72rem', color:muted }}>{s.email}</div>
                         </td>
+                        <td style={td()}><SubscriptionBadge s={s} /></td>
                         <td style={td({ color:muted })}>{s.phone}</td>
                         <td style={td({ color:muted })}>{s.city || '—'}</td>
                         <td style={td({ color:muted })}>{fmtD(s.created_at)}</td>
@@ -659,8 +843,8 @@ export default function SupplierHubAdmin({ isDarkMode }) {
               <button onClick={() => setTab('enquiries')} style={{ background:'transparent', border:`1px solid ${border}`, borderRadius:6, padding:'0.3rem 0.75rem', color:muted, fontSize:'0.78rem', cursor:'pointer' }}>View All →</button>
             </div>
             {loadingEnq ? <div style={{ padding:'1.5rem', textAlign:'center', color:muted, fontSize:'0.8125rem' }}>Loading…</div> : (
-              <div style={{ overflowX:'auto' }}>
-                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8125rem' }}>
+              <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch', width:'100%' }}>
+                <table style={{ width:'100%', minWidth:'720px', borderCollapse:'collapse', fontSize:'0.8125rem' }}>
                   <thead><tr>{['Customer','Category','Type','Qty','Status','Date'].map(c=><th key={c} style={th}>{c}</th>)}</tr></thead>
                   <tbody>
                     {enquiries.slice(0, 8).map(e => (
@@ -708,10 +892,10 @@ export default function SupplierHubAdmin({ isDarkMode }) {
 
           {/* Table */}
           <div style={{ background:surface, border:`1px solid ${border}`, borderRadius:10, overflow:'hidden' }}>
-            <div style={{ overflowX:'auto' }}>
-              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8125rem' }}>
+            <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch', width:'100%' }}>
+              <table style={{ width:'100%', minWidth:'980px', borderCollapse:'collapse', fontSize:'0.8125rem' }}>
                 <thead>
-                  <tr>{['#','Customer','Category','Type / Brand','Qty','Delivery Date','Address','Status','Supplier','Amount','Commission','Date',''].map(c=><th key={c} style={th}>{c}</th>)}</tr>
+                  <tr>{['#','Customer','Category','Type / Brand','Qty','Delivery Date','Address','Status','Vendor','Amount','Commission','Date',''].map(c=><th key={c} style={th}>{c}</th>)}</tr>
                 </thead>
                 <tbody>
                   {filteredEnqs.map(e => (
@@ -767,29 +951,42 @@ export default function SupplierHubAdmin({ isDarkMode }) {
           <div style={{ display:'flex', gap:'0.75rem', marginBottom:'1rem', flexWrap:'wrap', alignItems:'center', justifyContent:'space-between' }}>
             <div style={{ display:'flex', gap:'0.4rem', flexWrap:'wrap' }}>
               {[
-                { key:'all',      label:'All'      },
-                { key:'pending',  label:'Pending'  },
-                { key:'active',   label:'Active'   },
+                { key:'all',      label:'All' },
+                { key:'paid',     label:'⭐ Paid Vendors' },
+                { key:'free',     label:'🟡 Free Trial' },
+                { key:'pending',  label:'Pending' },
+                { key:'active',   label:'Active' },
                 { key:'inactive', label:'Inactive' },
                 { key:'rejected', label:'Rejected' },
-              ].map(f => (
-                <button key={f.key} onClick={() => setSupFilter(f.key)}
-                  style={{ padding:'0.35rem 0.875rem', border:`1px solid ${supFilter===f.key ? accent : border}`, borderRadius:20, background: supFilter===f.key ? accent : 'transparent', color: supFilter===f.key ? '#fff' : muted, fontSize:'0.78rem', fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>
-                  {f.label} ({suppliers.filter(s=>f.key==='all'?true:f.key==='active'?s.status==='approved'&&s.is_active:f.key==='inactive'?s.is_active===false:s.status===f.key).length})
-                </button>
-              ))}
+              ].map(f => {
+                const count = suppliers.filter(s => {
+                  const isFree = s.is_free_tier || Number(s.package_price || 0) <= 0 || s.package_id === 'pkg_free_1m';
+                  if (f.key === 'all') return true;
+                  if (f.key === 'paid') return !isFree;
+                  if (f.key === 'free') return isFree;
+                  if (f.key === 'active') return s.status === 'approved' && s.is_active;
+                  if (f.key === 'inactive') return s.is_active === false;
+                  return s.status === f.key;
+                }).length;
+                return (
+                  <button key={f.key} onClick={() => setSupFilter(f.key)}
+                    style={{ padding:'0.35rem 0.875rem', border:`1px solid ${supFilter===f.key ? accent : border}`, borderRadius:20, background: supFilter===f.key ? accent : 'transparent', color: supFilter===f.key ? '#fff' : muted, fontSize:'0.78rem', fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>
+                    {f.label} ({count})
+                  </button>
+                );
+              })}
             </div>
             <input value={supSearch} onChange={e => setSupSearch(e.target.value)} placeholder="Search…" style={{ ...inpStyle, width:200 }} />
           </div>
 
           <div style={{ background:surface, border:`1px solid ${border}`, borderRadius:10, overflow:'hidden' }}>
-            {loadingSup ? <div style={{ padding:'2.5rem', textAlign:'center', color:muted }}>Loading suppliers…</div> : filteredSups.length === 0 ? (
-              <div style={{ padding:'2.5rem', textAlign:'center', color:muted }}>No suppliers found.</div>
+            {loadingSup ? <div style={{ padding:'2.5rem', textAlign:'center', color:muted }}>Loading vendors…</div> : filteredSups.length === 0 ? (
+              <div style={{ padding:'2.5rem', textAlign:'center', color:muted }}>No vendors found.</div>
             ) : (
-              <div style={{ overflowX:'auto' }}>
-                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8125rem' }}>
+              <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch', width:'100%' }}>
+                <table style={{ width:'100%', minWidth:'940px', borderCollapse:'collapse', fontSize:'0.8125rem' }}>
                   <thead>
-                    <tr>{['Shop Name','Products','Phone','City','Status','Orders','Revenue','Commission','Joined','Actions'].map(c=><th key={c} style={th}>{c}</th>)}</tr>
+                    <tr>{['Shop / Vendor Name','Plan / Tier','Products','Phone','City','Status','Orders','Revenue','Commission','Joined','Actions'].map(c=><th key={c} style={th}>{c}</th>)}</tr>
                   </thead>
                   <tbody>
                     {filteredSups.map(s => (
@@ -798,6 +995,7 @@ export default function SupplierHubAdmin({ isDarkMode }) {
                           <div style={{ fontWeight:600, color:text, whiteSpace:'nowrap' }}>{s.shop_name}</div>
                           <div style={{ fontSize:'0.72rem', color:muted }}>{s.email}</div>
                         </td>
+                        <td style={td()}><SubscriptionBadge s={s} /></td>
                         <td style={td({ maxWidth:180 })}>
                           {(s.product_categories||[]).length > 0 ? (
                             <div style={{ display:'flex', flexWrap:'wrap', gap:'0.2rem' }}>
@@ -883,8 +1081,8 @@ export default function SupplierHubAdmin({ isDarkMode }) {
               <span style={{ fontWeight:700, fontSize:'0.875rem', color:text }}>Per-Supplier Revenue Breakdown</span>
             </div>
             {loadingSup ? <div style={{ padding:'1.5rem', textAlign:'center', color:muted }}>Loading…</div> : (
-              <div style={{ overflowX:'auto' }}>
-                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8125rem' }}>
+              <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch', width:'100%' }}>
+                <table style={{ width:'100%', minWidth:'720px', borderCollapse:'collapse', fontSize:'0.8125rem' }}>
                   <thead>
                     <tr>{['Supplier','City','Status','Orders Fulfilled','Total Revenue','Commission (15%)','Net to Supplier','Joined'].map(c=><th key={c} style={th}>{c}</th>)}</tr>
                   </thead>
@@ -924,8 +1122,8 @@ export default function SupplierHubAdmin({ isDarkMode }) {
             <div style={{ padding:'0.875rem 1.25rem', borderBottom:`1px solid ${border}` }}>
               <span style={{ fontWeight:700, fontSize:'0.875rem', color:text }}>Fulfilled Orders — Commission Ledger</span>
             </div>
-            <div style={{ overflowX:'auto' }}>
-              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.8125rem' }}>
+            <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch', width:'100%' }}>
+              <table style={{ width:'100%', minWidth:'980px', borderCollapse:'collapse', fontSize:'0.8125rem' }}>
                 <thead>
                   <tr>{['#','Customer','Category','Type','Qty','Fulfilled By','Amount','Commission','Fulfilled On'].map(c=><th key={c} style={th}>{c}</th>)}</tr>
                 </thead>
@@ -958,6 +1156,8 @@ export default function SupplierHubAdmin({ isDarkMode }) {
             </div>
           </div>
         </>
+      )}
+    </>
       )}
     </>
   );

@@ -2,6 +2,22 @@ import pool from '@/lib/db';
 import { createInitializationGuard } from '@/lib/api-utils';
 
 export const ensureProjectOpsSchema = createInitializationGuard(async () => {
+  // Fast path: if project ops schema is already initialized, ensure performance index and return
+  const check = await pool.query(`
+    SELECT (SELECT to_regclass('public.project_payments') IS NOT NULL) AS has_ops,
+           (SELECT EXISTS (
+             SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'projects' AND column_name = 'assigned_agent_id'
+           )) AS has_cols
+  `);
+  if (check.rows[0]?.has_ops && check.rows[0]?.has_cols) {
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS projects_assigned_agent_kind_idx
+        ON projects (assigned_agent_id, project_kind);
+    `);
+    return;
+  }
+
   await pool.query(`
     ALTER TABLE projects
       ADD COLUMN IF NOT EXISTS franchise_id INTEGER,
@@ -182,7 +198,7 @@ export async function convertFinalLeadToProject(db, leadId) {
        project_notes, client_name, client_phone, client_email, deal_amount,
        project_status, source_lead_id, project_kind
      )
-     VALUES ($1,$2,$3,$4,'/logo.png','', 'small','draft',$5,NULL,$6,$7,$8,$9,$10,$11,'final',$12,'operational')
+     VALUES ($1,$2,$3,$4,'/logo.png','', 'small','draft',$5,$6,$7,$8,$9,$10,$11,$12,'final',$13,'operational')
      ON CONFLICT (source_lead_id) WHERE source_lead_id IS NOT NULL
      DO UPDATE SET
        title = EXCLUDED.title,
@@ -190,6 +206,7 @@ export async function convertFinalLeadToProject(db, leadId) {
        location = EXCLUDED.location,
        description = EXCLUDED.description,
        franchise_id = EXCLUDED.franchise_id,
+       assigned_agent_id = COALESCE(EXCLUDED.assigned_agent_id, projects.assigned_agent_id),
        project_kind = 'operational',
        project_notes = EXCLUDED.project_notes,
        client_name = EXCLUDED.client_name,
@@ -203,6 +220,7 @@ export async function convertFinalLeadToProject(db, leadId) {
       lead.city || '',
       lead.client_requirement || lead.notes || '',
       lead.assigned_franchise_id || null,
+      lead.agent_id || null,
       lead.assigned_by_role || 'agent',
       [lead.client_requirement, lead.notes].filter(Boolean).join('\n\n'),
       lead.client_name,
