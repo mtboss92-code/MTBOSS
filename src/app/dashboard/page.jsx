@@ -1281,7 +1281,7 @@ function AdminDashboard() {
           )}
 
           {activeTab === 'suppliers' && <SupplierHubAdmin isDarkMode={isDarkMode} />}
-          {(activeTab === 'users' || activeTab === 'vendors' || activeTab === 'agents') && (
+          {(activeTab === 'users' || activeTab === 'vendors' || activeTab === 'agents' || activeTab === 'contractors') && (
             <UserManagementAdmin isDarkMode={isDarkMode} initialRoleView={activeTab} />
           )}
           {activeTab === 'product-approvals' && <ProductApprovalsAdmin isDarkMode={isDarkMode} />}

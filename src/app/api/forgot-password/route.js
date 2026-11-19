@@ -44,7 +44,7 @@ export async function POST(req) {
     // Check user exists in the right table
     const table = user_type === 'supplier'
       ? 'suppliers'
-      : user_type === 'vendor'
+      : (user_type === 'vendor' || user_type === 'contractor')
         ? 'vendors'
         : user_type === 'agent'
           ? 'agents'

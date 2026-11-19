@@ -522,6 +522,7 @@ export async function POST(req) {
         }
       }
 
+      const assignedUserRole = normRole === 'contractor' ? 'Contractor' : 'Vendor';
       if (existingUser.rows.length === 0) {
         await queryWithConnectionRetry(
           `INSERT INTO users (name, email, phone, delivery_city, password, role, is_blocked, created_at, updated_at)

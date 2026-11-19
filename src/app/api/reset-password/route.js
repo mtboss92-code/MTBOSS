@@ -65,12 +65,17 @@ export async function POST(req) {
       );
     } else {
       const hash = await bcrypt.hash(new_password, 10);
-      if (user_type === 'vendor') {
-        // vendors use password_hash column
+      if (user_type === 'vendor' || user_type === 'contractor') {
+        // vendors/contractors use password_hash column in vendors table
         await pool.query(
           `UPDATE vendors SET password_hash = $1, updated_at = NOW() WHERE LOWER(TRIM(email)) = $2`,
           [hash, normalizedEmail]
         );
+        // Also update users table if user account exists
+        await pool.query(
+          `UPDATE users SET password = $1, updated_at = NOW() WHERE LOWER(TRIM(email)) = $2`,
+          [hash, normalizedEmail]
+        ).catch(() => {});
       } else if (user_type === 'agent') {
         const result = await pool.query(
           `UPDATE agents
