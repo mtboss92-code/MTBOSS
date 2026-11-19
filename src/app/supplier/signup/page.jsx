@@ -1,11 +1,14 @@
 'use client';
+import RequiredAsterisk from '../../components/RequiredAsterisk';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCities } from '@/hooks/useCities';
 import { redirectToPayU } from '@/lib/payu-client';
 
 export default function SupplierSignupPage() {
+  const router = useRouter();
   const { cities, loading: citiesLoading, error: citiesError } = useCities();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -26,9 +29,10 @@ export default function SupplierSignupPage() {
   }, []);
 
   const [plans, setPlans] = useState([
-    { id: 'pkg_6m', name: '6 Months Plan', price: '₹100', desc: 'Perfect for getting started. Complete material enquiries access.' },
-    { id: 'pkg_1y', name: '1 Year Plan', price: '₹4,999', desc: 'Most popular. Great value with a full year of enquiries.' },
-    { id: 'pkg_2y', name: '2 Years Plan', price: '₹7,999', desc: 'Best deal. Long-term peace of mind and maximum savings.' },
+    { id: 'pkg_free_1m', name: 'Free Plan', price: 'Free', rawPrice: 0, desc: 'Setup store & add products free. Customer leads & direct payouts unlock on paid plan.' },
+    { id: 'pkg_6m', name: '6 Months Plan', price: '₹2,999', rawPrice: 2999, desc: 'Perfect for getting started. Complete material enquiries access.' },
+    { id: 'pkg_1y', name: '1 Year Plan', price: '₹4,999', rawPrice: 4999, desc: 'Most popular. Great value with a full year of enquiries.' },
+    { id: 'pkg_2y', name: '2 Years Plan', price: '₹7,999', rawPrice: 7999, desc: 'Best deal. Long-term peace of mind and maximum savings.' },
   ]);
 
   useEffect(() => {
@@ -36,12 +40,15 @@ export default function SupplierSignupPage() {
       .then(r => r.json())
       .then(d => {
         if (Array.isArray(d?.packages) && d.packages.length > 0) {
-          setPlans(d.packages.map(pkg => ({
+          const mapped = d.packages.map(pkg => ({
             id: pkg.id,
             name: pkg.name,
             price: Number(pkg.price) === 0 ? 'Free' : `₹${Number(pkg.price).toLocaleString('en-IN')}`,
+            rawPrice: Number(pkg.price || 0),
             desc: pkg.description || `${pkg.name} subscription plan.`,
-          })));
+          }));
+          setPlans(mapped);
+          setFormData(prev => ({ ...prev, package_id: prev.package_id || mapped[0]?.id }));
         }
       })
       .catch(() => {});
@@ -51,8 +58,45 @@ export default function SupplierSignupPage() {
     email: '', password: '', confirmPassword: '',
     shop_name: '', phone: '',
     city: '', state: '', country: 'India', postal_code: '',
-    aadhaar_number: '', package_id: 'pkg_6m',
+    aadhaar_number: '', aadhaar_document: '',
+    pan_number: '', pan_document: '',
+    gst_number: '', gst_document: '',
+    package_id: 'pkg_free_1m',
   });
+
+  const [fileNames, setFileNames] = useState({
+    aadhaar_document: '',
+    pan_document: '',
+    gst_document: '',
+  });
+
+  const handleFileUpload = (field, file) => {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setError('File size must be under 5MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setFormData(prev => ({ ...prev, [field]: reader.result }));
+      setFileNames(prev => ({ ...prev, [field]: file.name }));
+      if (error) setError('');
+    };
+    reader.onerror = () => {
+      setError('Failed to read file');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeFile = (field) => {
+    setFormData(prev => ({ ...prev, [field]: '' }));
+    setFileNames(prev => ({ ...prev, [field]: '' }));
+  };
+
+  const selectedPlan = plans.find(p => p.id === formData.package_id);
+  const isFreePlan = selectedPlan
+    ? (selectedPlan.rawPrice === 0 || selectedPlan.price === 'Free')
+    : false;
 
   useEffect(() => {
     const html = document.documentElement;
@@ -103,6 +147,15 @@ export default function SupplierSignupPage() {
     if (s === 5) {
       if (!formData.aadhaar_number) { setError('Aadhaar number is required'); return false; }
       if (!/^\d{12}$/.test(formData.aadhaar_number.replace(/\s/g, ''))) { setError('Aadhaar must be exactly 12 digits'); return false; }
+      if (!formData.aadhaar_document) { setError('Please upload Aadhaar card document (Photo or PDF)'); return false; }
+      if (formData.pan_number && !/^[A-Z]{4,5}[0-9]{4}[A-Z]{1}$/i.test(formData.pan_number.trim())) {
+        setError('Valid PAN number is required (e.g., ABCDE1234F)');
+        return false;
+      }
+      if (formData.gst_number && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/i.test(formData.gst_number.trim())) {
+        setError('Invalid GST number format (15 characters, e.g., 07AAAAA0000A1Z5)');
+        return false;
+      }
     }
     if (s === 6) {
       if (!formData.package_id) { setError('Select a subscription plan'); return false; }
@@ -125,18 +178,30 @@ export default function SupplierSignupPage() {
         body: JSON.stringify({
           ...formData,
           aadhaar_number: formData.aadhaar_number.replace(/\s/g, ''),
+          pan_number: (formData.pan_number || '').trim().toUpperCase(),
+          gst_number: (formData.gst_number || '').trim().toUpperCase(),
           product_categories: selectedCategories, // already names from DB
         }),
       });
       const data = await res.json();
-      if (res.ok && data.success) redirectToPayU(data.payment);
-      else setError(data.error || 'Registration failed. Please try again.');
-    } catch { setError('An error occurred. Please try again.'); }
-    finally { setLoading(false); }
+      if (res.ok && data.success) {
+        if (data.payment) {
+          redirectToPayU(data.payment);
+        } else {
+          router.push(data.redirectTo || '/supplier/pending-approval');
+        }
+      } else {
+        setError(data.error || 'Registration failed. Please try again.');
+      }
+    } catch {
+      setError('An error occurred. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const TOTAL_STEPS = 6;
-  const stepTitles = ['Login Credentials', 'Shop Details', 'Address', 'Products You Sell', 'Identity Verification', 'Subscription Plan'];
+  const stepTitles = ['Login Credentials', 'Shop Details', 'Address', 'Products You Sell', 'Identity & Tax Details', 'Subscription Plan'];
 
   const c = {
     bg: dark ? '#000' : '#f5f5f7',
@@ -193,7 +258,7 @@ export default function SupplierSignupPage() {
 
       <div className="ss-root">
         <div className="ss-box">
-          <div className="ss-logo">SUPPLIER<span>HUB</span></div>
+          <div className="ss-logo">VENDOR<span>HUB</span></div>
           <div className="ss-title">Create Your Store</div>
           <div className="ss-sub">Join our marketplace and start serving customers</div>
 
@@ -209,7 +274,7 @@ export default function SupplierSignupPage() {
 
           {step === 5 && (
             <div className="ss-notice">
-              🔒 Your Aadhaar is used only for identity verification by the admin team. After approval you can log in and start receiving orders.
+              🔒 Aadhaar, PAN card, and business verification documents are reviewed confidentially by the admin team before store approval.
             </div>
           )}
 
@@ -219,16 +284,16 @@ export default function SupplierSignupPage() {
             {step === 1 && (
               <>
                 <div className="ss-field">
-                  <label className="ss-label">Email Address *</label>
-                  <input className="ss-input" type="email" name="email" value={formData.email} onChange={handleChange} placeholder="supplier@example.com" required />
+                  <label className="ss-label">Email Address <RequiredAsterisk /></label>
+                  <input className="ss-input" type="email" name="email" value={formData.email} onChange={handleChange} placeholder="Vendor@example.com" required />
                 </div>
                 <div className="ss-row">
                   <div className="ss-field">
-                    <label className="ss-label">Password *</label>
+                    <label className="ss-label">Password <RequiredAsterisk /></label>
                     <input className="ss-input" type="password" name="password" value={formData.password} onChange={handleChange} placeholder="Min 6 characters" required />
                   </div>
                   <div className="ss-field">
-                    <label className="ss-label">Confirm Password *</label>
+                    <label className="ss-label">Confirm Password <RequiredAsterisk /></label>
                     <input className="ss-input" type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} placeholder="Repeat password" required />
                   </div>
                 </div>
@@ -239,11 +304,11 @@ export default function SupplierSignupPage() {
             {step === 2 && (
               <>
                 <div className="ss-field">
-                  <label className="ss-label">Shop / Store Name *</label>
+                  <label className="ss-label">Shop / Store Name <RequiredAsterisk /></label>
                   <input className="ss-input" type="text" name="shop_name" value={formData.shop_name} onChange={handleChange} placeholder="e.g., Sharma Building Materials" required />
                 </div>
                 <div className="ss-field">
-                  <label className="ss-label">Contact Phone Number *</label>
+                  <label className="ss-label">Contact Phone Number <RequiredAsterisk /></label>
                   <input className="ss-input" type="tel" name="phone" value={formData.phone} onChange={handleChange} placeholder="9876543210" required />
                 </div>
               </>
@@ -254,7 +319,7 @@ export default function SupplierSignupPage() {
               <>
                 <div className="ss-row">
                   <div className="ss-field">
-                    <label className="ss-label">City *</label>
+                    <label className="ss-label">City <RequiredAsterisk /></label>
                     <select className="ss-input" name="city" value={formData.city} onChange={handleChange} required disabled={citiesLoading}>
                       <option value="">{citiesLoading ? 'Loading cities...' : 'Select city'}</option>
                       {cities.map(city => <option key={city} value={city}>{city}</option>)}
@@ -262,17 +327,17 @@ export default function SupplierSignupPage() {
                     {citiesError && <div className="ss-error">{citiesError}</div>}
                   </div>
                   <div className="ss-field">
-                    <label className="ss-label">State *</label>
+                    <label className="ss-label">State <RequiredAsterisk /></label>
                     <input className="ss-input" type="text" name="state" value={formData.state} onChange={handleChange} placeholder="Delhi" required />
                   </div>
                 </div>
                 <div className="ss-row">
                   <div className="ss-field">
-                    <label className="ss-label">Country *</label>
+                    <label className="ss-label">Country <RequiredAsterisk /></label>
                     <input className="ss-input" type="text" name="country" value={formData.country} onChange={handleChange} placeholder="India" required />
                   </div>
                   <div className="ss-field">
-                    <label className="ss-label">Postal Code *</label>
+                    <label className="ss-label">Postal Code <RequiredAsterisk /></label>
                     <input className="ss-input" type="text" name="postal_code" value={formData.postal_code} onChange={handleChange} placeholder="110001" required />
                   </div>
                 </div> 
@@ -327,28 +392,199 @@ export default function SupplierSignupPage() {
               </>
             )}
 
-            {/* STEP 5 — Aadhaar */}
+            {/* STEP 5 — Identity & Tax Details (Aadhaar, PAN, GST) */}
             {step === 5 && (
               <>
-                <div className="ss-field">
-                  <label className="ss-label">Aadhaar Number * (12 digits)</label>
-                  <input
-                    className="ss-input"
-                    type="text"
-                    name="aadhaar_number"
-                    value={formData.aadhaar_number}
-                    onChange={e => {
-                      const val = e.target.value.replace(/\D/g, '').slice(0, 12);
-                      setFormData(prev => ({ ...prev, aadhaar_number: val }));
-                      if (error) setError('');
-                    }}
-                    placeholder="Enter 12-digit Aadhaar number"
-                    maxLength={12}
-                    inputMode="numeric"
-                    required
-                  />
-                  <div style={{ fontSize: '.75rem', color: c.muted, marginTop: '.4rem' }}>
-                    Required for identity verification. Admin reviews this before approving your account.
+                {/* Aadhaar Section */}
+                <div style={{ background: c.inputBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.25rem', marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                    <span style={{ fontSize: '1.2rem' }}>🪪</span>
+                    <div>
+                      <div style={{ fontSize: '0.875rem', fontWeight: 700, color: c.text }}>Aadhaar Card Details <RequiredAsterisk /></div>
+                      <div style={{ fontSize: '0.72rem', color: c.muted }}>Mandatory for identity verification</div>
+                    </div>
+                  </div>
+
+                  <div className="ss-field">
+                    <label className="ss-label">Aadhaar Number * (12 digits)</label>
+                    <input
+                      className="ss-input"
+                      type="text"
+                      name="aadhaar_number"
+                      value={formData.aadhaar_number}
+                      onChange={e => {
+                        const val = e.target.value.replace(/\D/g, '').slice(0, 12);
+                        setFormData(prev => ({ ...prev, aadhaar_number: val }));
+                        if (error) setError('');
+                      }}
+                      placeholder="Enter 12-digit Aadhaar number"
+                      maxLength={12}
+                      inputMode="numeric"
+                      required
+                    />
+                  </div>
+
+                  <div className="ss-field" style={{ marginBottom: 0 }}>
+                    <label className="ss-label">Upload Aadhaar Card (Photo / PDF) <RequiredAsterisk /></label>
+                    <input
+                      type="file"
+                      id="upload-aadhaar"
+                      accept="image/*,application/pdf"
+                      style={{ display: 'none' }}
+                      onChange={e => handleFileUpload('aadhaar_document', e.target.files?.[0])}
+                    />
+                    {!formData.aadhaar_document ? (
+                      <label htmlFor="upload-aadhaar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem', padding: '0.85rem', border: `1.5px dashed ${c.border}`, borderRadius: 8, background: dark ? '#151515' : '#fafafa', cursor: 'pointer', transition: 'border-color 0.2s' }}>
+                        <span style={{ fontSize: '1.1rem' }}>📎</span>
+                        <span style={{ fontSize: '0.8rem', color: c.muted, fontWeight: 600 }}>Click to select Aadhaar document (Max 5MB)</span>
+                      </label>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', background: dark ? '#0a2a1a' : '#f0fdf4', border: '1.5px solid #10b981', borderRadius: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', overflow: 'hidden' }}>
+                          <span style={{ color: '#10b981', fontWeight: 800 }}>✓</span>
+                          {formData.aadhaar_document.startsWith('data:image') ? (
+                            <img src={formData.aadhaar_document} alt="Aadhaar" style={{ width: 34, height: 26, objectFit: 'cover', borderRadius: 4, border: '1px solid #10b981' }} />
+                          ) : (
+                            <span style={{ fontSize: '1.1rem' }}>📄</span>
+                          )}
+                          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: c.text, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                            {fileNames.aadhaar_document || 'Aadhaar document attached'}
+                          </span>
+                        </div>
+                        <button type="button" onClick={() => removeFile('aadhaar_document')} style={{ background: 'transparent', border: 'none', color: '#dc2626', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}>
+                          ✕ Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* PAN Card Section */}
+                <div style={{ background: c.inputBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.25rem', marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                    <span style={{ fontSize: '1.2rem' }}>💳</span>
+                    <div>
+                      <div style={{ fontSize: '0.875rem', fontWeight: 700, color: c.text }}>PAN Card Details (Optional)</div>
+                      <div style={{ fontSize: '0.72rem', color: c.muted }}>Optional for business & financial verification</div>
+                    </div>
+                  </div>
+
+                  <div className="ss-field">
+                    <label className="ss-label">PAN Number (Optional)</label>
+                    <input
+                      className="ss-input"
+                      type="text"
+                      name="pan_number"
+                      value={formData.pan_number}
+                      onChange={e => {
+                        const val = e.target.value.toUpperCase().slice(0, 10);
+                        setFormData(prev => ({ ...prev, pan_number: val }));
+                        if (error) setError('');
+                      }}
+                      placeholder="e.g. ABCDE1234F"
+                      maxLength={10}
+                      style={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}
+                    />
+                  </div>
+
+                  <div className="ss-field" style={{ marginBottom: 0 }}>
+                    <label className="ss-label">Upload PAN Card (Photo / PDF) (Optional)</label>
+                    <input
+                      type="file"
+                      id="upload-pan"
+                      accept="image/*,application/pdf"
+                      style={{ display: 'none' }}
+                      onChange={e => handleFileUpload('pan_document', e.target.files?.[0])}
+                    />
+                    {!formData.pan_document ? (
+                      <label htmlFor="upload-pan" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem', padding: '0.85rem', border: `1.5px dashed ${c.border}`, borderRadius: 8, background: dark ? '#151515' : '#fafafa', cursor: 'pointer', transition: 'border-color 0.2s' }}>
+                        <span style={{ fontSize: '1.1rem' }}>📎</span>
+                        <span style={{ fontSize: '0.8rem', color: c.muted, fontWeight: 600 }}>Click to select PAN Card document (Max 5MB)</span>
+                      </label>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', background: dark ? '#0a2a1a' : '#f0fdf4', border: '1.5px solid #10b981', borderRadius: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', overflow: 'hidden' }}>
+                          <span style={{ color: '#10b981', fontWeight: 800 }}>✓</span>
+                          {formData.pan_document.startsWith('data:image') ? (
+                            <img src={formData.pan_document} alt="PAN" style={{ width: 34, height: 26, objectFit: 'cover', borderRadius: 4, border: '1px solid #10b981' }} />
+                          ) : (
+                            <span style={{ fontSize: '1.1rem' }}>📄</span>
+                          )}
+                          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: c.text, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                            {fileNames.pan_document || 'PAN document attached'}
+                          </span>
+                        </div>
+                        <button type="button" onClick={() => removeFile('pan_document')} style={{ background: 'transparent', border: 'none', color: '#dc2626', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}>
+                          ✕ Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* GST Section */}
+                <div style={{ background: c.inputBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.25rem', marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '1.2rem' }}>🏢</span>
+                      <div>
+                        <div style={{ fontSize: '0.875rem', fontWeight: 700, color: c.text }}>GST Details</div>
+                        <div style={{ fontSize: '0.72rem', color: c.muted }}>Provide GST if your business is GST registered</div>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem', borderRadius: 6, background: dark ? '#222' : '#e5e7eb', color: c.muted, fontWeight: 700 }}>OPTIONAL</span>
+                  </div>
+
+                  <div className="ss-field">
+                    <label className="ss-label">GSTIN / GST Number (15 characters)</label>
+                    <input
+                      className="ss-input"
+                      type="text"
+                      name="gst_number"
+                      value={formData.gst_number}
+                      onChange={e => {
+                        const val = e.target.value.toUpperCase().slice(0, 15);
+                        setFormData(prev => ({ ...prev, gst_number: val }));
+                        if (error) setError('');
+                      }}
+                      placeholder="e.g. 07AAAAA0000A1Z5 (Optional)"
+                      maxLength={15}
+                      style={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}
+                    />
+                  </div>
+
+                  <div className="ss-field" style={{ marginBottom: 0 }}>
+                    <label className="ss-label">Upload GST Certificate (Optional)</label>
+                    <input
+                      type="file"
+                      id="upload-gst"
+                      accept="image/*,application/pdf"
+                      style={{ display: 'none' }}
+                      onChange={e => handleFileUpload('gst_document', e.target.files?.[0])}
+                    />
+                    {!formData.gst_document ? (
+                      <label htmlFor="upload-gst" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem', padding: '0.85rem', border: `1.5px dashed ${c.border}`, borderRadius: 8, background: dark ? '#151515' : '#fafafa', cursor: 'pointer', transition: 'border-color 0.2s' }}>
+                        <span style={{ fontSize: '1.1rem' }}>📎</span>
+                        <span style={{ fontSize: '0.8rem', color: c.muted, fontWeight: 600 }}>Click to select GST Certificate (Optional)</span>
+                      </label>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', background: dark ? '#0a2a1a' : '#f0fdf4', border: '1.5px solid #10b981', borderRadius: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', overflow: 'hidden' }}>
+                          <span style={{ color: '#10b981', fontWeight: 800 }}>✓</span>
+                          {formData.gst_document.startsWith('data:image') ? (
+                            <img src={formData.gst_document} alt="GST" style={{ width: 34, height: 26, objectFit: 'cover', borderRadius: 4, border: '1px solid #10b981' }} />
+                          ) : (
+                            <span style={{ fontSize: '1.1rem' }}>📄</span>
+                          )}
+                          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: c.text, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                            {fileNames.gst_document || 'GST document attached'}
+                          </span>
+                        </div>
+                        <button type="button" onClick={() => removeFile('gst_document')} style={{ background: 'transparent', border: 'none', color: '#dc2626', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}>
+                          ✕ Remove
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -364,6 +600,16 @@ export default function SupplierSignupPage() {
                       <span style={{ color: c.muted }}>Location</span>
                       <strong style={{ color: c.text }}>{formData.city}, {formData.state}</strong>
                     </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: c.muted }}>PAN</span>
+                      <strong style={{ color: c.text, letterSpacing: '0.06em' }}>{formData.pan_number || '—'}</strong>
+                    </div>
+                    {formData.gst_number && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: c.muted }}>GSTIN</span>
+                        <strong style={{ color: c.text, letterSpacing: '0.06em' }}>{formData.gst_number}</strong>
+                      </div>
+                    )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
                       <span style={{ color: c.muted, flexShrink: 0 }}>Products</span>
                       <div style={{ textAlign: 'right' }}>
@@ -385,7 +631,7 @@ export default function SupplierSignupPage() {
             {/* STEP 6 — Subscription Plan */}
             {step === 6 && (
               <>
-                <label className="ss-label">Select a subscription plan *</label>
+                <label className="ss-label">Select a subscription plan <RequiredAsterisk /></label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
                   {plans.map(pkg => (
                     <div
@@ -398,10 +644,18 @@ export default function SupplierSignupPage() {
                         borderRadius: '12px',
                         cursor: 'pointer',
                         transition: 'all 0.2s',
+                        position: 'relative',
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                        <span style={{ fontSize: '0.875rem', fontWeight: 700, color: c.text }}>{pkg.name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ fontSize: '0.875rem', fontWeight: 700, color: c.text }}>{pkg.name}</span>
+                          {pkg.rawPrice === 0 && (
+                            <span style={{ background: '#10b981', color: '#fff', fontSize: '0.65rem', padding: '0.15rem 0.45rem', borderRadius: 999, fontWeight: 800 }}>
+                              FREE PLAN
+                            </span>
+                          )}
+                        </div>
                         <span style={{ color: '#10b981', fontWeight: 800, fontSize: '0.875rem' }}>{pkg.price}</span>
                       </div>
                       <p style={{ fontSize: '0.75rem', color: c.muted, margin: 0 }}>{pkg.desc}</p>
@@ -416,7 +670,11 @@ export default function SupplierSignupPage() {
                 <button type="button" onClick={() => { setError(''); setStep(step - 1); }} className="ss-btn">← Back</button>
               )}
               <button type="submit" className="ss-btn ss-btn-primary" disabled={loading}>
-                {step === TOTAL_STEPS ? (loading ? 'Opening PayU…' : 'Pay & Submit →') : 'Continue →'}
+                {step === TOTAL_STEPS
+                  ? (loading
+                      ? (isFreePlan ? 'Registering…' : 'Opening PayU…')
+                      : (isFreePlan ? 'Complete Free Registration →' : 'Pay & Submit →'))
+                  : 'Continue →'}
               </button>
             </div>
           </form>

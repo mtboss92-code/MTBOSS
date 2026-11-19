@@ -274,20 +274,7 @@ const Content = () => {
                   attached counter for extra prep space and casual dining, suited
                   to larger villas and open plans.
                 </li>
-                <li>
-                  <strong>Open kitchen:</strong> Connected to the dining or living
-                  area, good for hosting, but needs strong ventilation planning.
-                </li>
-                <li>
-                  <strong>Closed kitchen:</strong> Separated from the rest of the
-                  home, which suits heavy Indian cooking and keeps smoke and odours
-                  contained.
-                </li>
-                <li>
-                  <strong>Dry and wet kitchen:</strong> A main kitchen for display
-                  and light cooking, with a separate wet kitchen for heavy cooking
-                  and washing.
-                </li>
+                
               </ul>
 
               <p className="mt-3">
@@ -715,20 +702,7 @@ const Content = () => {
                   units and tall units are made and fitted with accurate
                   measurement.
                 </li>
-                <li>
-                  <strong>Step 9 — Countertop and finishing:</strong> Countertop,
-                  backsplash, lighting, hardware and appliance fitting are
-                  completed and checked.
-                </li>
-                <li>
-                  <strong>Step 10 — Inspection and handover:</strong> A final
-                  walk-through and correction of small defects precede handover.
-                </li>
-                <li>
-                  <strong>Step 11 — After-handover support:</strong> Doorstep home
-                  services and renovation support are available when you need
-                  them.
-                </li>
+                
               </ul>
             </section>
 
@@ -988,21 +962,21 @@ const Content = () => {
                 <li>
                   <strong>Website:</strong>{" "}
                   <a
-                    href="https://www.mtboss.in"
+                    href="https://www.MTBOSS.in"
                     className="text-blue-600 underline"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    https://www.mtboss.in
+                    https://www.MTBOSS.in
                   </a>
                 </li>
                 <li>
                   <strong>Email:</strong>{" "}
                   <a
-                    href="mailto:mtboss2016@gmail.com"
+                    href="mailto:MTBOSS2016@gmail.com"
                     className="text-blue-600 underline"
                   >
-                    mtboss2016@gmail.com
+                    MTBOSS2016@gmail.com
                   </a>
                 </li>
                 <li>

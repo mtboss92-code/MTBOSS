@@ -3,7 +3,7 @@ import pool from '@/lib/db';
 import { jobs as defaultJobs } from '@/app/careers/data/jobs';
 import { createInitializationGuard } from '@/lib/api-utils';
 import { requireRole, unauthorized } from '@/lib/auth';
-import { resolveManagedCity } from '@/lib/cities';
+import { cleanCityName, resolveManagedCity } from '@/lib/cities';
 
 function toList(value) {
   if (Array.isArray(value)) return value.filter(Boolean);
@@ -39,6 +39,8 @@ const ensureTable = createInitializationGuard(async () => {
 
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'active'`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs (status, created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs (created_at DESC)`);
 });
 
 const seedDefaultJobs = createInitializationGuard(async () => {
@@ -183,9 +185,9 @@ export async function POST(req) {
       );
     }
 
-    const canonicalLocation = await resolveManagedCity(location);
+    const canonicalLocation = (await resolveManagedCity(location)) || cleanCityName(location);
     if (!canonicalLocation) {
-      return NextResponse.json({ success: false, error: 'Select an active city from City Management' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Location is required' }, { status: 400 });
     }
     const result = await pool.query(
       `INSERT INTO jobs (
@@ -245,9 +247,9 @@ export async function PATCH(req) {
       );
     }
 
-    const canonicalLocation = await resolveManagedCity(location);
+    const canonicalLocation = (await resolveManagedCity(location)) || cleanCityName(location);
     if (!canonicalLocation) {
-      return NextResponse.json({ success: false, error: 'Select an active city from City Management' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Location is required' }, { status: 400 });
     }
     const result = await pool.query(
       `UPDATE jobs SET

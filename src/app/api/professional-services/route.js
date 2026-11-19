@@ -5,7 +5,7 @@ import { createInitializationGuard, isDatabaseConnectionError } from '@/lib/api-
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { resolveManagedCity } from '@/lib/cities';
+import { cleanCityName, resolveManagedCity } from '@/lib/cities';
 
 export const runtime = 'nodejs';
 
@@ -201,9 +201,9 @@ export async function POST(req) {
         { status: 400 }
       );
     }
-    const canonicalCity = await resolveManagedCity(city);
+    const canonicalCity = (await resolveManagedCity(city)) || cleanCityName(city);
     if (!canonicalCity) {
-      return NextResponse.json({ error: 'Select an active city from the city list' }, { status: 400 });
+      return NextResponse.json({ error: 'City is required' }, { status: 400 });
     }
 
     const result = await pool.query(
@@ -229,7 +229,7 @@ export async function POST(req) {
     // Notify admin via email (non-blocking)
     try {
       const { sendMail } = await import('@/lib/email');
-      const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || process.env.ADMIN_EMAIL || 'mtboss2016@gmail.com';
+      const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || process.env.ADMIN_EMAIL || 'MTBOSS2016@gmail.com';
       if (adminEmail) {
         await sendMail({
           to: adminEmail,
@@ -305,9 +305,9 @@ export async function PUT(req) {
       specializations, portfolio_images, certifications,
       city, phone, email, website, instagram, linkedin,
     } = fields;
-    const canonicalCity = await resolveManagedCity(city);
+    const canonicalCity = (await resolveManagedCity(city)) || cleanCityName(city);
     if (!canonicalCity) {
-      return NextResponse.json({ error: 'Select an active city from the city list' }, { status: 400 });
+      return NextResponse.json({ error: 'City is required' }, { status: 400 });
     }
 
     const result = await pool.query(

@@ -1,5 +1,6 @@
 "use client";
 
+import { getDashboardPath, resolveWebAuthUser, syncWebLogout } from "@/lib/client-session";
 import { useState, useMemo, useRef, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -12,6 +13,8 @@ import {
   ChevronRight,
   ChevronUp,
   ClipboardList,
+  Clock,
+  CreditCard,
   Droplet,
   Grid3X3,
   Hammer,
@@ -32,14 +35,23 @@ import {
   Wrench,
   X,
   Zap,
+  Sparkles,
 } from "lucide-react";
-import { displayUnit, getProductImage, ShopImage } from "./Storefront";
+import { displayUnit, getProductImage, ShopImage, getLowestBulkPrice, getProductPromotion, getProductPromotions, getProductFreeShippingPromo, formatPromoSpend } from "./Storefront";
 import AutoSwipeGallery from "./AutoSwipeGallery";
 import { getCartStep } from "@/lib/cart-step";
-import { CATEGORY_NAV_TREE } from "./categoryNavTree";
+import { extractProductAttributes, matchesAttribute, collectUniqueAttributes } from "@/lib/product-attributes";
+import {
+  CATEGORY_NAV_TREE,
+  getMainCategories,
+  getSubcategoriesForParent,
+  productMatchesCategoryAndSub,
+  namesMatch,
+} from "./categoryNavTree";
 import GlobalSearch from "../components/GlobalSearch";
 import QuickServices from "../components/QuickServices";
 import MaterialOrdersPanel from "../components/MaterialOrdersPanel";
+
 function getCategoryIcon(name = "") {
   const val = name.toLowerCase();
   if (/cement|concrete/.test(val)) return Package;
@@ -49,8 +61,12 @@ function getCategoryIcon(name = "") {
   if (/paint|colour|primer/.test(val)) return PaintBucket;
   if (/tile|floor|marble|granite/.test(val)) return Grid3X3;
   if (/plumb|sanitary|tank/.test(val)) return Droplet;
-  if (/timber|wood|plywood|lakdi/.test(val)) return Layers;
+  if (/timber|wood|plywood|lakdi|carpentry/.test(val)) return Layers;
   if (/electric|wire|cable|switch|mcb/.test(val)) return Zap;
+  if (/hardware|furniture|hinges|lock/.test(val)) return ShieldCheck;
+  if (/chemical|waterproof/.test(val)) return Package;
+  if (/launch|arrival|new/.test(val)) return Sparkles;
+  if (/building/.test(val)) return Mountain;
   return Package;
 }
 
@@ -100,23 +116,14 @@ function getProductDiscount(product) {
   return 8; // fallback realistic bulk discount
 }
 
-function getLowestBulkPrice(product) {
-  const basePrice = Number(product?.price) || 0;
-  if (Array.isArray(product?.bulk_pricing) && product.bulk_pricing.length > 0) {
-    const valid = product.bulk_pricing.map((b) => Number(b.price)).filter((p) => p > 0);
-    if (valid.length > 0) return Math.min(...valid);
-  }
-  return basePrice > 0 ? Math.round(basePrice * 0.92) : null;
-}
-
 function MobileTopNavBar({ user, isDark, onToggleTheme, onOpenNavDrawer }) {
   return (
     <div className="mobile-top-nav-bar">
-      {/* Logo (MTboss icon + text) — left side */}
-      <Link href="/" className="mobile-top-logo" aria-label="MTBoss Home">
+      {/* Logo (MTBOSS icon + text) — left side */}
+      <Link href="/" className="mobile-top-logo" aria-label="MTBOSS Home">
         <Image
           src="/logo.png"
-          alt="MTboss"
+          alt="MTBOSS"
           width={100}
           height={30}
           priority
@@ -139,11 +146,7 @@ function MobileTopNavBar({ user, isDark, onToggleTheme, onOpenNavDrawer }) {
           <button
             type="button"
             onClick={() => {
-              if (user.role === 'vendor') window.location.href = '/vendor/dashboard';
-              else if (user.role === 'admin') window.location.href = '/dashboard';
-              else if (user.role === 'supplier') window.location.href = '/supplier/dashboard';
-              else if (user.role === 'franchise') window.location.href = '/franchise/dashboard';
-              else window.location.href = '/userdashboard';
+              window.location.href = getDashboardPath(user?.role);
             }}
             className="mobile-btn-signin"
           >
@@ -184,6 +187,7 @@ function MobileTopNavBar({ user, isDark, onToggleTheme, onOpenNavDrawer }) {
 
 export default function MobileStorefront({
   categories = [],
+  mainCategories: mainCategoriesProp = [],
   products = [],
   catalog = [],
   content = {},
@@ -206,6 +210,7 @@ export default function MobileStorefront({
   onSelectCoupon = () => ({ error: 'Coupon service unavailable' }),
   onClearCoupon = () => { },
   shippingQuote = null,
+  promotions = [], onOpenLocationModal = null,
 }) {
   const [mobileView, setMobileView] = useState("home"); // "home" | "listing" | "orders" | "account"
   const [activeCategoryId, setActiveCategoryId] = useState(null);
@@ -326,13 +331,7 @@ export default function MobileStorefront({
 
   useEffect(() => {
     const checkUser = () => {
-      const token = localStorage.getItem('token') || localStorage.getItem('vendor-token') || localStorage.getItem('admin-token') || localStorage.getItem('supplier-token') || localStorage.getItem('franchise-token');
-      const userData = localStorage.getItem('user') || localStorage.getItem('vendor') || localStorage.getItem('admin') || localStorage.getItem('supplier') || localStorage.getItem('franchise');
-      if (token && userData) {
-        try { setUser(JSON.parse(userData)); } catch (e) { }
-      } else {
-        setUser(null);
-      }
+      setUser(resolveWebAuthUser());
     };
     checkUser();
     window.addEventListener('storage', checkUser);
@@ -376,25 +375,33 @@ export default function MobileStorefront({
   };
 
   const handleLogout = async () => {
-    [
-      'token', 'user', 'admin-token', 'admin', 'vendor-token', 'vendor',
-      'supplier-token', 'supplier', 'franchise-token', 'franchise'
-    ].forEach((key) => localStorage.removeItem(key));
-    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => { });
+    await syncWebLogout();
     setUser(null);
-    window.dispatchEvent(new Event('userLoggedIn'));
     window.location.href = '/login';
   };
 
-  // Active Category object
+  const goDashboard = () => {
+    window.location.href = getDashboardPath(user?.role);
+  };
+
+  const resolvedMainCategories = useMemo(() => {
+    if (Array.isArray(mainCategoriesProp) && mainCategoriesProp.length > 0) {
+      return mainCategoriesProp;
+    }
+    return getMainCategories(categories, products);
+  }, [mainCategoriesProp, categories, products]);
+
+  // Active Category object (Main Navbar Category)
   const activeCategory = useMemo(() => {
-    if (!activeCategoryId && categories.length > 0) return categories[0];
-    return categories.find((c) => String(c.id) === String(activeCategoryId)) || categories[0] || null;
-  }, [categories, activeCategoryId]);
+    if (!activeCategoryId && resolvedMainCategories.length > 0) return resolvedMainCategories[0];
+    return resolvedMainCategories.find((c) => String(c.id) === String(activeCategoryId) || namesMatch(c.label || c.name, String(activeCategoryId)))
+      || categories.find((c) => String(c.id) === String(activeCategoryId))
+      || resolvedMainCategories[0] || null;
+  }, [resolvedMainCategories, categories, activeCategoryId]);
 
   const displayedHomeCategories = useMemo(() => {
-    return showAllCategories ? categories : categories.slice(0, 8);
-  }, [categories, showAllCategories]);
+    return showAllCategories ? resolvedMainCategories : resolvedMainCategories.slice(0, 8);
+  }, [resolvedMainCategories, showAllCategories]);
 
   useEffect(() => {
     if (mobileView === "listing") {
@@ -403,60 +410,46 @@ export default function MobileStorefront({
   }, [activeCategoryId, mobileView]);
 
   // Subcategories for active category
-  const subcategories = useMemo(() => {
-    return getSubcategoriesForCategory(activeCategory);
-  }, [activeCategory]);
+  const parentSubcategories = useMemo(() => {
+    if (!activeCategory) return [];
+    return getSubcategoriesForParent(activeCategory, categories, products);
+  }, [activeCategory, categories, products]);
 
-  // Filter chips (subcategories + brands) for right pane in listing
+  const subcategories = useMemo(() => {
+    if (parentSubcategories.length > 0) {
+      return ["All", ...parentSubcategories.map((s) => s.name)];
+    }
+    return getSubcategoriesForCategory(activeCategory);
+  }, [activeCategory, parentSubcategories]);
+
+  // Filter chips (subcategories) for right pane in listing
   const filterChips = useMemo(() => {
     if (!activeCategory) return ["All"];
-    const catProducts = catalog.filter(
-      (p) =>
-        String(p.category?.id) === String(activeCategory.id) ||
-        p.category?.name?.toLowerCase() === activeCategory.name?.toLowerCase()
-    );
-    const subcats = Array.isArray(activeCategory.subcategories) && activeCategory.subcategories.length > 0
-      ? activeCategory.subcategories.map(s => typeof s === 'object' && s !== null ? s.name : s).filter(Boolean)
-      : getSubcategoriesForCategory(activeCategory).filter((s) => s !== "All");
-    const brands = [...new Set(catProducts.map((p) => p.brand).filter(Boolean))];
-    const options = ["All", ...subcats, ...brands].filter(Boolean);
-    return [...new Set(options)].slice(0, 12);
-  }, [catalog, activeCategory]);
+    if (parentSubcategories.length > 0) {
+      return ["All", ...parentSubcategories.map((s) => s.name)];
+    }
+    const subcats = getSubcategoriesForCategory(activeCategory).filter((s) => s !== "All");
+    return ["All", ...subcats];
+  }, [activeCategory, parentSubcategories]);
 
   // Products belonging to the active category
   const categoryProducts = useMemo(() => {
     if (!activeCategory) return [];
+    const currentParent = activeCategory.label || activeCategory.name;
+    const currentSub = activeFilterChip !== "All" ? activeFilterChip : (activeSubcategory !== "All" ? activeSubcategory : null);
+
     let list = catalog.filter((product) => {
-      const matchCat =
-        String(product.category?.id) === String(activeCategory.id) ||
-        product.category?.name?.toLowerCase() === activeCategory.name?.toLowerCase();
-      return matchCat;
+      return productMatchesCategoryAndSub(product, currentParent, currentSub);
     });
-
-    // Subcategory filter
-    if (activeSubcategory && activeSubcategory !== "All") {
-      const subLower = activeSubcategory.toLowerCase();
-      const filtered = list.filter((p) => {
-        const text = `${p.name} ${p.description || ""} ${p.brand || ""}`.toLowerCase();
-        return text.includes(subLower);
-      });
-      if (filtered.length > 0) list = filtered;
-    }
-
-    // Filter chip filter (brand / specific tag)
-    if (activeFilterChip && activeFilterChip !== "All") {
-      const chipLower = activeFilterChip.toLowerCase();
-      const filtered = list.filter((p) => {
-        const text = `${p.name} ${p.brand || ""}`.toLowerCase();
-        return text.includes(chipLower);
-      });
-      if (filtered.length > 0) list = filtered;
-    }
 
     // Search filter
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
-      list = list.filter((p) => `${p.name} ${p.brand || ""} ${p.category?.name || ""}`.toLowerCase().includes(q));
+      list = list.filter((p) => {
+        const attrs = extractProductAttributes(p);
+        const attrText = `${attrs.thickness} ${attrs.size} ${attrs.type} ${attrs.color} ${attrs.material}`.toLowerCase();
+        return `${p.name} ${p.brand || ""} ${p.category?.name || ""} ${attrText}`.toLowerCase().includes(q);
+      });
     }
 
     return list;
@@ -466,7 +459,11 @@ export default function MobileStorefront({
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.trim().toLowerCase();
-    return catalog.filter((p) => `${p.name} ${p.brand || ""} ${p.category?.name || ""}`.toLowerCase().includes(q));
+    return catalog.filter((p) => {
+      const attrs = extractProductAttributes(p);
+      const attrText = `${attrs.thickness} ${attrs.size} ${attrs.type} ${attrs.color} ${attrs.material}`.toLowerCase();
+      return `${p.name} ${p.brand || ""} ${p.category?.name || ""} ${attrText}`.toLowerCase().includes(q);
+    });
   }, [catalog, searchQuery]);
 
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
@@ -510,7 +507,7 @@ export default function MobileStorefront({
   const cartTotalWithShipping = cartFinalTotal + (shippingQuote?.totalShipping || 0);
 
   const navigateToCategory = (cat) => {
-    setActiveCategoryId(cat.id);
+    setActiveCategoryId(cat?.id || cat?.label || cat?.name || null);
     setActiveSubcategory("All");
     setActiveFilterChip("All");
     setMobileView("listing");
@@ -547,7 +544,7 @@ export default function MobileStorefront({
               <button
                 type="button"
                 className="mobile-delivery-dropdown"
-                onClick={() => setCitySheetOpen(true)}
+                onClick={() => (onOpenLocationModal ? onOpenLocationModal() : setCitySheetOpen(true))}
                 aria-label="Select delivery city"
               >
                 <span className="mobile-delivery-dot" />
@@ -569,15 +566,16 @@ export default function MobileStorefront({
                 <span className="mobile-wallet-pill">₹{walletBalance.toLocaleString('en-IN')}</span>
               </Link>
 
-              <button
-                type="button"
+              <Link
+                href="/ShopNow/cart"
+                id="mobile-store-cart-btn"
+                data-cart-target="mobile-cart"
                 className="mobile-header-icon-btn mobile-cart-btn"
-                onClick={() => setMobileCartOpen(true)}
                 aria-label="Shopping Cart"
               >
                 <ShoppingCart size={21} />
                 {cartCategoryCount > 0 && <span className="mobile-cart-badge">{cartCategoryCount}</span>}
-              </button>
+              </Link>
             </div>
           </div>
 
@@ -680,15 +678,15 @@ export default function MobileStorefront({
                 <Search size={20} />
               </button>
 
-              <button
-                type="button"
+              <Link
+                href="/ShopNow/cart"
+                data-cart-target="mobile-listing-cart"
                 className="mobile-listing-action-btn mobile-cart-btn"
-                onClick={() => setMobileCartOpen(true)}
                 aria-label="Shopping Cart"
               >
                 <ShoppingCart size={20} />
                 {cartCategoryCount > 0 && <span className="mobile-cart-badge">{cartCategoryCount}</span>}
-              </button>
+              </Link>
             </div>
           </div>
 
@@ -705,7 +703,7 @@ export default function MobileStorefront({
                   placeholder={`Search in ${activeCategory?.name}...`}
                 />
                 {searchQuery && (
-                  <button type="button" onClick={() => setSearchQuery("")} className="mobile-search-clear">
+                  <button type="button" onClick={() => setSearchQuery("")} className="mobile-search-clear" aria-label="Clear search" title="Clear search">
                     <X size={14} />
                   </button>
                 )}
@@ -746,20 +744,20 @@ export default function MobileStorefront({
                   ? "Track status & delivery"
                   : user?.name
                     ? `Logged in as ${user.name}`
-                    : "MT-Boss Customer Profile"}
+                    : "MTBOSS Customer Profile"}
               </span>
             </div>
 
             <div className="mobile-listing-header-actions">
-              <button
-                type="button"
+              <Link
+                href="/ShopNow/cart"
+                data-cart-target="mobile-listing-cart"
                 className="mobile-listing-action-btn mobile-cart-btn"
-                onClick={() => setMobileCartOpen(true)}
                 aria-label="Shopping Cart"
               >
                 <ShoppingCart size={20} />
                 {cartCategoryCount > 0 && <span className="mobile-cart-badge">{cartCategoryCount}</span>}
-              </button>
+              </Link>
             </div>
           </div>
         </header>
@@ -809,6 +807,8 @@ export default function MobileStorefront({
                           selectedCity={selectedCity}
                           categories={categories}
                           isDark={isDark}
+                          promotions={promotions}
+                          shippingSettings={activeShipping}
                         />
                       );
                     })}
@@ -857,7 +857,7 @@ export default function MobileStorefront({
                       <span className="mobile-section-kicker">EXPLORE MATERIALS</span>
                       <h2 className="mobile-section-heading">Shop by Category</h2>
                     </div>
-                    {categories.length > 8 ? (
+                    {resolvedMainCategories.length > 8 ? (
                       <button
                         type="button"
                         className="mobile-category-header-view-all"
@@ -866,11 +866,11 @@ export default function MobileStorefront({
                         {showAllCategories ? (
                           <>View less <ChevronUp size={14} /></>
                         ) : (
-                          <>View all ({categories.length}) <ChevronRight size={14} /></>
+                          <>View all ({resolvedMainCategories.length}) <ChevronRight size={14} /></>
                         )}
                       </button>
                     ) : (
-                      <span className="mobile-section-tag">Direct Supply</span>
+                      <span className="mobile-section-tag">8 Departments</span>
                     )}
                   </div>
 
@@ -884,14 +884,15 @@ export default function MobileStorefront({
                     <>
                       <div className="mobile-category-grid">
                         {displayedHomeCategories.map((cat) => {
-                          const Icon = getCategoryIcon(cat.name);
+                          const catLabel = cat.label || cat.name;
+                          const Icon = getCategoryIcon(catLabel);
                           return (
                             <button
                               key={cat.id}
                               type="button"
                               className="mobile-category-chip-btn"
                               onClick={() => navigateToCategory(cat)}
-                              aria-label={`Browse ${cat.name}`}
+                              aria-label={`Browse ${catLabel}`}
                             >
                               <div className="mobile-category-square">
                                 {(() => {
@@ -903,7 +904,7 @@ export default function MobileStorefront({
                                     return (
                                       <AutoSwipeGallery
                                         images={catImgs}
-                                        alt={cat.name}
+                                        alt={catLabel}
                                         delay={3000}
                                         showDots={false}
                                         style={{ width: '100%', height: '100%', borderRadius: '10px', overflow: 'hidden' }}
@@ -914,13 +915,13 @@ export default function MobileStorefront({
                                   return <Icon size={26} className={isDark ? "text-sky-300" : "text-[#12283F]"} />;
                                 })()}
                               </div>
-                              <span className="mobile-category-label">{cat.name}</span>
+                              <span className="mobile-category-label">{catLabel}</span>
                             </button>
                           );
                         })}
                       </div>
 
-                      {categories.length > 8 && (
+                      {resolvedMainCategories.length > 8 && (
                         <div className="mobile-category-view-all-wrap">
                           <button
                             type="button"
@@ -972,6 +973,8 @@ export default function MobileStorefront({
                           freeDeliveryMinOrder={freeDeliveryMinOrder}
                           categories={categories}
                           isDark={isDark}
+                          promotions={promotions}
+                          shippingSettings={activeShipping}
                         />
                       );
                     })}
@@ -992,9 +995,11 @@ export default function MobileStorefront({
           <div className="mobile-two-pane-container">
             {/* LEFT PANE: Narrow (≈78px) vertical scrollable sidebar showing all remaining categories */}
             <aside className="mobile-left-sidebar" aria-label="Categories">
-              {categories.map((cat) => {
-                const isActive = String(cat.id) === String(activeCategory?.id);
-                const CatIcon = getCategoryIcon(cat.name);
+              {resolvedMainCategories.map((cat) => {
+                const catLabel = cat.label || cat.name;
+                const isActive = String(cat.id) === String(activeCategory?.id) || namesMatch(catLabel, activeCategory?.label || activeCategory?.name);
+                const CatIcon = getCategoryIcon(catLabel);
+                const catImg = cat.image || (Array.isArray(cat.images) ? cat.images[0] : null);
                 return (
                   <button
                     key={cat.id}
@@ -1002,19 +1007,19 @@ export default function MobileStorefront({
                     type="button"
                     className={`mobile-subcat-btn ${isActive ? "is-active" : ""}`}
                     onClick={() => {
-                      setActiveCategoryId(cat.id);
+                      setActiveCategoryId(cat.id || catLabel);
                       setActiveSubcategory("All");
                       setActiveFilterChip("All");
                       rightFeedRef.current?.scrollTo({ top: 0, behavior: "instant" });
                     }}
-                    aria-label={cat.name}
+                    aria-label={catLabel}
                     aria-current={isActive ? "true" : undefined}
                   >
                     <div className="mobile-subcat-icon-wrap">
-                      {cat.image ? (
+                      {catImg ? (
                         <ShopImage
-                          src={cat.image}
-                          alt={cat.name}
+                          src={catImg}
+                          alt={catLabel}
                           width={26}
                           height={26}
                           className="object-cover rounded-md"
@@ -1024,7 +1029,7 @@ export default function MobileStorefront({
                         <CatIcon size={20} />
                       )}
                     </div>
-                    <span className="mobile-subcat-text">{cat.name}</span>
+                    <span className="mobile-subcat-text">{catLabel}</span>
                   </button>
                 );
               })}
@@ -1137,6 +1142,8 @@ export default function MobileStorefront({
                         freeDeliveryMinOrder={freeDeliveryMinOrder}
                         categories={categories}
                         isDark={isDark}
+                        promotions={promotions}
+                        shippingSettings={activeShipping}
                       />
                     );
                   })}
@@ -1157,7 +1164,7 @@ export default function MobileStorefront({
               <button
                 type="button"
                 onClick={() => {
-                  if (categories.length > 0) navigateToCategory(activeCategory || categories[0]);
+                  if (resolvedMainCategories.length > 0) navigateToCategory(activeCategory || resolvedMainCategories[0]);
                 }}
                 className="text-xs font-bold text-[#E4572E] hover:underline"
               >
@@ -1172,7 +1179,7 @@ export default function MobileStorefront({
             <div className="mt-4 p-3.5 bg-sky-50 dark:bg-sky-950/40 rounded-xl border border-sky-100 dark:border-sky-900/40 flex items-center justify-between text-xs">
               <div>
                 <p className="font-bold text-[#12283F] dark:text-sky-200">Need order or dispatch help?</p>
-                <p className="text-gray-500 dark:text-gray-400">MT-Boss Dispatch Desk is available 24x7</p>
+                <p className="text-gray-500 dark:text-gray-400">MTBOSS Dispatch Desk is available 24x7</p>
               </div>
               <a
                 href="tel:+919458410866"
@@ -1197,7 +1204,7 @@ export default function MobileStorefront({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="font-extrabold text-sm text-[#12283F] dark:text-white truncate">
-                        {user.name || 'MT-Boss Customer'}
+                        {user.name || 'MTBOSS Customer'}
                       </h3>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                         {user.role || 'Customer'}
@@ -1216,7 +1223,7 @@ export default function MobileStorefront({
                   <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-zinc-800 text-gray-500 mx-auto flex items-center justify-center mb-2">
                     <User size={22} />
                   </div>
-                  <h3 className="font-extrabold text-sm text-[#12283F] dark:text-white">Welcome to MT-Boss</h3>
+                  <h3 className="font-extrabold text-sm text-[#12283F] dark:text-white">Welcome to MTBOSS</h3>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-xs mx-auto">
                     Sign in to track orders, manage site deliveries and unlock exclusive wholesale cashback.
                   </p>
@@ -1245,7 +1252,7 @@ export default function MobileStorefront({
                   <Wallet size={20} />
                 </div>
                 <div>
-                  <span className="text-[11px] text-white/70 block uppercase tracking-wider font-semibold">MT-Boss Wallet</span>
+                  <span className="text-[11px] text-white/70 block uppercase tracking-wider font-semibold">MTBOSS Wallet</span>
                   <strong className="text-base font-black">₹0.00 <span className="text-xs font-normal text-white/80">Cashback</span></strong>
                 </div>
               </div>
@@ -1282,7 +1289,7 @@ export default function MobileStorefront({
 
               <button
                 type="button"
-                onClick={() => setCitySheetOpen(true)}
+                onClick={() => (onOpenLocationModal ? onOpenLocationModal() : setCitySheetOpen(true))}
                 className="w-full flex items-center justify-between p-3 text-left hover:bg-gray-50 dark:hover:bg-zinc-800/50 rounded-xl transition-colors"
               >
                 <div className="flex items-center gap-3">
@@ -1324,13 +1331,7 @@ export default function MobileStorefront({
               <div className="pt-1 flex flex-col gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (user.role === 'vendor') window.location.href = '/vendor/dashboard';
-                    else if (user.role === 'admin') window.location.href = '/dashboard';
-                    else if (user.role === 'supplier') window.location.href = '/supplier/dashboard';
-                    else if (user.role === 'franchise') window.location.href = '/franchise/dashboard';
-                    else window.location.href = '/userdashboard';
-                  }}
+                  onClick={goDashboard}
                   className="w-full py-2.5 bg-[#12283F] text-white text-xs font-bold rounded-xl"
                 >
                   Open Full Dashboard
@@ -1366,8 +1367,8 @@ export default function MobileStorefront({
           type="button"
           className={`mobile-nav-item ${mobileView === "listing" ? "is-active" : ""}`}
           onClick={() => {
-            if (categories.length > 0) {
-              navigateToCategory(activeCategory || categories[0]);
+            if (resolvedMainCategories.length > 0) {
+              navigateToCategory(activeCategory || resolvedMainCategories[0]);
             } else {
               setMobileView("listing");
             }
@@ -1424,6 +1425,16 @@ export default function MobileStorefront({
             </div>
 
             <div className="mobile-city-list">
+              <button
+                type="button"
+                className="w-full mb-3 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-blue-600 text-white font-semibold text-xs shadow-sm hover:bg-blue-700 transition-colors"
+                onClick={() => {
+                  setCitySheetOpen(false);
+                  if (onOpenLocationModal) onOpenLocationModal();
+                }}
+              >
+                <MapPin size={15} /> Auto-Detect My Location (GPS)
+              </button>
               {[...new Set(cities)].map((city) => {
                 const isSelected = selectedCity?.toLowerCase() === city.toLowerCase();
                 return (
@@ -1459,7 +1470,7 @@ export default function MobileStorefront({
               <div className="w-14 h-14 rounded-full bg-[#12283F] text-white flex items-center justify-center mx-auto mb-3">
                 <Wallet size={28} />
               </div>
-              <h3 className="text-lg font-black text-[#12283F]">MTBoss Cashback Wallet</h3>
+              <h3 className="text-lg font-black text-[#12283F]">MTBOSS Cashback Wallet</h3>
               <p className="text-3xl font-extrabold text-[#2196F3] my-2">₹0.00</p>
               <div className="bg-[#F8FAFC] border border-gray-200 rounded-xl p-3 text-left mt-3 text-xs text-gray-600 space-y-1.5">
                 <p className="flex items-center gap-2">
@@ -1486,7 +1497,7 @@ export default function MobileStorefront({
       {/* ─────────────────────────────────────────────────────────────
           MOBILE CART BOTTOM DRAWER
          ───────────────────────────────────────────────────────────── */}
-      {mobileCartOpen && (
+      {false && mobileCartOpen && (
         <div className="mobile-sheet-backdrop" onClick={() => setMobileCartOpen(false)}>
           <div className="mobile-cart-drawer" onClick={(e) => e.stopPropagation()}>
             <div className="mobile-cart-drawer-head">
@@ -1839,7 +1850,7 @@ export default function MobileStorefront({
               >
                 <Image
                   src="/logo.png"
-                  alt="MTboss"
+                  alt="MTBOSS"
                   width={100}
                   height={30}
                   className="h-7 w-auto object-contain"
@@ -1869,11 +1880,7 @@ export default function MobileStorefront({
                     type="button"
                     onClick={() => {
                       setNavDrawerOpen(false);
-                      if (user.role === 'vendor') window.location.href = '/vendor/dashboard';
-                      else if (user.role === 'admin') window.location.href = '/dashboard';
-                      else if (user.role === 'supplier') window.location.href = '/supplier/dashboard';
-                      else if (user.role === 'franchise') window.location.href = '/franchise/dashboard';
-                      else window.location.href = '/userdashboard';
+                      window.location.href = getDashboardPath(user?.role);
                     }}
                     className="mobile-btn-signin"
                   >
@@ -2107,11 +2114,7 @@ export default function MobileStorefront({
                     type="button"
                     onClick={() => {
                       setNavDrawerOpen(false);
-                      if (user.role === 'vendor') window.location.href = '/vendor/dashboard';
-                      else if (user.role === 'admin') window.location.href = '/dashboard';
-                      else if (user.role === 'supplier') window.location.href = '/supplier/dashboard';
-                      else if (user.role === 'franchise') window.location.href = '/franchise/dashboard';
-                      else window.location.href = '/userdashboard';
+                      window.location.href = getDashboardPath(user?.role);
                     }}
                     className="block w-full py-2.5 text-center text-sm font-bold text-[#0284c7] border border-[#0284c7] rounded-lg hover:bg-sky-50 transition-colors"
                   >
@@ -2150,16 +2153,29 @@ function MobileProductCard({
   freeDeliveryMinOrder = 50000,
   categories = [],
   isDark = false,
+  promotions = [], onOpenLocationModal = null,
+  shippingSettings = null,
 }) {
   const price = Number(product.price) || 0;
   const hasFixedPrice = price > 0;
   const mrp = Number(product.compare_at_price) || (price > 0 ? Math.round(price * 1.08) : 0);
   const discount = getProductDiscount(product);
   const bulkPrice = getLowestBulkPrice(product);
+  const activePromos = getProductPromotions(product, promotions);
   const productImage = getProductImage(product, product.category || categories);
 
-  const canOrder = !product.fromSupplier || Number(product.quantity) > 0;
+  const normalizedCity = (selectedCity || "").trim().toLowerCase();
+  const cityUnavailable = Boolean(
+    normalizedCity &&
+    Array.isArray(product.available_cities) &&
+    product.available_cities.length > 0 &&
+    !product.available_cities.some((c) => c && c.trim().toLowerCase() === normalizedCity)
+  );
+  const outOfStock = Boolean(product.fromSupplier && Number(product.quantity) <= 0);
+  const canOrder = !cityUnavailable && !outOfStock;
   const isAvailable = canOrder;
+  const detailId = product.product_id || (String(product.id).startsWith('supplier-') ? product.id.replace('supplier-', '') : product.id);
+  const detailHref = `/ShopNow/${detailId}`;
 
   return (
     <article className="mobile-product-card">
@@ -2170,10 +2186,9 @@ function MobileProductCard({
 
       <div className="mobile-card-inner">
         {/* Left: Product image */}
-        <button
-          type="button"
+        <Link
+          href={detailHref}
           className="mobile-card-img-btn"
-          onClick={() => onDetails?.(product)}
           aria-label={`View ${product.name} details`}
         >
           {productImage ? (
@@ -2190,57 +2205,82 @@ function MobileProductCard({
               <Package size={34} className={isDark ? "text-slate-400" : "text-[#12283F]/60"} />
             </div>
           )}
-        </button>
+        </Link>
 
         {/* Right: Product details */}
         <div className="mobile-card-details">
-          {/* Free delivery tag */}
-          {isFreeDeliveryActive && (
-            <div className="mobile-free-delivery-tag">
-              <Truck size={12} className="text-[#0D9488] flex-shrink-0" />
-              <span>
-                {freeDeliveryMinOrder > 0
-                  ? `Free Delivery on orders above ₹${freeDeliveryMinOrder.toLocaleString("en-IN")}`
-                  : "Free Delivery on all orders"}
-              </span>
+          {/* Promotion / Delivery Strip */}
+          <div className="store-card-promo-section">
+            <div className="store-delivery-trust-row" style={{ fontSize: '9.5px', gap: '6px' }}>
+              <span className="store-trust-item"><CreditCard size={10} /> Pay on Delivery</span>
             </div>
-          )}
+            {activePromos.length > 0 ? (
+              activePromos.slice(0, 1).map((promo) => {
+                const isFreeShipping = promo.promo_type === 'free_shipping';
+                const promoSpendText = promo.min_cart_value > 0 ? `on orders above ${formatPromoSpend(promo.min_cart_value)}` : 'on all orders';
+                return (
+                  <div key={promo.id || promo.name} className="store-card-blue-promo" style={{ fontSize: '9.5px', padding: '2px 6px' }}>
+                    <Truck size={10} />
+                    <span>{isFreeShipping ? 'Free Delivery' : `${promo.discount_value}% Discount`} {promoSpendText}</span>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="store-card-blue-promo" style={{ fontSize: '9.5px', padding: '2px 6px' }}>
+                <Truck size={10} />
+                <span>Free Delivery on orders above ₹500</span>
+              </div>
+            )}
+          </div>
 
           {/* Product Name */}
-          <button
-            type="button"
+          <Link
+            href={detailHref}
             className="mobile-card-title-btn"
-            onClick={() => onDetails?.(product)}
           >
             <h3 className="mobile-card-title">{product.name}</h3>
-          </button>
+          </Link>
+
+          {cityUnavailable && (
+            <span className="text-[10px] font-bold text-red-600 block mt-0.5">Out of stock in {selectedCity}</span>
+          )}
+          {outOfStock && !cityUnavailable && (
+            <span className="text-[10px] font-bold text-red-600 block mt-0.5">Currently out of stock</span>
+          )}
 
           {/* Price & MRP (only if rate is added) */}
           {hasFixedPrice && (
             <div className="mobile-card-price-row">
-              <strong className="mobile-card-price">
-                ₹{price.toLocaleString("en-IN")}
-                <span className="mobile-card-unit"> / {displayUnit(product.unit)}</span>
-              </strong>
               {mrp > price && (
                 <del className="mobile-card-mrp">₹{mrp.toLocaleString("en-IN")}</del>
               )}
+              <strong className="mobile-card-price">
+                ₹{price.toLocaleString("en-IN")}
+              </strong>
             </div>
           )}
 
-          {/* Bulk Prices link (only if bulk pricing is configured) */}
+          {/* Bulk Prices link (Image 2 style: Unlock Bulk Prices of ₹...) */}
           {bulkPrice ? (
             <button
               type="button"
-              className="mobile-bulk-link"
+              className="store-bulk-price-link"
               onClick={() => onQuote(product)}
             >
-              Bulk Prices at ₹{bulkPrice.toLocaleString("en-IN")} →
+              Unlock Bulk Prices of ₹{bulkPrice.toLocaleString("en-IN")}
             </button>
           ) : null}
 
-          {/* Action Row: Stepper or Add button */}
-          <div className="mobile-card-actions">
+          {/* Action Row: Buy Now + Stepper or Add button */}
+          <div className="mobile-card-actions" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
+            <button
+              type="button"
+              className={`mobile-buy-btn ${!isAvailable ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={!isAvailable}
+              onClick={() => onBuy(product)}
+            >
+              Buy Now
+            </button>
             {quantity > 0 ? (
               <div className="mobile-stepper" aria-label={`${product.name} quantity in cart`}>
                 <button
@@ -2262,11 +2302,11 @@ function MobileProductCard({
             ) : (
               <button
                 type="button"
-                className="mobile-add-btn"
+                className={`mobile-add-btn ${!isAvailable ? 'opacity-50 cursor-not-allowed' : ''}`}
                 disabled={!isAvailable}
-                onClick={() => onAdd(product)}
+                onClick={(e) => onAdd(product, e)}
               >
-                <Plus size={14} /> ADD
+                {!isAvailable ? "Out of Stock" : "Add"}
               </button>
             )}
           </div>

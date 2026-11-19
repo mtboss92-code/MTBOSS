@@ -3,6 +3,7 @@ import PDFDocument from 'pdfkit';
 import { formatIndianPhone, toIndianPhoneTel, normalizePhoneSearch } from './phone-utils.js';
 import { creditDeliveredCashback, reverseOrderCashback } from './cashback/service.js';
 import { releaseWalletRedeem } from './wallet/redeem.js';
+import { ensureMaterialOrderSchema } from './material-orders.js';
 
 export { formatIndianPhone, toIndianPhoneTel, normalizePhoneSearch };
 
@@ -10,153 +11,156 @@ export { formatIndianPhone, toIndianPhoneTel, normalizePhoneSearch };
  * Format currency with Indian Lakh formatting (en-IN)
  */
 export function formatINR(val, fallback = 'N/A') {
-  if (val === null || val === undefined || val === '' || isNaN(Number(val))) return fallback;
-  const num = Number(val);
-  return '₹' + num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (val === null || val === undefined || val === '' || isNaN(Number(val))) return fallback;
+    const num = Number(val);
+    return '₹' + num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /**
  * Format date in DD-MM-YYYY
  */
 export function formatDateDDMMYYYY(val, fallback = 'N/A') {
-  if (!val) return fallback;
-  const d = new Date(val);
-  if (isNaN(d.getTime())) return fallback;
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  return `${day}-${month}-${year}`;
+    if (!val) return fallback;
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return fallback;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}-${month}-${year}`;
 }
 
 /**
  * Format date and time in DD-MM-YYYY HH:mm
  */
 export function formatDateTimeDDMMYYYY(val, fallback = 'N/A') {
-  if (!val) return fallback;
-  const d = new Date(val);
-  if (isNaN(d.getTime())) return fallback;
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  const hours = String(d.getHours()).padStart(2, '0');
-  const minutes = String(d.getMinutes()).padStart(2, '0');
-  return `${day}-${month}-${year} ${hours}:${minutes}`;
+    if (!val) return fallback;
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return fallback;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${day}-${month}-${year} ${hours}:${minutes}`;
 }
 
 export const VALID_ORDER_STATUSES = [
-  'open',
-  'accepted',
-  'confirmed',
-  'processing',
-  'packed',
-  'dispatched',
-  'out_for_delivery',
-  'delivered',
-  'fulfilled',
-  'completed',
-  'cancelled',
-  'rejected',
-  'payment_failed',
+    'open',
+    'accepted',
+    'confirmed',
+    'processing',
+    'packed',
+    'dispatched',
+    'out_for_delivery',
+    'delivered',
+    'fulfilled',
+    'completed',
+    'cancelled',
+    'rejected',
+    'payment_failed',
 ];
 
 /**
  * Fetch orders list with single aggregated SQL query & child subqueries
  */
 export async function getAdminOrders({
-  page = 1,
-  limit = 25,
-  orderId = '',
-  customerName = '',
-  phone = '',
-  status = '',
-  city = '',
-  createdFrom = '',
-  createdTo = '',
-  deliveryFrom = '',
-  deliveryTo = '',
-  type = 'all', // 'all' | 'shop_order' | 'service_booking'
-  exportCsv = false,
+    page = 1,
+    limit = 25,
+    orderId = '',
+    customerName = '',
+    phone = '',
+    status = '',
+    city = '',
+    createdFrom = '',
+    createdTo = '',
+    deliveryFrom = '',
+    deliveryTo = '',
+    type = 'all', // 'all' | 'shop_order' | 'service_booking'
+    exportCsv = false,
 } = {}) {
-  const p = Math.max(1, parseInt(page, 10) || 1);
-  const l = exportCsv ? 50000 : Math.max(1, Math.min(100, parseInt(limit, 10) || 25));
-  const offset = (p - 1) * l;
+    await ensureMaterialOrderSchema();
 
-  const conditions = [];
-  const params = [];
-  let paramIdx = 1;
+    const p = Math.max(1, parseInt(page, 10) || 1);
+    const l = exportCsv ? 50000 : Math.max(1, Math.min(100, parseInt(limit, 10) || 25));
+    const offset = (p - 1) * l;
 
-  if (orderId && orderId.trim()) {
-    conditions.push(`(unified.order_id ILIKE $${paramIdx})`);
-    params.push(`%${orderId.trim()}%`);
-    paramIdx++;
-  }
+    const conditions = [];
+    const params = [];
+    let paramIdx = 1;
 
-  if (customerName && customerName.trim()) {
-    conditions.push(`(unified.customer_name ILIKE $${paramIdx})`);
-    params.push(`%${customerName.trim()}%`);
-    paramIdx++;
-  }
-
-  if (phone && phone.trim()) {
-    const cleanDigits = normalizePhoneSearch(phone);
-    if (cleanDigits) {
-      conditions.push(`(REGEXP_REPLACE(unified.customer_phone, '\\D', '', 'g') LIKE $${paramIdx} OR unified.customer_phone ILIKE $${paramIdx + 1})`);
-      params.push(`%${cleanDigits}%`);
-      params.push(`%${phone.trim()}%`);
-      paramIdx += 2;
-    } else {
-      conditions.push(`(unified.customer_phone ILIKE $${paramIdx})`);
-      params.push(`%${phone.trim()}%`);
-      paramIdx++;
+    if (orderId && orderId.trim()) {
+        conditions.push(`(unified.order_id ILIKE $${paramIdx})`);
+        params.push(`%${orderId.trim()}%`);
+        paramIdx++;
     }
-  }
 
-  if (status && status.trim() && status.toLowerCase() !== 'all') {
-    conditions.push(`(LOWER(unified.status) = LOWER($${paramIdx}))`);
-    params.push(status.trim().toLowerCase());
-    paramIdx++;
-  }
+    if (customerName && customerName.trim()) {
+        conditions.push(`(unified.customer_name ILIKE $${paramIdx})`);
+        params.push(`%${customerName.trim()}%`);
+        paramIdx++;
+    }
 
-  if (city && city.trim() && city.toLowerCase() !== 'all') {
-    conditions.push(`(unified.delivery_city ILIKE $${paramIdx})`);
-    params.push(`%${city.trim()}%`);
-    paramIdx++;
-  }
+    if (phone && phone.trim()) {
+        const cleanDigits = normalizePhoneSearch(phone);
+        if (cleanDigits) {
+            conditions.push(`(REGEXP_REPLACE(unified.customer_phone, '\\D', '', 'g') LIKE $${paramIdx} OR unified.customer_phone ILIKE $${paramIdx + 1})`);
+            params.push(`%${cleanDigits}%`);
+            params.push(`%${phone.trim()}%`);
+            paramIdx += 2;
+        } else {
+            conditions.push(`(unified.customer_phone ILIKE $${paramIdx})`);
+            params.push(`%${phone.trim()}%`);
+            paramIdx++;
+        }
+    }
 
-  if (createdFrom && createdFrom.trim()) {
-    conditions.push(`(unified.created_at >= $${paramIdx}::date)`);
-    params.push(createdFrom.trim());
-    paramIdx++;
-  }
+    if (status && status.trim() && status.toLowerCase() !== 'all') {
+        conditions.push(`(LOWER(unified.status) = LOWER($${paramIdx}))`);
+        params.push(status.trim().toLowerCase());
+        paramIdx++;
+    }
 
-  if (createdTo && createdTo.trim()) {
-    conditions.push(`(unified.created_at <= ($${paramIdx}::date + INTERVAL '1 day'))`);
-    params.push(createdTo.trim());
-    paramIdx++;
-  }
+    if (city && city.trim() && city.toLowerCase() !== 'all') {
+        conditions.push(`(unified.delivery_city ILIKE $${paramIdx})`);
+        params.push(`%${city.trim()}%`);
+        paramIdx++;
+    }
 
-  if (deliveryFrom && deliveryFrom.trim()) {
-    conditions.push(`(unified.delivery_date >= $${paramIdx}::date)`);
-    params.push(deliveryFrom.trim());
-    paramIdx++;
-  }
+    if (createdFrom && createdFrom.trim()) {
+        conditions.push(`(unified.created_at >= $${paramIdx}::date)`);
+        params.push(createdFrom.trim());
+        paramIdx++;
+    }
 
-  if (deliveryTo && deliveryTo.trim()) {
-    conditions.push(`(unified.delivery_date <= ($${paramIdx}::date + INTERVAL '1 day'))`);
-    params.push(deliveryTo.trim());
-    paramIdx++;
-  }
+    if (createdTo && createdTo.trim()) {
+        conditions.push(`(unified.created_at <= ($${paramIdx}::date + INTERVAL '1 day'))`);
+        params.push(createdTo.trim());
+        paramIdx++;
+    }
 
-  if (type === 'shop_order') {
-    conditions.push(`(unified.type = 'shop_order')`);
-  } else if (type === 'service_booking') {
-    conditions.push(`(unified.type = 'service_booking')`);
-  }
+    if (deliveryFrom && deliveryFrom.trim()) {
+        conditions.push(`(unified.delivery_date >= $${paramIdx}::date)`);
+        params.push(deliveryFrom.trim());
+        paramIdx++;
+    }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    if (deliveryTo && deliveryTo.trim()) {
+        conditions.push(`(unified.delivery_date <= ($${paramIdx}::date + INTERVAL '1 day'))`);
+        params.push(deliveryTo.trim());
+        paramIdx++;
+    }
 
-  // List/summary: slim rows (no events / supplier / vendor JSON — those load on detail)
-  const shopQuery = `
+    if (type === 'shop_order') {
+        conditions.push(`(unified.type = 'shop_order')`);
+    } else if (type === 'service_booking') {
+        conditions.push(`(unified.type = 'service_booking')`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // List/summary: slim rows (no events / supplier / vendor JSON — those load on detail)
+    const shopQuery = `
+
     SELECT
       me.id,
       COALESCE(me.order_reference, 'MO-' || me.id) AS order_id,
@@ -178,8 +182,12 @@ export async function getAdminOrders({
       me.coupon_code,
       me.coupon_discount,
       CAST(COALESCE(me.grand_total, me.product_total, 0) AS NUMERIC) AS grand_total,
-      CAST(COALESCE(me.wallet_used, 0) AS NUMERIC) AS wallet_used,
-      COALESCE(me.wallet_redeem_status, 'NONE') AS wallet_redeem_status,
+      -- Read wallet fields through the row JSON so this order-history query
+      -- remains available while an older production database is awaiting the
+      -- wallet-redemption migration. to_jsonb returns NULL for an absent
+      -- key, while it returns the real column value after migration.
+      COALESCE(NULLIF(to_jsonb(me) ->> 'wallet_used', '')::NUMERIC, 0::NUMERIC) AS wallet_used,
+      COALESCE(NULLIF(to_jsonb(me) ->> 'wallet_redeem_status', ''), 'NONE') AS wallet_redeem_status,
       me.delivery_address,
       COALESCE(me.selected_city, 'N/A') AS delivery_city,
       me.delivery_date,
@@ -188,15 +196,25 @@ export async function getAdminOrders({
       me.order_intent,
       COALESCE(me.message, me.status_note) AS notes,
       me.accepted_by_supplier_id,
+      sm.supplier_id AS free_tier_vendor_id,
+      COALESCE(ps.shop_name, '') AS free_vendor_shop_name,
+      COALESCE(ps.phone, '') AS free_vendor_phone,
+      COALESCE(ps.email, '') AS free_vendor_email,
+      CASE 
+        WHEN sm.supplier_id > 0 AND (COALESCE(ps.package_price, 0) <= 0 OR ps.package_id = 'pkg_free_1m') THEN TRUE
+        ELSE FALSE
+      END AS is_free_tier_order,
       NULL::JSON AS supplier,
       NULL::JSON AS vendor,
       '[]'::JSON AS events,
       1 AS type_sort_priority
     FROM material_enquiries me
     LEFT JOIN users u ON u.id = me.user_id
+    LEFT JOIN supplier_materials sm ON sm.id = me.product_id
+    LEFT JOIN suppliers ps ON ps.id = sm.supplier_id
   `;
 
-  const serviceQuery = `
+    const serviceQuery = `
     SELECT
       sb.id,
       COALESCE(sb.booking_reference, 'BK-' || sb.id) AS order_id,
@@ -228,6 +246,11 @@ export async function getAdminOrders({
       'service' AS order_intent,
       COALESCE(sb.user_notes, sb.admin_notes, sb.vendor_notes) AS notes,
       NULL::INT AS accepted_by_supplier_id,
+      NULL::INT AS free_tier_vendor_id,
+      ''::TEXT AS free_vendor_shop_name,
+      ''::TEXT AS free_vendor_phone,
+      ''::TEXT AS free_vendor_email,
+      FALSE AS is_free_tier_order,
       NULL::JSON AS supplier,
       NULL::JSON AS vendor,
       '[]'::JSON AS events,
@@ -237,17 +260,24 @@ export async function getAdminOrders({
     LEFT JOIN quick_services qs ON qs.id = sb.quick_service_id
   `;
 
-  // Combine based on type selection. Shop orders are prioritized first
+  // Skip the unused half of the UNION when the caller filters by type.
+  const unifiedBody =
+    type === 'shop_order'
+      ? shopQuery
+      : type === 'service_booking'
+        ? serviceQuery
+        : `${shopQuery}
+      UNION ALL
+      ${serviceQuery}`;
+
   const unionSql = `
     WITH unified AS (
-      ${shopQuery}
-      UNION ALL
-      ${serviceQuery}
+      ${unifiedBody}
     )
   `;
 
-  // Summary aggregation query over filtered dataset
-  const summarySql = `
+    // Summary aggregation query over filtered dataset
+    const summarySql = `
     ${unionSql}
     SELECT
       COUNT(*)::INT AS total_orders,
@@ -259,8 +289,8 @@ export async function getAdminOrders({
     ${whereClause}
   `;
 
-  // Paginated items query: sort newest first, shop orders first on equal timestamps
-  const itemsSql = `
+    // Paginated items query: sort newest first, shop orders first on equal timestamps
+    const itemsSql = `
     ${unionSql}
     SELECT *
     FROM unified
@@ -269,10 +299,10 @@ export async function getAdminOrders({
     LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
   `;
 
-  const [summaryResult, itemsResult] = await Promise.all([
-    pool.query(summarySql, params),
-    pool.query(itemsSql, [...params, l, offset]),
-  ]);
+  // Sequential on purpose: Neon pooler max is small; twin heavy UNION queries
+  // in parallel often exhaust waitingCount during dashboard/orders loads.
+  const summaryResult = await pool.query(summarySql, params);
+  const itemsResult = await pool.query(itemsSql, [...params, l, offset]);
 
   const summary = summaryResult.rows[0] || {
     total_orders: 0,
@@ -309,14 +339,14 @@ export async function getAdminOrders({
  * @param {{ type?: 'shop_order'|'service_booking' }} [options] - Limit lookup to one order kind
  */
 export async function getAdminOrderById(orderId, { type } = {}) {
-  if (!orderId) return null;
-  const isNumber = /^\d+$/.test(String(orderId).trim());
-  const ref = String(orderId).trim();
-  const tryShop = !type || type === 'shop_order';
-  const tryService = !type || type === 'service_booking';
+    if (!orderId) return null;
+    const isNumber = /^\d+$/.test(String(orderId).trim());
+    const ref = String(orderId).trim();
+    const tryShop = !type || type === 'shop_order';
+    const tryService = !type || type === 'service_booking';
 
-  // Try shop orders first (material_enquiries)
-  const shopSql = `
+    // Try shop orders first (material_enquiries)
+    const shopSql = `
     SELECT
       me.id,
       COALESCE(me.order_reference, 'MO-' || me.id) AS order_id,
@@ -339,8 +369,10 @@ export async function getAdminOrderById(orderId, { type } = {}) {
       me.coupon_code,
       me.coupon_discount,
       CAST(COALESCE(me.grand_total, me.product_total, 0) AS NUMERIC) AS grand_total,
-      CAST(COALESCE(me.wallet_used, 0) AS NUMERIC) AS wallet_used,
-      COALESCE(me.wallet_redeem_status, 'NONE') AS wallet_redeem_status,
+      -- See the list query above: this keeps invoice/detail lookup compatible
+      -- with a database that has not yet received the wallet migration.
+      COALESCE(NULLIF(to_jsonb(me) ->> 'wallet_used', '')::NUMERIC, 0::NUMERIC) AS wallet_used,
+      COALESCE(NULLIF(to_jsonb(me) ->> 'wallet_redeem_status', ''), 'NONE') AS wallet_redeem_status,
       me.delivery_address,
       COALESCE(me.selected_city, 'N/A') AS delivery_city,
       me.delivery_date,
@@ -350,6 +382,14 @@ export async function getAdminOrderById(orderId, { type } = {}) {
       me.order_intent,
       COALESCE(me.message, me.status_note) AS notes,
       me.accepted_by_supplier_id,
+      sm.supplier_id AS free_tier_vendor_id,
+      COALESCE(ps.shop_name, '') AS free_vendor_shop_name,
+      COALESCE(ps.phone, '') AS free_vendor_phone,
+      COALESCE(ps.email, '') AS free_vendor_email,
+      CASE 
+        WHEN sm.supplier_id > 0 AND (COALESCE(ps.package_price, 0) <= 0 OR ps.package_id = 'pkg_free_1m') THEN TRUE
+        ELSE FALSE
+      END AS is_free_tier_order,
       (
         SELECT row_to_json(sup)
         FROM (
@@ -377,21 +417,23 @@ export async function getAdminOrderById(orderId, { type } = {}) {
       ) AS events
     FROM material_enquiries me
     LEFT JOIN users u ON u.id = me.user_id
+    LEFT JOIN supplier_materials sm ON sm.id = me.product_id
+    LEFT JOIN suppliers ps ON ps.id = sm.supplier_id
     WHERE ${isNumber ? 'me.id = $1 OR me.order_reference = $2' : 'me.order_reference = $1'}
     LIMIT 1
   `;
 
-  if (tryShop) {
-    const shopParams = isNumber ? [parseInt(ref, 10), ref] : [ref];
-    const shopRes = await pool.query(shopSql, shopParams);
-    if (shopRes.rows.length > 0) {
-      return normalizeOrderBillData(shopRes.rows[0]);
+    if (tryShop) {
+        const shopParams = isNumber ? [parseInt(ref, 10), ref] : [ref];
+        const shopRes = await pool.query(shopSql, shopParams);
+        if (shopRes.rows.length > 0) {
+            return normalizeOrderBillData(shopRes.rows[0]);
+        }
+        if (type === 'shop_order') return null;
     }
-    if (type === 'shop_order') return null;
-  }
 
-  // Try service bookings
-  const serviceSql = `
+    // Try service bookings
+    const serviceSql = `
     SELECT
       sb.id,
       COALESCE(sb.booking_reference, 'BK-' || sb.id) AS order_id,
@@ -413,6 +455,8 @@ export async function getAdminOrderById(orderId, { type } = {}) {
       NULL::TEXT AS coupon_code,
       0::NUMERIC AS coupon_discount,
       CAST(COALESCE(sb.total_amount, sb.final_amount, sb.base_amount, 0) AS NUMERIC) AS grand_total,
+      0::NUMERIC AS wallet_used,
+      'NONE' AS wallet_redeem_status,
       sb.payment_status,
       sb.payment_gateway,
       sb.payment_txnid,
@@ -451,32 +495,32 @@ export async function getAdminOrderById(orderId, { type } = {}) {
     LIMIT 1
   `;
 
-  if (tryService) {
-    const serviceParams = isNumber ? [parseInt(ref, 10), ref] : [ref];
-    const serviceRes = await pool.query(serviceSql, serviceParams);
-    if (serviceRes.rows.length > 0) {
-      return normalizeOrderBillData(serviceRes.rows[0]);
+    if (tryService) {
+        const serviceParams = isNumber ? [parseInt(ref, 10), ref] : [ref];
+        const serviceRes = await pool.query(serviceSql, serviceParams);
+        if (serviceRes.rows.length > 0) {
+            return normalizeOrderBillData(serviceRes.rows[0]);
+        }
     }
-  }
 
-  return null;
+    return null;
 }
 
 const INVOICE_ORDER_TYPES = new Set(['shop_order', 'service_booking']);
 
 export function canActorAccessOrderInvoice(order, actor) {
-  if (!order || !actor) return false;
-  if (actor.role === 'admin') return true;
-  if (actor.role !== 'user') return false;
+    if (!order || !actor) return false;
+    if (actor.role === 'admin') return true;
+    if (actor.role !== 'user') return false;
 
-  const actorId = Number(actor.id);
-  if (order.customer_id != null && Number(order.customer_id) === actorId) return true;
+    const actorId = Number(actor.id);
+    if (order.customer_id != null && Number(order.customer_id) === actorId) return true;
 
-  const actorEmail = String(actor.email || '').trim().toLowerCase();
-  const orderEmail = String(order.customer_email || '').trim().toLowerCase();
-  if (actorEmail && orderEmail && orderEmail !== 'n/a' && actorEmail === orderEmail) return true;
+    const actorEmail = String(actor.email || '').trim().toLowerCase();
+    const orderEmail = String(order.customer_email || '').trim().toLowerCase();
+    if (actorEmail && orderEmail && orderEmail !== 'n/a' && actorEmail === orderEmail) return true;
 
-  return false;
+    return false;
 }
 
 /**
@@ -484,172 +528,167 @@ export function canActorAccessOrderInvoice(order, actor) {
  * @returns {Promise<{ order }|{ forbidden: true }|null>}
  */
 export async function getOrderForInvoiceRequest(orderId, type, actor) {
-  const normalizedType = String(type || '').trim();
-  if (!INVOICE_ORDER_TYPES.has(normalizedType)) {
-    throw new Error('Invalid order type. Use shop_order or service_booking.');
-  }
+    const normalizedType = String(type || '').trim();
+    if (!INVOICE_ORDER_TYPES.has(normalizedType)) {
+        throw new Error('Invalid order type. Use shop_order or service_booking.');
+    }
 
-  const order = await getAdminOrderById(orderId, { type: normalizedType });
-  if (!order) return null;
-  if (!canActorAccessOrderInvoice(order, actor)) return { forbidden: true };
-  return { order };
+    const order = await getAdminOrderById(orderId, { type: normalizedType });
+    if (!order) return null;
+    if (!canActorAccessOrderInvoice(order, actor)) return { forbidden: true };
+    return { order };
 }
 
 /**
  * Normalizes order bill data with graceful fallbacks ("N/A") for older or missing fields
  */
 function normalizeOrderBillData(row) {
-  // Construct clean items table array
-  const unitPrice = row.indicative_unit_price !== null && row.indicative_unit_price !== undefined ? parseFloat(row.indicative_unit_price) : null;
-  const lineTotal = row.product_total !== null && row.product_total !== undefined ? parseFloat(row.product_total) : (unitPrice !== null ? unitPrice : null);
-  const grandTotal = row.grand_total !== null && row.grand_total !== undefined ? parseFloat(row.grand_total) : (lineTotal !== null ? lineTotal : null);
-  const shippingCost = row.shipping_cost !== null && row.shipping_cost !== undefined ? parseFloat(row.shipping_cost) : 0;
-  const couponDiscount = row.coupon_discount !== null && row.coupon_discount !== undefined ? parseFloat(row.coupon_discount) : 0;
-  const walletUsed = row.wallet_used !== null && row.wallet_used !== undefined ? parseFloat(row.wallet_used) : 0;
+    // Construct clean items table array
+    const unitPrice = row.indicative_unit_price !== null && row.indicative_unit_price !== undefined ? parseFloat(row.indicative_unit_price) : null;
+    const lineTotal = row.product_total !== null && row.product_total !== undefined ? parseFloat(row.product_total) : (unitPrice !== null ? unitPrice : null);
+    const grandTotal = row.grand_total !== null && row.grand_total !== undefined ? parseFloat(row.grand_total) : (lineTotal !== null ? lineTotal : null);
+    const shippingCost = row.shipping_cost !== null && row.shipping_cost !== undefined ? parseFloat(row.shipping_cost) : 0;
+    const couponDiscount = row.coupon_discount !== null && row.coupon_discount !== undefined ? parseFloat(row.coupon_discount) : 0;
+    const walletUsed = row.wallet_used !== null && row.wallet_used !== undefined ? parseFloat(row.wallet_used) : 0;
 
-  let paymentMode = 'Pay on Delivery / Standard';
-  if (row.payment_status === 'PAID') {
-    const gateway = row.payment_gateway || 'Online';
-    paymentMode = row.payment_txnid ? `Paid via ${gateway} · Ref ${row.payment_txnid}` : `Paid via ${gateway}`;
-  } else if (row.payment_status === 'FREE') {
-    paymentMode = 'Free slot / No charge';
-  } else if (row.notes?.includes('Payment preference:')) {
-    paymentMode = row.notes.split('Payment preference:')[1]?.trim() || paymentMode;
-  }
+    let paymentMode = 'Pay on Delivery / Standard';
+    if (row.payment_status === 'PAID') {
+        const gateway = row.payment_gateway || 'Online';
+        paymentMode = row.payment_txnid ? `Paid via ${gateway} · Ref ${row.payment_txnid}` : `Paid via ${gateway}`;
+    } else if (row.payment_status === 'FREE') {
+        paymentMode = 'Free slot / No charge';
+    } else if (row.notes && row.notes.includes('Payment preference:')) {
+        const paymentPreference = row.notes.split('Payment preference:')[1];
+        paymentMode = paymentPreference ? paymentPreference.trim() || paymentMode : paymentMode;
+    }
 
-  const items = [
-    {
-      name: row.product_name || 'N/A',
-      category: row.category_name || 'N/A',
-      subcategory: row.subcategory_name || 'N/A',
-      brand: row.brand_company || 'N/A',
-      unit: row.order_unit || 'N/A',
-      quantity: row.quantity_text || '1',
-      rate: unitPrice !== null && !isNaN(unitPrice) ? unitPrice : null,
-      amount: lineTotal !== null && !isNaN(lineTotal) ? lineTotal : null,
-    },
-  ];
+    const items = [{
+        name: row.product_name || 'N/A',
+        category: row.category_name || 'N/A',
+        subcategory: row.subcategory_name || 'N/A',
+        brand: row.brand_company || 'N/A',
+        unit: row.order_unit || 'N/A',
+        quantity: row.quantity_text || '1',
+        rate: unitPrice !== null && !isNaN(unitPrice) ? unitPrice : null,
+        amount: lineTotal !== null && !isNaN(lineTotal) ? lineTotal : null,
+    }, ];
 
-  return {
-    ...row,
-    unit_price: unitPrice,
-    product_total: lineTotal,
-    shipping_cost: shippingCost,
-    coupon_discount: couponDiscount,
-    wallet_used: walletUsed,
-    grand_total: grandTotal,
-    items,
-    payment_mode: paymentMode,
-  };
+    return {
+        ...row,
+        unit_price: unitPrice,
+        product_total: lineTotal,
+        shipping_cost: shippingCost,
+        coupon_discount: couponDiscount,
+        wallet_used: walletUsed,
+        grand_total: grandTotal,
+        items,
+        payment_mode: paymentMode,
+    };
 }
 
 /**
  * Update order status and record in pm_audit_log & material_order_events
  */
 export async function updateAdminOrderStatus({
-  orderId,
-  type = 'shop_order',
-  newStatus,
-  notes = '',
-  adminUser = {},
+    orderId,
+    type = 'shop_order',
+    newStatus,
+    notes = '',
+    adminUser = {},
 }) {
-  const normalizedStatus = String(newStatus || '').trim().toLowerCase();
-  if (!VALID_ORDER_STATUSES.includes(normalizedStatus)) {
-    throw new Error(`Invalid status: "${newStatus}". Allowed values: ${VALID_ORDER_STATUSES.join(', ')}`);
-  }
+    const normalizedStatus = String(newStatus || '').trim().toLowerCase();
+    if (!VALID_ORDER_STATUSES.includes(normalizedStatus)) {
+        throw new Error(`Invalid status: "${newStatus}". Allowed values: ${VALID_ORDER_STATUSES.join(', ')}`);
+    }
 
-  const adminIdentifier = `${adminUser.email || adminUser.name || 'admin'} (#${adminUser.id || 0})`;
-  const client = await pool.connect();
+    const adminIdentifier = `${adminUser.email || adminUser.name || 'admin'} (#${adminUser.id || 0})`;
+    const client = await pool.connect();
 
-  try {
-    await client.query('BEGIN');
+    try {
+        await client.query('BEGIN');
 
-    let oldData = null;
-    let recordId = null;
-    let updatedRow = null;
+        let oldData = null;
+        let recordId = null;
+        let updatedRow = null;
 
-    if (type === 'service_booking') {
-      const isNum = /^\d+$/.test(String(orderId).trim());
-      const findSql = isNum
-        ? 'SELECT * FROM service_bookings WHERE id = $1 OR booking_reference = $2 FOR UPDATE'
-        : 'SELECT * FROM service_bookings WHERE booking_reference = $1 FOR UPDATE';
-      const findParams = isNum ? [parseInt(orderId, 10), String(orderId).trim()] : [String(orderId).trim()];
-      const findRes = await client.query(findSql, findParams);
+        if (type === 'service_booking') {
+            const isNum = /^\d+$/.test(String(orderId).trim());
+            const findSql = isNum ?
+                'SELECT * FROM service_bookings WHERE id = $1 OR booking_reference = $2 FOR UPDATE' :
+                'SELECT * FROM service_bookings WHERE booking_reference = $1 FOR UPDATE';
+            const findParams = isNum ? [parseInt(orderId, 10), String(orderId).trim()] : [String(orderId).trim()];
+            const findRes = await client.query(findSql, findParams);
 
-      if (findRes.rows.length === 0) {
-        throw new Error('Service booking not found');
-      }
+            if (findRes.rows.length === 0) {
+                throw new Error('Service booking not found');
+            }
 
-      oldData = findRes.rows[0];
-      recordId = oldData.id;
+            oldData = findRes.rows[0];
+            recordId = oldData.id;
 
-      const updateRes = await client.query(
-        `UPDATE service_bookings
+            const updateRes = await client.query(
+                `UPDATE service_bookings
          SET status = $1, admin_notes = COALESCE($2, admin_notes), updated_at = NOW()
          WHERE id = $3
-         RETURNING *`,
-        [normalizedStatus.toUpperCase(), notes || null, recordId]
-      );
-      updatedRow = updateRes.rows[0];
+         RETURNING *`, [normalizedStatus.toUpperCase(), notes || null, recordId]
+            );
+            updatedRow = updateRes.rows[0];
 
-      // Record in pm_audit_log
-      await client.query(
-        `INSERT INTO pm_audit_log
+            // Record in pm_audit_log
+            await client.query(
+                `INSERT INTO pm_audit_log
          (table_name, record_id, action, changed_by, old_data, new_data, created_at)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, NOW())`,
-        [
-          'service_bookings',
-          recordId,
-          'status_change',
-          adminIdentifier,
-          JSON.stringify({ status: oldData.status, admin_notes: oldData.admin_notes }),
-          JSON.stringify({ status: updatedRow.status, admin_notes: updatedRow.admin_notes }),
-        ]
-      );
-    } else {
-      // Shop / Material order
-      const isNum = /^\d+$/.test(String(orderId).trim());
-      const findSql = isNum
-        ? 'SELECT * FROM material_enquiries WHERE id = $1 OR order_reference = $2 FOR UPDATE'
-        : 'SELECT * FROM material_enquiries WHERE order_reference = $1 FOR UPDATE';
-      const findParams = isNum ? [parseInt(orderId, 10), String(orderId).trim()] : [String(orderId).trim()];
-      const findRes = await client.query(findSql, findParams);
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, NOW())`, [
+                    'service_bookings',
+                    recordId,
+                    'status_change',
+                    adminIdentifier,
+                    JSON.stringify({ status: oldData.status, admin_notes: oldData.admin_notes }),
+                    JSON.stringify({ status: updatedRow.status, admin_notes: updatedRow.admin_notes }),
+                ]
+            );
+        } else {
+            // Shop / Material order
+            const isNum = /^\d+$/.test(String(orderId).trim());
+            const findSql = isNum ?
+                'SELECT * FROM material_enquiries WHERE id = $1 OR order_reference = $2 FOR UPDATE' :
+                'SELECT * FROM material_enquiries WHERE order_reference = $1 FOR UPDATE';
+            const findParams = isNum ? [parseInt(orderId, 10), String(orderId).trim()] : [String(orderId).trim()];
+            const findRes = await client.query(findSql, findParams);
 
-      if (findRes.rows.length === 0) {
-        throw new Error('Material order not found');
-      }
+            if (findRes.rows.length === 0) {
+                throw new Error('Material order not found');
+            }
 
-      oldData = findRes.rows[0];
-      recordId = oldData.id;
+            oldData = findRes.rows[0];
+            recordId = oldData.id;
 
-      const updateRes = await client.query(
-        `UPDATE material_enquiries
+            const updateRes = await client.query(
+                `UPDATE material_enquiries
          SET status = $1, status_note = COALESCE($2, status_note), updated_at = NOW()
          WHERE id = $3
-         RETURNING *`,
-        [normalizedStatus, notes || null, recordId]
-      );
-      updatedRow = updateRes.rows[0];
+         RETURNING *`, [normalizedStatus, notes || null, recordId]
+            );
+            updatedRow = updateRes.rows[0];
 
-      // Record in material_order_events
-      await client.query(
-        `INSERT INTO material_order_events
+            // Record in material_order_events
+            await client.query(
+                `INSERT INTO material_order_events
          (order_id, status, title, note, actor_role, actor_id, actor_name, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
-        [
-          recordId,
-          normalizedStatus,
-          `Status changed to ${normalizedStatus.replace(/_/g, ' ').toUpperCase()}`,
-          notes || `Admin updated order status to ${normalizedStatus}`,
-          'admin',
-          adminUser.id || 0,
-          adminUser.name || 'Admin',
-        ]
-      );
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`, [
+                    recordId,
+                    normalizedStatus,
+                    `Status changed to ${normalizedStatus.replace(/_/g, ' ').toUpperCase()}`,
+                    notes || `Admin updated order status to ${normalizedStatus}`,
+                    'admin',
+                    adminUser.id || 0,
+                    adminUser.name || 'Admin',
+                ]
+            );
 
-      // Record in pm_audit_log
-      await client.query(
-        `INSERT INTO pm_audit_log
+            // Record in pm_audit_log
+            await client.query(
+                `INSERT INTO pm_audit_log
          (table_name, record_id, action, changed_by, old_data, new_data, created_at)
          VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, NOW())`,
         [
@@ -668,98 +707,130 @@ export async function updateAdminOrderStatus({
       } else if (['cancelled', 'returned'].includes(normalizedStatus)) {
         await reverseOrderCashback({ orderId: recordId, reason: `Order marked as ${normalizedStatus}`, client });
         await releaseWalletRedeem(recordId, client);
+
+        // Restore inventory if order was active and intent was 'buy'
+        if (oldData.product_id && oldData.order_intent === 'buy' && !['cancelled', 'returned'].includes(String(oldData.status || '').toLowerCase())) {
+          try {
+            const returnQty = Math.max(1, Math.round(Number.parseFloat(String(oldData.quantity_text || '1')) || 1));
+            const pRes = await client.query('SELECT id, quantity, low_stock_threshold FROM supplier_materials WHERE id = $1 FOR UPDATE', [oldData.product_id]);
+            if (pRes.rows.length > 0) {
+              const currentStock = Number(pRes.rows[0].quantity) || 0;
+              const newStock = currentStock + returnQty;
+              const threshold = Number(pRes.rows[0].low_stock_threshold) || 10;
+              const newStatus = newStock <= 0 ? 'out_of_stock' : (newStock <= threshold ? 'low_stock' : 'in_stock');
+              await client.query('UPDATE supplier_materials SET quantity = $1, stock_status = $2, updated_at = NOW() WHERE id = $3', [newStock, newStatus, oldData.product_id]);
+              await client.query(
+                `INSERT INTO stock_movements (
+                  product_id, movement_type, quantity, previous_stock, new_stock,
+                  reference_type, reference_id, reason, performed_by, performed_by_role, notes, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+                [
+                  oldData.product_id,
+                  'return',
+                  returnQty,
+                  currentStock,
+                  newStock,
+                  'order',
+                  String(recordId),
+                  `Order #${oldData.order_reference || recordId} marked as ${normalizedStatus}`,
+                  adminUser.id || 0,
+                  'admin',
+                  `Stock restored due to order ${normalizedStatus} by ${adminIdentifier}`,
+                ]
+              );
+            }
+          } catch (rErr) {
+            console.warn('Could not restore stock for cancelled order:', rErr.message);
+          }
+        }
       }
     }
 
-    await client.query('COMMIT');
-    return {
-      orderId: recordId,
-      oldStatus: oldData.status,
-      newStatus: normalizedStatus,
-      updatedAt: new Date(),
-    };
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
+        await client.query('COMMIT');
+        return {
+            orderId: recordId,
+            oldStatus: oldData.status,
+            newStatus: normalizedStatus,
+            updatedAt: new Date(),
+        };
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 }
 
 /**
  * Fetch customer profile by user ID or customer email/phone
  */
 export async function getCustomerProfile(customerIdOrPhone) {
-  const isNumber = /^\d+$/.test(String(customerIdOrPhone).trim());
-  let user = null;
+    const isNumber = /^\d+$/.test(String(customerIdOrPhone).trim());
+    let user = null;
 
-  if (isNumber) {
-    const res = await pool.query(
-      `SELECT id, name, email, phone, delivery_city, is_blocked, created_at, last_login_at
-       FROM users WHERE id = $1`,
-      [parseInt(customerIdOrPhone, 10)]
-    );
-    user = res.rows[0] || null;
-  }
+    if (isNumber) {
+        const res = await pool.query(
+            `SELECT id, name, email, phone, delivery_city, is_blocked, created_at, last_login_at
+       FROM users WHERE id = $1`, [parseInt(customerIdOrPhone, 10)]
+        );
+        user = res.rows[0] || null;
+    }
 
-  if (!user) {
-    const res = await pool.query(
-      `SELECT id, name, email, phone, delivery_city, is_blocked, created_at, last_login_at
-       FROM users WHERE phone = $1 OR email = $1 LIMIT 1`,
-      [String(customerIdOrPhone).trim()]
-    );
-    user = res.rows[0] || null;
-  }
+    if (!user) {
+        const res = await pool.query(
+            `SELECT id, name, email, phone, delivery_city, is_blocked, created_at, last_login_at
+       FROM users WHERE phone = $1 OR email = $1 LIMIT 1`, [String(customerIdOrPhone).trim()]
+        );
+        user = res.rows[0] || null;
+    }
 
-  // If user still doesn't exist in users table (e.g. guest order), pull from material_enquiries
-  if (!user) {
-    const guestRes = await pool.query(
-      `SELECT user_name AS name, user_email AS email, user_phone AS phone,
+    // If user still doesn't exist in users table (e.g. guest order), pull from material_enquiries
+    if (!user) {
+        const guestRes = await pool.query(
+            `SELECT user_name AS name, user_email AS email, user_phone AS phone,
               selected_city AS delivery_city, delivery_address, created_at
        FROM material_enquiries
        WHERE user_id::TEXT = $1 OR user_phone = $1 OR user_email = $1
-       ORDER BY created_at DESC LIMIT 1`,
-      [String(customerIdOrPhone).trim()]
-    );
-    if (guestRes.rows.length > 0) {
-      const g = guestRes.rows[0];
-      return {
-        id: null,
-        name: g.name || 'Guest Customer',
-        email: g.email || 'N/A',
-        phone: g.phone || 'N/A',
-        delivery_city: g.delivery_city || 'N/A',
-        delivery_address: g.delivery_address || 'N/A',
-        is_blocked: false,
-        created_at: g.created_at,
-        last_login_at: null,
-        is_guest: true,
-      };
+       ORDER BY created_at DESC LIMIT 1`, [String(customerIdOrPhone).trim()]
+        );
+        if (guestRes.rows.length > 0) {
+            const g = guestRes.rows[0];
+            return {
+                id: null,
+                name: g.name || 'Guest Customer',
+                email: g.email || 'N/A',
+                phone: g.phone || 'N/A',
+                delivery_city: g.delivery_city || 'N/A',
+                delivery_address: g.delivery_address || 'N/A',
+                is_blocked: false,
+                created_at: g.created_at,
+                last_login_at: null,
+                is_guest: true,
+            };
+        }
+        return null;
     }
-    return null;
-  }
 
-  // Fetch default delivery address
-  const addrRes = await pool.query(
-    `SELECT delivery_address FROM material_enquiries WHERE user_id = $1 AND delivery_address IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
-    [user.id]
-  );
-  const deliveryAddress = addrRes.rows[0]?.delivery_address || 'N/A';
+    // Fetch default delivery address
+    const addrRes = await pool.query(
+        `SELECT delivery_address FROM material_enquiries WHERE user_id = $1 AND delivery_address IS NOT NULL ORDER BY created_at DESC LIMIT 1`, [user.id]
+    );
+    const deliveryAddress = (addrRes.rows[0] && addrRes.rows[0].delivery_address) || 'N/A';
 
-  return {
-    ...user,
-    delivery_address: deliveryAddress,
-    is_guest: false,
-  };
+    return {
+        ...user,
+        delivery_address: deliveryAddress,
+        is_guest: false,
+    };
 }
 
 /**
  * Fetch all orders for a customer in a single batched query with timing logging
  */
 export async function getCustomerOrdersHistory(customerId, customerPhone = null) {
-  const startTime = Date.now();
+    const startTime = Date.now();
 
-  const query = `
+    const query = `
     WITH customer_orders AS (
       SELECT
         me.id,
@@ -812,27 +883,27 @@ export async function getCustomerOrdersHistory(customerId, customerPhone = null)
     FROM customer_orders
   `;
 
-  const userIdParam = customerId && /^\d+$/.test(String(customerId)) ? parseInt(customerId, 10) : null;
-  const phoneParam = customerPhone || (!userIdParam ? String(customerId || '').trim() : null);
+    const userIdParam = customerId && /^\d+$/.test(String(customerId)) ? parseInt(customerId, 10) : null;
+    const phoneParam = customerPhone || (!userIdParam ? String(customerId || '').trim() : null);
 
-  const res = await pool.query(query, [userIdParam, phoneParam]);
-  const durationMs = Date.now() - startTime;
-  console.log(`[Admin Customer Orders] Batched query completed in ${durationMs}ms for user ${customerId || customerPhone}`);
+    const res = await pool.query(query, [userIdParam, phoneParam]);
+    const durationMs = Date.now() - startTime;
+    console.log(`[Admin Customer Orders] Batched query completed in ${durationMs}ms for user ${customerId || customerPhone}`);
 
-  const row = res.rows[0] || {
-    orders: [],
-    total_orders: 0,
-    lifetime_spend: '0.00',
-    coupons_used: [],
-  };
+    const row = res.rows[0] || {
+        orders: [],
+        total_orders: 0,
+        lifetime_spend: '0.00',
+        coupons_used: [],
+    };
 
-  return {
-    orders: row.orders || [],
-    total_orders: parseInt(row.total_orders, 10) || 0,
-    lifetime_spend: parseFloat(row.lifetime_spend || 0),
-    coupons_used: row.coupons_used || [],
-    query_duration_ms: durationMs,
-  };
+    return {
+        orders: row.orders || [],
+        total_orders: parseInt(row.total_orders, 10) || 0,
+        lifetime_spend: parseFloat(row.lifetime_spend || 0),
+        coupons_used: row.coupons_used || [],
+        query_duration_ms: durationMs,
+    };
 }
 
 const INVOICE_PAGE_W = 595.28;
@@ -841,13 +912,13 @@ const INVOICE_CONTENT_W = INVOICE_PAGE_W - INVOICE_MARGIN * 2;
 
 function companyInvoiceConfig() {
   return {
-    name: process.env.COMPANY_NAME || 'MT-BOSS',
+    name: process.env.COMPANY_NAME || 'MTBOSS',
     tagline: process.env.COMPANY_TAGLINE || 'Building Materials & Services',
-    address: process.env.COMPANY_ADDRESS || 'Zentrix MT-Boss Technologies · Moradabad, Uttar Pradesh',
+    address: process.env.COMPANY_ADDRESS || 'Zentrix MTBOSS Technologies · Moradabad, Uttar Pradesh',
     gstin: String(process.env.COMPANY_GSTIN || '').trim(),
     pan: String(process.env.COMPANY_PAN || '').trim(),
     phone: process.env.COMPANY_PHONE || process.env.NEXT_PUBLIC_COMPANY_PHONE || '+91 9410225039',
-    email: process.env.COMPANY_SUPPORT_EMAIL || process.env.SMTP_REPLY_TO || 'support@mtboss.in',
+    email: process.env.COMPANY_SUPPORT_EMAIL || process.env.SMTP_REPLY_TO || 'support@MTBOSS.in',
     placeOfSupply: process.env.COMPANY_PLACE_OF_SUPPLY || 'Uttar Pradesh (09)',
     productHsn: String(process.env.INVOICE_DEFAULT_PRODUCT_HSN || '2523').trim(),
     shippingHsn: String(process.env.INVOICE_SHIPPING_HSN || '996812').trim(),
@@ -1020,23 +1091,31 @@ function amountInWordsINR(amount) {
   return `Indian Rupees ${parts.join(' ').replace(/\s+/g, ' ').trim()} Only`;
 }
 
+function cleanPdfString(val) {
+  if (val === null || val === undefined) return '';
+  return String(val)
+    .replace(/₹/g, 'Rs. ')
+    .replace(/[^\x00-\xFF]/g, ' ')
+    .trim();
+}
+
 function drawInvoiceMetaCell(doc, x, y, w, h, label, value, { valueColor = '#0f172a', valueSize = 8.5 } = {}) {
   doc.rect(x, y, w, h).fillAndStroke('#ffffff', '#e2e8f0');
-  doc.fillColor('#64748b').fontSize(7).font('Helvetica-Bold').text(label, x + 6, y + 6, { width: w - 12 });
-  doc.fillColor(valueColor).fontSize(valueSize).font('Helvetica-Bold').text(String(value ?? '-'), x + 6, y + 18, { width: w - 12 });
+  doc.fillColor('#64748b').fontSize(7).font('Helvetica-Bold').text(label, x + 6, y + 5, { width: w - 12, lineBreak: false });
+  doc.fillColor(valueColor).fontSize(valueSize).font('Helvetica-Bold').text(cleanPdfString(value ?? '-'), x + 6, y + 17, { width: w - 12, lineBreak: false });
 }
 
 function drawInvoiceAddressBlock(doc, x, y, w, h, title, lines) {
   doc.rect(x, y, w, h).fillAndStroke('#ffffff', '#e2e8f0');
-  doc.fillColor('#0284c7').fontSize(8).font('Helvetica-Bold').text(title, x + 8, y + 8);
-  doc.fillColor('#0f172a').fontSize(8).font('Helvetica').text(lines.filter(Boolean).join('\n'), x + 8, y + 22, { width: w - 16, lineGap: 1.5 });
+  doc.fillColor('#0284c7').fontSize(8).font('Helvetica-Bold').text(title, x + 8, y + 7, { lineBreak: false });
+  doc.fillColor('#0f172a').fontSize(7.5).font('Helvetica').text(lines.filter(Boolean).map(cleanPdfString).join('\n'), x + 8, y + 20, { width: w - 16, lineGap: 1.2 });
 }
 
 function drawStatusPill(doc, x, y, statusText) {
-  const normalized = String(statusText || 'OPEN').toUpperCase().replace(/_/g, ' ');
+  const normalized = cleanPdfString(statusText || 'OPEN').toUpperCase().replace(/_/g, ' ');
   const pillW = Math.min(78, doc.widthOfString(normalized) + 16);
   doc.roundedRect(x, y, pillW, 14, 7).fill('#fef3c7');
-  doc.fillColor('#b45309').fontSize(7.5).font('Helvetica-Bold').text(normalized, x + 8, y + 3, { width: pillW - 16 });
+  doc.fillColor('#b45309').fontSize(7.5).font('Helvetica-Bold').text(normalized, x + 8, y + 3, { width: pillW - 16, lineBreak: false });
 }
 
 /**
@@ -1045,7 +1124,12 @@ function drawStatusPill(doc, x, y, statusText) {
 export async function generateOrderInvoicePdf(order) {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ margin: INVOICE_MARGIN, size: 'A4' });
+      const doc = new PDFDocument({
+        margin: 0,
+        size: 'A4',
+        autoFirstPage: true,
+        bufferPages: true,
+      });
       const buffers = [];
       const company = companyInvoiceConfig();
       const hasGst = hasInvoiceGstStructure(company);
@@ -1060,7 +1144,7 @@ export async function generateOrderInvoicePdf(order) {
       const borderColor = '#e2e8f0';
       const primaryColor = '#0284c7';
 
-      const invoiceNo = order.order_id || '—';
+      const invoiceNo = cleanPdfString(order.order_id || '-');
       const productTotal = Number(order.product_total) || 0;
       const couponDiscount = Number(order.coupon_discount) || 0;
       const shippingCost = Number(order.shipping_cost) || 0;
@@ -1085,24 +1169,24 @@ export async function generateOrderInvoicePdf(order) {
       );
 
       // ── Header band ──
-      const headerH = 92;
+      const headerH = 88;
       doc.rect(0, 0, INVOICE_PAGE_W, headerH).fill('#0f172a');
-      doc.fillColor('#ffffff').fontSize(24).font('Helvetica-Bold').text(company.name, INVOICE_MARGIN, 18);
-      doc.fontSize(9).font('Helvetica').fillColor('#cbd5e1').text(company.tagline, INVOICE_MARGIN, 44);
-      doc.fontSize(7.5).fillColor('#94a3b8').text(company.address, INVOICE_MARGIN, 58, { width: 300 });
+      doc.fillColor('#ffffff').fontSize(22).font('Helvetica-Bold').text(company.name, INVOICE_MARGIN, 16, { lineBreak: false });
+      doc.fontSize(8.5).font('Helvetica').fillColor('#cbd5e1').text(company.tagline, INVOICE_MARGIN, 40, { lineBreak: false });
+      doc.fontSize(7.5).fillColor('#94a3b8').text(company.address, INVOICE_MARGIN, 54, { width: 300, lineBreak: false });
       const gstLine = hasGst
-        ? `GSTIN: ${company.gstin}${company.pan ? ` · PAN: ${company.pan}` : ''}`
-        : `GSTIN: -${company.pan ? ` · PAN: ${company.pan}` : ''}`;
-      doc.text(gstLine, INVOICE_MARGIN, 72, { width: 300 });
+        ? `GSTIN: ${company.gstin}${company.pan ? ` | PAN: ${company.pan}` : ''}`
+        : `GSTIN: -${company.pan ? ` | PAN: ${company.pan}` : ''}`;
+      doc.text(gstLine, INVOICE_MARGIN, 68, { width: 300, lineBreak: false });
 
-      doc.fillColor('#ffffff').fontSize(18).font('Helvetica-Bold').text('TAX INVOICE', INVOICE_MARGIN + 320, 20, { align: 'right', width: 195 });
-      doc.fontSize(8.5).font('Helvetica').fillColor('#cbd5e1').text(`Invoice No: ${invoiceNo}`, INVOICE_MARGIN + 320, 44, { align: 'right', width: 195 });
-      doc.fontSize(7).text('Original for Recipient', INVOICE_MARGIN + 320, 58, { align: 'right', width: 195 });
+      doc.fillColor('#ffffff').fontSize(18).font('Helvetica-Bold').text('TAX INVOICE', INVOICE_MARGIN + 320, 18, { align: 'right', width: 200, lineBreak: false });
+      doc.fontSize(8.5).font('Helvetica').fillColor('#cbd5e1').text(`Invoice No: ${invoiceNo}`, INVOICE_MARGIN + 320, 42, { align: 'right', width: 200, lineBreak: false });
+      doc.fontSize(7).text('Original for Recipient', INVOICE_MARGIN + 320, 56, { align: 'right', width: 200, lineBreak: false });
 
       // ── Metadata strip ──
-      const metaY = headerH + 12;
+      const metaY = headerH + 10;
       const metaCellW = INVOICE_CONTENT_W / 6;
-      const metaH = 42;
+      const metaH = 38;
       const statusText = String(order.status || 'open').toUpperCase().replace(/_/g, ' ');
       drawInvoiceMetaCell(doc, INVOICE_MARGIN, metaY, metaCellW, metaH, 'Invoice Date', formatDateDDMMYYYY(order.created_at));
       drawInvoiceMetaCell(doc, INVOICE_MARGIN + metaCellW, metaY, metaCellW, metaH, 'Order ID', invoiceNo);
@@ -1110,26 +1194,26 @@ export async function generateOrderInvoicePdf(order) {
       drawInvoiceMetaCell(doc, INVOICE_MARGIN + metaCellW * 3, metaY, metaCellW, metaH, 'Place of Supply', hasGst ? company.placeOfSupply : '-');
       drawInvoiceMetaCell(doc, INVOICE_MARGIN + metaCellW * 4, metaY, metaCellW, metaH, 'Payment Mode', order.payment_mode || 'Cash on Delivery');
       doc.rect(INVOICE_MARGIN + metaCellW * 5, metaY, metaCellW, metaH).fillAndStroke('#ffffff', borderColor);
-      doc.fillColor(grayColor).fontSize(7).font('Helvetica-Bold').text('Order Status', INVOICE_MARGIN + metaCellW * 5 + 6, metaY + 6);
-      drawStatusPill(doc, INVOICE_MARGIN + metaCellW * 5 + 6, metaY + 20, statusText);
+      doc.fillColor(grayColor).fontSize(7).font('Helvetica-Bold').text('Order Status', INVOICE_MARGIN + metaCellW * 5 + 6, metaY + 5, { lineBreak: false });
+      drawStatusPill(doc, INVOICE_MARGIN + metaCellW * 5 + 6, metaY + 18, statusText);
 
       // ── Bill / Ship / Fulfilled ──
-      const addrY = metaY + metaH + 10;
+      const addrY = metaY + metaH + 8;
       const addrW = (INVOICE_CONTENT_W - 16) / 3;
-      const addrH = 88;
-      const customerAddress = order.delivery_address || '—';
+      const addrH = 82;
+      const customerAddress = order.delivery_address || '-';
       const customerGst = hasGst ? 'Unregistered / Consumer' : '-';
       drawInvoiceAddressBlock(doc, INVOICE_MARGIN, addrY, addrW, addrH, 'BILL TO', [
         order.customer_name || 'Customer',
         customerAddress,
         `Phone: ${formatIndianPhone(order.customer_phone)}`,
-        `Email: ${order.customer_email && order.customer_email !== 'N/A' ? order.customer_email : '—'}`,
+        `Email: ${order.customer_email && order.customer_email !== 'N/A' ? order.customer_email : '-'}`,
         `GSTIN: ${customerGst}`,
       ]);
       drawInvoiceAddressBlock(doc, INVOICE_MARGIN + addrW + 8, addrY, addrW, addrH, 'SHIP TO', [
         order.customer_name || 'Customer',
         customerAddress,
-        `Delivery City: ${order.delivery_city || '—'}`,
+        `Delivery City: ${order.delivery_city || '-'}`,
         `Phone: ${formatIndianPhone(order.customer_phone)}`,
       ]);
 
@@ -1138,19 +1222,20 @@ export async function generateOrderInvoicePdf(order) {
         fulfilledLines = [
           order.supplier.shop_name || order.supplier.business_name || 'Verified Supplier',
           `Phone: ${formatIndianPhone(order.supplier.phone)}`,
-          `City: ${order.supplier.city || '—'}`,
+          `City: ${order.supplier.city || '-'}`,
           order.supplier.email ? `Email: ${order.supplier.email}` : null,
         ];
-      } else if (order.vendor) {
+      } else if (order.vendor || order.service_provider) {
+        const prov = order.vendor || order.service_provider;
         fulfilledLines = [
-          order.vendor.vendor_name || order.vendor.shop_name || 'Verified Vendor',
-          `Phone: ${formatIndianPhone(order.vendor.phone)}`,
-          `City: ${order.vendor.city || '—'}`,
-          order.vendor.email ? `Email: ${order.vendor.email}` : null,
+          prov.vendor_name || prov.service_provider_name || prov.shop_name || 'Verified Service Provider',
+          `Phone: ${formatIndianPhone(prov.phone)}`,
+          `City: ${prov.city || '-'}`,
+          prov.email ? `Email: ${prov.email}` : null,
         ];
       } else {
         fulfilledLines = [
-          'MT-Boss Direct Operations',
+          'MTBOSS Direct Operations',
           `Helpline: ${company.phone}`,
           `Email: ${company.email}`,
         ];
@@ -1160,97 +1245,97 @@ export async function generateOrderInvoicePdf(order) {
       // ── Line items table ──
       const cols = [
         { key: 'idx', label: '#', x: INVOICE_MARGIN, w: 16 },
-        { key: 'description', label: 'Item Description', x: INVOICE_MARGIN + 16, w: 108 },
-        { key: 'hsn', label: 'HSN/SAC', x: INVOICE_MARGIN + 124, w: 42 },
-        { key: 'qty', label: 'Qty', x: INVOICE_MARGIN + 166, w: 38 },
-        { key: 'rate', label: 'Rate (Rs.)', x: INVOICE_MARGIN + 204, w: 44 },
-        { key: 'discount', label: 'Discount (Rs.)', x: INVOICE_MARGIN + 248, w: 48 },
-        { key: 'taxable', label: 'Taxable Value', x: INVOICE_MARGIN + 296, w: 52 },
-        { key: 'cgst', label: 'CGST 9%', x: INVOICE_MARGIN + 348, w: 44 },
-        { key: 'sgst', label: 'SGST 9%', x: INVOICE_MARGIN + 392, w: 44 },
-        { key: 'amount', label: 'Amount (Rs.)', x: INVOICE_MARGIN + 436, w: 79 },
+        { key: 'description', label: 'Item Description', x: INVOICE_MARGIN + 16, w: 112 },
+        { key: 'hsn', label: 'HSN/SAC', x: INVOICE_MARGIN + 128, w: 42 },
+        { key: 'qty', label: 'Qty', x: INVOICE_MARGIN + 170, w: 38 },
+        { key: 'rate', label: 'Rate (Rs.)', x: INVOICE_MARGIN + 208, w: 44 },
+        { key: 'discount', label: 'Discount (Rs.)', x: INVOICE_MARGIN + 252, w: 48 },
+        { key: 'taxable', label: 'Taxable Value', x: INVOICE_MARGIN + 300, w: 52 },
+        { key: 'cgst', label: 'CGST 9%', x: INVOICE_MARGIN + 352, w: 44 },
+        { key: 'sgst', label: 'SGST 9%', x: INVOICE_MARGIN + 396, w: 44 },
+        { key: 'amount', label: 'Amount (Rs.)', x: INVOICE_MARGIN + 440, w: INVOICE_CONTENT_W - (440 - INVOICE_MARGIN) },
       ];
 
-      let tableY = addrY + addrH + 12;
-      doc.rect(INVOICE_MARGIN, tableY, INVOICE_CONTENT_W, 20).fill('#1e293b');
+      let tableY = addrY + addrH + 10;
+      doc.rect(INVOICE_MARGIN, tableY, INVOICE_CONTENT_W, 18).fill('#1e293b');
       doc.fillColor('#ffffff').fontSize(6.5).font('Helvetica-Bold');
       cols.forEach((col) => {
-        doc.text(col.label, col.x + 2, tableY + 6, { width: col.w - 4, align: col.key === 'amount' || col.key === 'rate' || col.key === 'discount' || col.key === 'taxable' || col.key === 'cgst' || col.key === 'sgst' ? 'right' : 'left' });
+        doc.text(col.label, col.x + 2, tableY + 5, { width: col.w - 4, align: col.key === 'amount' || col.key === 'rate' || col.key === 'discount' || col.key === 'taxable' || col.key === 'cgst' || col.key === 'sgst' ? 'right' : 'left', lineBreak: false });
       });
 
-      tableY += 20;
+      tableY += 18;
       tableRows.forEach((row, index) => {
-        const rowH = 34;
+        const rowH = 30;
         doc.rect(INVOICE_MARGIN, tableY, INVOICE_CONTENT_W, rowH).fillAndStroke(index % 2 === 0 ? '#ffffff' : lightBg, borderColor);
         doc.fillColor(darkColor).fontSize(7).font('Helvetica');
-        doc.text(String(index + 1), cols[0].x + 2, tableY + 8, { width: cols[0].w - 4 });
-        doc.font('Helvetica-Bold').text(row.description, cols[1].x + 2, tableY + 6, { width: cols[1].w - 4, lineGap: 0.5 });
+        doc.text(String(index + 1), cols[0].x + 2, tableY + 7, { width: cols[0].w - 4, lineBreak: false });
+        doc.font('Helvetica-Bold').text(cleanPdfString(row.description), cols[1].x + 2, tableY + 5, { width: cols[1].w - 4, lineGap: 0.5 });
         doc.font('Helvetica');
-        doc.text(row.hsn, cols[2].x + 2, tableY + 10, { width: cols[2].w - 4 });
-        doc.text(row.qty, cols[3].x + 2, tableY + 10, { width: cols[3].w - 4 });
-        doc.text(row.rate, cols[4].x + 2, tableY + 10, { width: cols[4].w - 4, align: 'right' });
-        doc.text(row.discount, cols[5].x + 2, tableY + 10, { width: cols[5].w - 4, align: 'right' });
-        doc.text(row.taxable, cols[6].x + 2, tableY + 10, { width: cols[6].w - 4, align: 'right' });
-        doc.text(row.cgst, cols[7].x + 2, tableY + 10, { width: cols[7].w - 4, align: 'right' });
-        doc.text(row.sgst, cols[8].x + 2, tableY + 10, { width: cols[8].w - 4, align: 'right' });
-        doc.font('Helvetica-Bold').text(row.amount, cols[9].x + 2, tableY + 10, { width: cols[9].w - 4, align: 'right' });
+        doc.text(row.hsn, cols[2].x + 2, tableY + 9, { width: cols[2].w - 4, lineBreak: false });
+        doc.text(row.qty, cols[3].x + 2, tableY + 9, { width: cols[3].w - 4, lineBreak: false });
+        doc.text(row.rate, cols[4].x + 2, tableY + 9, { width: cols[4].w - 4, align: 'right', lineBreak: false });
+        doc.text(row.discount, cols[5].x + 2, tableY + 9, { width: cols[5].w - 4, align: 'right', lineBreak: false });
+        doc.text(row.taxable, cols[6].x + 2, tableY + 9, { width: cols[6].w - 4, align: 'right', lineBreak: false });
+        doc.text(row.cgst, cols[7].x + 2, tableY + 9, { width: cols[7].w - 4, align: 'right', lineBreak: false });
+        doc.text(row.sgst, cols[8].x + 2, tableY + 9, { width: cols[8].w - 4, align: 'right', lineBreak: false });
+        doc.font('Helvetica-Bold').text(row.amount, cols[9].x + 2, tableY + 9, { width: cols[9].w - 4, align: 'right', lineBreak: false });
         tableY += rowH;
       });
 
       doc.rect(INVOICE_MARGIN, tableY, INVOICE_CONTENT_W, 18).fillAndStroke('#eef2ff', borderColor);
-      doc.fillColor(darkColor).fontSize(7).font('Helvetica-Bold').text('Total', cols[1].x + 2, tableY + 5);
+      doc.fillColor(darkColor).fontSize(7).font('Helvetica-Bold').text('Total', cols[1].x + 2, tableY + 5, { lineBreak: false });
       if (hasGst) {
-        doc.text(formatInvoiceMoney(tableTotals.taxable, { dashWhenEmpty: false }), cols[6].x + 2, tableY + 5, { width: cols[6].w - 4, align: 'right' });
-        doc.text(formatInvoiceMoney(tableTotals.cgst, { dashWhenEmpty: false }), cols[7].x + 2, tableY + 5, { width: cols[7].w - 4, align: 'right' });
-        doc.text(formatInvoiceMoney(tableTotals.sgst, { dashWhenEmpty: false }), cols[8].x + 2, tableY + 5, { width: cols[8].w - 4, align: 'right' });
+        doc.text(formatInvoiceMoney(tableTotals.taxable, { dashWhenEmpty: false }), cols[6].x + 2, tableY + 5, { width: cols[6].w - 4, align: 'right', lineBreak: false });
+        doc.text(formatInvoiceMoney(tableTotals.cgst, { dashWhenEmpty: false }), cols[7].x + 2, tableY + 5, { width: cols[7].w - 4, align: 'right', lineBreak: false });
+        doc.text(formatInvoiceMoney(tableTotals.sgst, { dashWhenEmpty: false }), cols[8].x + 2, tableY + 5, { width: cols[8].w - 4, align: 'right', lineBreak: false });
       } else {
-        doc.text('-', cols[6].x + 2, tableY + 5, { width: cols[6].w - 4, align: 'right' });
-        doc.text('-', cols[7].x + 2, tableY + 5, { width: cols[7].w - 4, align: 'right' });
-        doc.text('-', cols[8].x + 2, tableY + 5, { width: cols[8].w - 4, align: 'right' });
+        doc.text('-', cols[6].x + 2, tableY + 5, { width: cols[6].w - 4, align: 'right', lineBreak: false });
+        doc.text('-', cols[7].x + 2, tableY + 5, { width: cols[7].w - 4, align: 'right', lineBreak: false });
+        doc.text('-', cols[8].x + 2, tableY + 5, { width: cols[8].w - 4, align: 'right', lineBreak: false });
       }
-      doc.text(formatInvoiceMoney(grandTotal, { dashWhenEmpty: false }), cols[9].x + 2, tableY + 5, { width: cols[9].w - 4, align: 'right' });
-      tableY += 24;
+      doc.text(formatInvoiceMoney(grandTotal, { dashWhenEmpty: false }), cols[9].x + 2, tableY + 5, { width: cols[9].w - 4, align: 'right', lineBreak: false });
+      tableY += 22;
 
-      const footerTop = tableY + 8;
-      const leftW = 280;
+      const footerTop = tableY + 6;
+      const leftW = 270;
       const rightX = INVOICE_MARGIN + leftW + 10;
       const rightW = INVOICE_CONTENT_W - leftW - 10;
 
-      doc.fillColor(darkColor).fontSize(8).font('Helvetica-Bold').text('Amount in Words', INVOICE_MARGIN, footerTop);
-      doc.font('Helvetica').fontSize(8).text(amountInWordsINR(grandTotal), INVOICE_MARGIN, footerTop + 14, { width: leftW });
+      doc.fillColor(darkColor).fontSize(7.5).font('Helvetica-Bold').text('Amount in Words', INVOICE_MARGIN, footerTop, { lineBreak: false });
+      doc.font('Helvetica').fontSize(7.5).text(amountInWordsINR(grandTotal), INVOICE_MARGIN, footerTop + 12, { width: leftW });
 
-      const hsnY = footerTop + 34;
-      doc.fillColor(primaryColor).fontSize(7.5).font('Helvetica-Bold').text('HSN / SAC Summary', INVOICE_MARGIN, hsnY);
-      const hsnTableY = hsnY + 12;
+      const hsnY = footerTop + 30;
+      doc.fillColor(primaryColor).fontSize(7.5).font('Helvetica-Bold').text('HSN / SAC Summary', INVOICE_MARGIN, hsnY, { lineBreak: false });
+      const hsnTableY = hsnY + 11;
       const hsnCols = [
-        { label: 'HSN/SAC', w: 52 },
-        { label: 'Taxable Value', w: 62 },
-        { label: 'CGST', w: 48 },
-        { label: 'SGST', w: 48 },
-        { label: 'Total Tax', w: 52 },
+        { label: 'HSN/SAC', w: 50 },
+        { label: 'Taxable Value', w: 60 },
+        { label: 'CGST', w: 46 },
+        { label: 'SGST', w: 46 },
+        { label: 'Total Tax', w: 50 },
       ];
       let hx = INVOICE_MARGIN;
-      doc.rect(INVOICE_MARGIN, hsnTableY, leftW, 16).fill('#1e293b');
+      doc.rect(INVOICE_MARGIN, hsnTableY, leftW, 15).fill('#1e293b');
       doc.fillColor('#ffffff').fontSize(6.5).font('Helvetica-Bold');
       hsnCols.forEach((col) => {
-        doc.text(col.label, hx + 3, hsnTableY + 4, { width: col.w - 6 });
+        doc.text(col.label, hx + 3, hsnTableY + 4, { width: col.w - 6, lineBreak: false });
         hx += col.w;
       });
-      let hy = hsnTableY + 16;
+      let hy = hsnTableY + 15;
       hsnSummaryRows.forEach((row) => {
         hx = INVOICE_MARGIN;
-        doc.rect(INVOICE_MARGIN, hy, leftW, 14).strokeColor(borderColor).stroke();
+        doc.rect(INVOICE_MARGIN, hy, leftW, 13).strokeColor(borderColor).stroke();
         doc.fillColor(darkColor).fontSize(6.5).font('Helvetica');
         [row.hsn, row.taxable, row.cgst, row.sgst, row.totalTax].forEach((cell, i) => {
-          doc.text(String(cell), hx + 3, hy + 3, { width: hsnCols[i].w - 6, align: i === 0 ? 'left' : 'right' });
+          doc.text(String(cell), hx + 3, hy + 3, { width: hsnCols[i].w - 6, align: i === 0 ? 'left' : 'right', lineBreak: false });
           hx += hsnCols[i].w;
         });
-        hy += 14;
+        hy += 13;
       });
 
-      const termsY = hy + 10;
-      doc.rect(INVOICE_MARGIN, termsY, leftW, 72).fillAndStroke(lightBg, borderColor);
-      doc.fillColor(primaryColor).fontSize(7.5).font('Helvetica-Bold').text('TERMS & NOTES', INVOICE_MARGIN + 8, termsY + 8);
+      const termsY = hy + 8;
+      doc.rect(INVOICE_MARGIN, termsY, leftW, 64).fillAndStroke(lightBg, borderColor);
+      doc.fillColor(primaryColor).fontSize(7.5).font('Helvetica-Bold').text('TERMS & NOTES', INVOICE_MARGIN + 8, termsY + 6, { lineBreak: false });
       const gstNote = hasGst
         ? 'Prices are inclusive of applicable GST unless stated otherwise.'
         : 'GST details are not applicable on this invoice.';
@@ -1259,27 +1344,27 @@ export async function generateOrderInvoicePdf(order) {
         gstNote,
         'Materials once delivered are subject to supplier return policies.',
         'Disputes are subject to Moradabad jurisdiction.',
-      ].filter(Boolean).join('\n');
-      doc.fillColor(darkColor).fontSize(6.8).font('Helvetica').text(terms, INVOICE_MARGIN + 8, termsY + 22, { width: leftW - 16, lineGap: 1.2 });
+      ].filter(Boolean).map(cleanPdfString).join('\n');
+      doc.fillColor(darkColor).fontSize(6.8).font('Helvetica').text(terms, INVOICE_MARGIN + 8, termsY + 18, { width: leftW - 16, lineGap: 1.1 });
 
       // ── Totals box ──
       let lineY = footerTop;
-      doc.rect(rightX, lineY, rightW, 168).fillAndStroke('#ffffff', borderColor);
-      lineY += 10;
+      doc.rect(rightX, lineY, rightW, 158).fillAndStroke('#ffffff', borderColor);
+      lineY += 8;
       const printTotalLine = (label, val, { bold = false, accent = false, discount = false } = {}) => {
-        doc.fillColor(grayColor).fontSize(8).font(bold ? 'Helvetica-Bold' : 'Helvetica').text(label, rightX + 10, lineY, { width: rightW - 20 });
+        doc.fillColor(grayColor).fontSize(7.5).font(bold ? 'Helvetica-Bold' : 'Helvetica').text(label, rightX + 8, lineY, { width: rightW - 16, lineBreak: false });
         let valColor = darkColor;
         if (accent) valColor = primaryColor;
         if (discount) valColor = '#16a34a';
-        doc.fillColor(valColor).fontSize(bold ? 10 : 8).font(bold ? 'Helvetica-Bold' : 'Helvetica')
-          .text(val, rightX + 10, lineY, { width: rightW - 20, align: 'right' });
-        lineY += 18;
+        doc.fillColor(valColor).fontSize(bold ? 9.5 : 7.5).font(bold ? 'Helvetica-Bold' : 'Helvetica')
+          .text(val, rightX + 8, lineY, { width: rightW - 16, align: 'right', lineBreak: false });
+        lineY += 16;
       };
 
       const qtyMeta = parseInvoiceQuantity(order.items?.[0]?.quantity || order.quantity_text);
       const rateMeta = order.unit_price ?? order.items?.[0]?.rate;
       const productLabel = rateMeta != null && qtyMeta.numeric
-        ? `Product Total (${qtyMeta.numeric} × ${formatInvoiceMoney(rateMeta, { dashWhenEmpty: false })}):`
+        ? `Product Total (${qtyMeta.numeric} x ${formatInvoiceMoney(rateMeta, { dashWhenEmpty: false })}):`
         : 'Product Total:';
       printTotalLine(productLabel, formatInvoiceMoney(productTotal, { dashWhenEmpty: false }));
       if (couponDiscount > 0) {
@@ -1301,22 +1386,45 @@ export async function generateOrderInvoicePdf(order) {
         printTotalLine('SGST @ 9%:', '-');
       }
 
-      doc.rect(rightX + 8, lineY + 2, rightW - 16, 22).fill('#eff6ff');
-      doc.fillColor(primaryColor).fontSize(9).font('Helvetica-Bold').text('Grand Total:', rightX + 14, lineY + 8);
-      doc.fillColor(primaryColor).fontSize(11).font('Helvetica-Bold')
-        .text(`Rs. ${formatInvoiceMoney(grandTotal, { dashWhenEmpty: false })}`, rightX + 10, lineY + 8, { width: rightW - 20, align: 'right' });
-      lineY += 34;
-      doc.fillColor(grayColor).fontSize(7).font('Helvetica').text('Authorised Signatory for MT-Boss', rightX + 10, lineY, { width: rightW - 20, align: 'right' });
+      doc.rect(rightX + 6, lineY + 2, rightW - 12, 20).fill('#eff6ff');
+      doc.fillColor(primaryColor).fontSize(8.5).font('Helvetica-Bold').text('Grand Total:', rightX + 10, lineY + 6, { lineBreak: false });
+      doc.fillColor(primaryColor).fontSize(10).font('Helvetica-Bold')
+        .text(`Rs. ${formatInvoiceMoney(grandTotal, { dashWhenEmpty: false })}`, rightX + 8, lineY + 6, { width: rightW - 16, align: 'right', lineBreak: false });
+      lineY += 28;
+      doc.fillColor(grayColor).fontSize(7).font('Helvetica').text('Authorised Signatory for MTBOSS', rightX + 8, lineY, { width: rightW - 16, align: 'right', lineBreak: false });
 
+      // ── Page bottom footer (Safely positioned above page boundary) ──
       const pageFooterY = 780;
-      doc.moveTo(INVOICE_MARGIN, pageFooterY).lineTo(INVOICE_MARGIN + INVOICE_CONTENT_W, pageFooterY).strokeColor(borderColor).stroke();
-      doc.fillColor(grayColor).fontSize(7.5).font('Helvetica')
-        .text('Thank you for choosing MT-Boss! This is a computer-generated tax invoice and requires no physical signature.', INVOICE_MARGIN, pageFooterY + 8, { align: 'center', width: INVOICE_CONTENT_W });
-      doc.text(`${company.address} · Contact: ${company.email}`, INVOICE_MARGIN, pageFooterY + 20, { align: 'center', width: INVOICE_CONTENT_W });
+      doc.moveTo(INVOICE_MARGIN, pageFooterY).lineTo(INVOICE_PAGE_W - INVOICE_MARGIN, pageFooterY).strokeColor(borderColor).stroke();
+      doc.fillColor(grayColor).fontSize(7).font('Helvetica')
+        .text('Thank you for choosing MTBOSS! This is a computer-generated tax invoice and requires no physical signature.', INVOICE_MARGIN, pageFooterY + 6, { align: 'center', width: INVOICE_CONTENT_W, lineBreak: false });
+      doc.text(`${company.address} | Contact: ${company.email}`, INVOICE_MARGIN, pageFooterY + 18, { align: 'center', width: INVOICE_CONTENT_W, lineBreak: false });
 
       doc.end();
     } catch (err) {
       reject(err);
     }
   });
+}
+
+/**
+ * Get distinct delivery cities from shop orders and service bookings
+ */
+export async function getDistinctDeliveryCities() {
+  try {
+    const query = `
+      SELECT DISTINCT TRIM(city) AS city FROM (
+        SELECT selected_city AS city FROM material_enquiries WHERE selected_city IS NOT NULL AND TRIM(selected_city) != ''
+        UNION
+        SELECT service_city AS city FROM service_bookings WHERE service_city IS NOT NULL AND TRIM(service_city) != ''
+      ) sub
+      WHERE city IS NOT NULL AND TRIM(city) != '' AND LOWER(TRIM(city)) != 'n/a'
+      ORDER BY city ASC
+    `;
+    const res = await pool.query(query);
+    return res.rows.map((r) => r.city).filter(Boolean);
+  } catch (err) {
+    console.error('getDistinctDeliveryCities error:', err);
+    return [];
+  }
 }

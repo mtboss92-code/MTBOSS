@@ -1,8 +1,11 @@
 'use client';
+import RequiredAsterisk from './RequiredAsterisk';
+import ManagedCitySelect from './ManagedCitySelect';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import QuickServiceIcon from './QuickServiceIcon';
+import ServiceCheckboxCard from './ServiceCheckboxCard';
 import {
   Users, Eye, Ban, ShieldCheck, Trash2, X, RefreshCw, Search,
   Calendar, MapPin, ShoppingCart, CircleDollarSign, CheckCircle2,
@@ -10,9 +13,9 @@ import {
 } from '@/app/components/ui/icons';
 
 const SPECIALIZATION_OPTIONS = [
-  { key: 'payments', label: 'Payments', desc: 'Party & Vendor Payments', bg: '#e0f2fe', tx: '#2563eb' },
+  { key: 'payments', label: 'Payments', desc: 'Party & Vendor / Service Provider Payments', bg: '#e0f2fe', tx: '#2563eb' },
   { key: 'labor', label: 'Labor', desc: 'Attendance & Labor Payments', bg: '#fef3c7', tx: '#ea580c' },
-  { key: 'vendor', label: 'Vendor', desc: 'Vendors & Project Assignments', bg: '#f3e8ff', tx: '#9333ea' },
+  { key: 'vendor', label: 'Service Provider', desc: 'Service Providers & Project Assignments', bg: '#f3e8ff', tx: '#9333ea' },
   { key: 'construction', label: 'Construction', desc: 'Materials, Stock & Expenses', bg: '#dcfce7', tx: '#16a34a' },
 ];
 
@@ -38,13 +41,15 @@ const AgentsPage = dynamic(() => import('../dashboard/agents/page'), { loading: 
 
 const getRoleBadgeStyle = (role) => {
   switch (String(role || 'Customer').toLowerCase()) {
-    case 'vendor':
+    case 'service provider':
+    case 'service provider':
       return { bg: '#ffedd5', text: '#c2410c', border: '#fdba74', icon: '🧑‍💼' };
     case 'contractor':
       return { bg: '#f3e8ff', text: '#7e22ce', border: '#d8b4fe', icon: '🏗️' };
     case 'agent':
       return { bg: '#fef3c7', text: '#b45309', border: '#fcd34d', icon: '🤝' };
     case 'supplier':
+    case 'vendor':
       return { bg: '#dcfce7', text: '#15803d', border: '#86efac', icon: '🏭' };
     case 'customer':
     default:
@@ -110,8 +115,8 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'active' | 'blocked'
   const [roleFilter, setRoleFilter] = useState(
     initialRoleView === 'contractors' ? 'Contractor' :
-    initialRoleView === 'vendors' ? 'Vendor' :
-    initialRoleView === 'suppliers' ? 'Supplier' :
+    initialRoleView === 'service providers' || initialRoleView === 'service-providers' ? 'Service Provider' :
+    initialRoleView === 'suppliers' || initialRoleView === 'vendors' ? 'Vendor' :
     initialRoleView === 'agents' ? 'Agent' :
     initialRoleView === 'users' ? 'Customer' : 'all'
   );
@@ -123,8 +128,8 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
   // Synchronize initialRoleView if changed from outside
   useEffect(() => {
     if (initialRoleView) {
-      if (initialRoleView === 'vendors') setRoleFilter('Vendor');
-      else if (initialRoleView === 'suppliers') setRoleFilter('Supplier');
+      if (initialRoleView === 'service providers' || initialRoleView === 'service-providers') setRoleFilter('Service Provider');
+      else if (initialRoleView === 'suppliers' || initialRoleView === 'vendors') setRoleFilter('Vendor');
       else if (initialRoleView === 'agents') setRoleFilter('Agent');
       else if (initialRoleView === 'contractors') setRoleFilter('Contractor');
       else if (initialRoleView === 'users') setRoleFilter('Customer');
@@ -151,9 +156,10 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
   const [showAgentLeads, setShowAgentLeads] = useState(false);
   const [showAgentActivity, setShowAgentActivity] = useState(false);
 
-  // Interactive Vendor states
+  // Interactive service provider states
   const [selectedServiceIds, setSelectedServiceIds] = useState([]);
   const [serviceSaving, setServiceSaving] = useState(false);
+  const [contractorSaving, setContractorSaving] = useState(false);
   const [vendorActionLoading, setVendorActionLoading] = useState(false);
 
   // Interactive Supplier states
@@ -170,7 +176,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
 
   // In-Page Account Creation State
   const [isCreating, setIsCreating] = useState(false);
-  const [createRole, setCreateRole] = useState('Customer'); // Customer | Agent | Vendor | Supplier
+  const [createRole, setCreateRole] = useState('Customer'); // Customer | Agent | service provider | Supplier
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createForm, setCreateForm] = useState({
     name: '',
@@ -188,11 +194,12 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
     network: '100+',
     specializations: ['construction'],
     has_project_management_access: false,
-    // Vendor
+    // service provider
     shop_name: '',
     business_name: '',
-    business_type: 'Vendor',
+    business_type: 'service provider',
     services: [],
+    is_contractor: false,
     // Supplier
     aadhaar_number: '',
     product_categories: ['Cement', 'Bricks', 'Steel'],
@@ -237,8 +244,9 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
         has_project_management_access: false,
         shop_name: '',
         business_name: '',
-        business_type: 'Vendor',
+        business_type: 'service provider',
         services: [],
+        is_contractor: false,
         aadhaar_number: '',
         product_categories: ['Cement', 'Bricks', 'Steel'],
       });
@@ -269,6 +277,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
         pageSize: String(pageSize),
       });
 
+      if (targetPage > 1) params.set('skip_meta', '1');
       if (search.trim()) params.set('search', search.trim());
       if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
       if (roleFilter && roleFilter !== 'all') params.set('role', roleFilter);
@@ -288,7 +297,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
       }
 
       setUsers(data.data || []);
-      setCities(data.cities || []);
+      if (data.cities && data.cities.length) setCities(data.cities);
       if (data.stats) setStats(data.stats);
       if (data.pagination) {
         setPagination(data.pagination);
@@ -322,7 +331,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
     const initialRole = user.role || 'Customer';
     if (initialRole === 'Agent') setActiveDetailTab('agent_profile');
     else if (initialRole === 'Supplier') setActiveDetailTab('supplier_info');
-    else if (initialRole === 'Vendor' || initialRole === 'Contractor') setActiveDetailTab('vendor_info');
+    else if (initialRole === 'service provider' || initialRole === 'Contractor' || initialRole === 'Service Provider') setActiveDetailTab('service provider_info');
     else setActiveDetailTab('orders');
 
     try {
@@ -352,7 +361,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
       const serverRole = data.data?.role || initialRole;
       if (serverRole === 'Agent') setActiveDetailTab('agent_profile');
       else if (serverRole === 'Supplier') setActiveDetailTab('supplier_info');
-      else if (serverRole === 'Vendor' || serverRole === 'Contractor') setActiveDetailTab('vendor_info');
+      else if (serverRole === 'service provider' || serverRole === 'Contractor' || serverRole === 'Service Provider') setActiveDetailTab('service provider_info');
     } catch (err) {
       setNotice({ type: 'error', message: err.message || 'Failed to fetch user details' });
     } finally {
@@ -638,7 +647,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
     }
   };
 
-  // Save Vendor Assigned Services
+  // Save service provider Assigned Services
   const handleSaveVendorServices = async (vendorId, serviceIds) => {
     setServiceSaving(true);
     try {
@@ -654,7 +663,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to update vendor services');
+        throw new Error(data.error || 'Failed to update service provider services');
       }
       setNotice({ type: 'success', message: `Assigned services (${serviceIds.length}) updated successfully.` });
     } catch (err) {
@@ -664,7 +673,39 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
     }
   };
 
-  // Approve Vendor
+  const handleContractorChange = async (vendorId, isContractor, trade = null) => {
+    setContractorSaving(true);
+    try {
+      const token = localStorage.getItem('admin-token') || localStorage.getItem('token');
+      const finalTrade = isContractor ? (trade || userDetails?.vendor?.contractor_trade || 'CIVIL') : null;
+      const res = await fetch('/api/admin/vendors', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          vendor_id: vendorId,
+          action: 'update_contractor',
+          is_contractor: isContractor,
+          contractor_trade: finalTrade,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Could not update contractor status');
+      setUserDetails((current) => current ? { ...current, vendor: { ...current.vendor, ...data.data } } : current);
+      setNotice({
+        type: 'success',
+        message: isContractor
+          ? `Contractor registered successfully (${data.data?.contractor_trade || finalTrade}).`
+          : 'Contractor role removed.',
+      });
+      fetchUsers(page);
+    } catch (err) {
+      setNotice({ type: 'error', message: err.message || 'Could not update contractor status' });
+    } finally {
+      setContractorSaving(false);
+    }
+  };
+
+  // Approve service provider
   const handleApproveVendor = async (vendorId) => {
     setVendorActionLoading(true);
     try {
@@ -675,21 +716,21 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
         body: JSON.stringify({ vendor_id: vendorId, action: 'approve' }),
       });
       const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to approve vendor');
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to approve service provider');
       setUserDetails((prev) => prev ? ({
         ...prev,
         vendor: { ...prev.vendor, verification_status: 'verified', status: 'active', is_approved: true },
       }) : prev);
-      setNotice({ type: 'success', message: 'Vendor approved successfully!' });
+      setNotice({ type: 'success', message: 'service provider approved successfully!' });
       fetchUsers(page);
     } catch (err) {
-      setNotice({ type: 'error', message: err.message || 'Error approving vendor' });
+      setNotice({ type: 'error', message: err.message || 'Error approving service provider' });
     } finally {
       setVendorActionLoading(false);
     }
   };
 
-  // Reject Vendor
+  // Reject service provider
   const handleRejectVendor = async (vendorId, reason) => {
     setVendorActionLoading(true);
     try {
@@ -700,21 +741,21 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
         body: JSON.stringify({ vendor_id: vendorId, action: 'reject', admin_notes: reason }),
       });
       const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to reject vendor');
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to reject service provider');
       setUserDetails((prev) => prev ? ({
         ...prev,
         vendor: { ...prev.vendor, verification_status: 'rejected', status: 'inactive' },
       }) : prev);
-      setNotice({ type: 'success', message: 'Vendor rejected.' });
+      setNotice({ type: 'success', message: 'service provider rejected.' });
       fetchUsers(page);
     } catch (err) {
-      setNotice({ type: 'error', message: err.message || 'Error rejecting vendor' });
+      setNotice({ type: 'error', message: err.message || 'Error rejecting service provider' });
     } finally {
       setVendorActionLoading(false);
     }
   };
 
-  // Toggle Vendor Status
+  // Toggle service provider Status
   const handleToggleVendorStatus = async (vendorId, currentStatus) => {
     setVendorActionLoading(true);
     try {
@@ -726,15 +767,15 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
         body: JSON.stringify({ vendor_id: vendorId, action }),
       });
       const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update vendor status');
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update service provider status');
       setUserDetails((prev) => prev ? ({
         ...prev,
         vendor: { ...prev.vendor, status: currentStatus === 'active' ? 'inactive' : 'active' },
       }) : prev);
-      setNotice({ type: 'success', message: `Vendor ${action}d successfully.` });
+      setNotice({ type: 'success', message: `service provider ${action}d successfully.` });
       fetchUsers(page);
     } catch (err) {
-      setNotice({ type: 'error', message: err.message || 'Error updating vendor status' });
+      setNotice({ type: 'error', message: err.message || 'Error updating service provider status' });
     } finally {
       setVendorActionLoading(false);
     }
@@ -834,8 +875,10 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
   const getRoleLabel = () => {
     switch (String(roleFilter || 'all').toLowerCase()) {
       case 'agent': return { singular: 'Agent', plural: 'Agents' };
+      case 'vendor':
+      case 'service provider': return { singular: 'Service Provider', plural: 'Service Providers' };
+      case 'supplier':
       case 'vendor': return { singular: 'Vendor', plural: 'Vendors' };
-      case 'supplier': return { singular: 'Supplier', plural: 'Suppliers' };
       case 'contractor': return { singular: 'Contractor', plural: 'Contractors' };
       case 'customer': return { singular: 'Customer', plural: 'Customers' };
       default: return { singular: 'User', plural: 'Users' };
@@ -910,7 +953,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                 Create New Account
               </h3>
               <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--muted, #64748b)' }}>
-                Select an account section below and fill out the form to register a new user, vendor, agent, or supplier.
+                Select an account section below and fill out the form to register a new user, service provider, agent, or vendor.
               </p>
             </div>
 
@@ -923,9 +966,8 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                 {[
                   { id: 'Customer', label: 'Customer / User', icon: '👤', desc: 'Place material orders, enquiry & book home services' },
                   { id: 'Agent', label: 'Agent', icon: '🤝', desc: 'Manage project leads, client schedule & site supervision' },
-                  { id: 'Vendor', label: 'Vendor', icon: '🧑‍💼', desc: 'Accept construction tasks, service orders & quick services' },
-                  { id: 'Contractor', label: 'Contractor', icon: '🏗️', desc: 'Civil & MEP projects, daily site labor & work orders' },
-                  { id: 'Supplier', label: 'Supplier', icon: '🏭', desc: 'Fulfill material enquiries, supply orders & shop products' },
+                  { id: 'service provider', label: 'Service Provider / Contractor', icon: '🧑‍💼', desc: 'Accept construction tasks, service orders & quick services' },
+                  { id: 'Vendor', label: 'Vendor', icon: '🏭', desc: 'Fulfill material enquiries, supply orders & shop products' },
                 ].map((sec) => {
                   const isSelected = createRole === sec.id;
                   return (
@@ -967,7 +1009,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px', marginBottom: '20px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: 'var(--muted, #475569)', marginBottom: '6px' }}>
-                    {createRole === 'Supplier' || createRole === 'Vendor' || createRole === 'Contractor' ? 'Owner / Contact Full Name *' : 'Full Name *'}
+                    {createRole === 'Supplier' || createRole === 'Vendor' || createRole === 'service provider' ? 'Owner / Contact Full Name *' : 'Full Name *'}
                   </label>
                   <input
                     type="text"
@@ -1022,14 +1064,18 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
 
                 <div>
                   <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: 'var(--muted, #475569)', marginBottom: '6px' }}>
-                    City *
+                    City <RequiredAsterisk />
                   </label>
-                  <input
-                    type="text"
+                  <ManagedCitySelect
                     required
                     value={createForm.city}
-                    onChange={(e) => setCreateForm({ ...createForm, city: e.target.value })}
-                    placeholder="e.g. Moradabad"
+                    onChange={(city, state) =>
+                      setCreateForm((prev) => ({
+                        ...prev,
+                        city,
+                        state: state || prev.state,
+                      }))
+                    }
                     style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid var(--border, #cbd5e1)', fontSize: '13px', background: 'var(--bg, #fff)', color: 'var(--text, #111)', boxSizing: 'border-box' }}
                   />
                 </div>
@@ -1048,15 +1094,15 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                 </div>
               </div>
 
-              {/* Vendor, Contractor & Supplier Business Details */}
-              {(createRole === 'Vendor' || createRole === 'Supplier' || createRole === 'Contractor') && (
+              {/* service provider & Supplier Business Details */}
+              {(createRole === 'service provider' || createRole === 'Supplier' || createRole === 'Vendor') && (
                 <div style={{ background: '#f8fafc', border: '1px solid var(--border, #e2e8f0)', borderRadius: '10px', padding: '16px', marginBottom: '20px' }}>
                   <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted, #475569)', marginBottom: '12px' }}>
                     Shop &amp; Business Information
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px' }}>
                     <div>
-                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: 'var(--muted, #475569)', marginBottom: '6px' }}>Shop / Store Name *</label>
+                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: 'var(--muted, #475569)', marginBottom: '6px' }}>Shop / Store Name <RequiredAsterisk /></label>
                       <input
                         type="text"
                         required
@@ -1076,7 +1122,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                         style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border, #cbd5e1)', fontSize: '13px', background: '#fff', boxSizing: 'border-box' }}
                       />
                     </div>
-                    {createRole === 'Supplier' && (
+                    {(createRole === 'Supplier' || createRole === 'Vendor') && (
                       <div>
                         <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: 'var(--muted, #475569)', marginBottom: '6px' }}>Aadhaar Number (12 Digits)</label>
                         <input
@@ -1201,8 +1247,8 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                 </div>
               )}
 
-              {/* Vendor Services */}
-              {createRole === 'Vendor' && (
+              {/* service provider Services */}
+              {createRole === 'service provider' && (
                 <div style={{ background: '#f8fafc', border: '1px solid var(--border, #e2e8f0)', borderRadius: '10px', padding: '16px', marginBottom: '20px' }}>
                   <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted, #475569)', marginBottom: '8px' }}>
                     Assign Primary Quick Services
@@ -1257,8 +1303,26 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                 </div>
               )}
 
-              {/* Supplier Product Categories */}
-              {createRole === 'Supplier' && (
+              {/* Register as Contractor checkbox — only shown for service provider */}
+              {createRole === 'service provider' && (
+                <div style={{ marginTop: '14px', padding: '12px 16px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', marginBottom: '20px' }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={createForm.is_contractor || false}
+                      onChange={(e) => setCreateForm({ ...createForm, is_contractor: e.target.checked })}
+                      style={{ width: '16px', height: '16px', marginTop: '2px', accentColor: '#16a34a', flexShrink: 0 }}
+                    />
+                    <span>
+                      <span style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#15803d' }}>Register as Contractor</span>
+                      <span style={{ display: 'block', fontSize: '12px', color: '#166534', marginTop: '2px' }}>Show this service provider in Project Management contractor selection.</span>
+                    </span>
+                  </label>
+                </div>
+              )}
+
+              {/* Vendor Product Categories */}
+              {(createRole === 'Supplier' || createRole === 'Vendor') && (
                 <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '16px', marginBottom: '20px' }}>
                   <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#15803d', marginBottom: '8px' }}>
                     Select Material Categories Supplied
@@ -1383,8 +1447,8 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
               setIsCreating(true);
               const r = String(roleFilter || '').toLowerCase();
               if (r === 'agent') setCreateRole('Agent');
-              else if (r === 'vendor' || r === 'contractor') setCreateRole('Vendor');
-              else if (r === 'supplier') setCreateRole('Supplier');
+              else if (r === 'service provider' || r === 'contractor') setCreateRole('service provider');
+              else if (r === 'supplier' || r === 'vendor') setCreateRole('Vendor');
               else setCreateRole('Customer');
             }}
             style={{
@@ -1650,10 +1714,10 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
             >
               <option value="all">All Roles</option>
               <option value="Customer">Customer</option>
-              <option value="Vendor">Vendor</option>
+              <option value="Service Provider">Service Provider</option>
               <option value="Contractor">Contractor</option>
               <option value="Agent">Agent</option>
-              <option value="Supplier">Supplier</option>
+              <option value="Vendor">Vendor</option>
             </select>
           </div>
 
@@ -1799,8 +1863,8 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
         </div>
       </div>
 
-      {/* If Supplier is selected as role, render the Supplier Hub (Overview, Enquiries, Suppliers, Revenue) */}
-      {String(roleFilter || '').toLowerCase() === 'supplier' ? (
+      {/* If Vendor is selected as role, render the Supplier Hub (Overview, Enquiries, Suppliers, Revenue) */}
+      {(String(roleFilter || '').toLowerCase() === 'supplier' || String(roleFilter || '').toLowerCase() === 'vendor') ? (
         <SupplierHubAdmin isDarkMode={isDarkMode} />
       ) : (
         <>
@@ -1814,25 +1878,21 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
               marginBottom: '20px',
             }}
           >
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', width: '100%' }}>
+          <table style={{ width: '100%', minWidth: '760px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
             <thead>
               <tr style={{ background: 'var(--table-head-bg, #f8fafc)', borderBottom: '1px solid var(--border, #e2e8f0)' }}>
-                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)' }}>Customer</th>
-                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)' }}>Phone / City</th>
-                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)', textAlign: 'center' }}>Role</th>
-                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)' }}>Registered</th>
-                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)' }}>Last Login</th>
-                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)', textAlign: 'center' }}>Orders</th>
-                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)', textAlign: 'right' }}>Lifetime Spent</th>
-                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)', textAlign: 'center' }}>Status</th>
-                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)', textAlign: 'right' }}>Actions</th>
+                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)', whiteSpace: 'nowrap' }}>Customer</th>
+                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)', whiteSpace: 'nowrap' }}>Phone / City</th>
+                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)', textAlign: 'center', whiteSpace: 'nowrap' }}>Role</th>
+                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)', whiteSpace: 'nowrap' }}>Registered</th>
+                <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)', textAlign: 'right', whiteSpace: 'nowrap' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9} style={{ padding: '40px', textAlign: 'center', color: 'var(--muted, #64748b)' }}>
+                  <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: 'var(--muted, #64748b)' }}>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                       <RefreshCw size={16} className="animate-spin" />
                       Loading customer records...
@@ -1841,7 +1901,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={9} style={{ padding: '40px', textAlign: 'center', color: 'var(--muted, #64748b)' }}>
+                  <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: 'var(--muted, #64748b)' }}>
                     No registered customers match the selected filter criteria.
                   </td>
                 </tr>
@@ -1938,7 +1998,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                           }}
                         >
                           <span>{getRoleBadgeStyle(u.role).icon}</span>
-                          <span>{u.role || 'Customer'}</span>
+                          <span>{u.role === 'service provider' ? 'Service Provider' : (u.role === 'Supplier' || u.role === 'Vendor') ? 'Vendor' : (u.role || 'Customer')}</span>
                         </span>
                       </td>
 
@@ -1948,63 +2008,6 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                         <div style={{ fontSize: '10px', color: 'var(--muted, #94a3b8)' }}>
                           {new Date(u.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
                         </div>
-                      </td>
-
-                      {/* Last Login */}
-                      <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
-                        {u.last_login_at ? (
-                          <>
-                            <div style={{ fontWeight: 600 }}>{formatDateOnly(u.last_login_at)}</div>
-                            <div style={{ fontSize: '10px', color: 'var(--muted, #94a3b8)' }}>
-                              {new Date(u.last_login_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-                            </div>
-                          </>
-                        ) : (
-                          <span style={{ color: 'var(--muted, #94a3b8)', fontStyle: 'italic', fontSize: '11px' }}>
-                            Never logged in
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Orders Count */}
-                      <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            padding: '2px 8px',
-                            borderRadius: '999px',
-                            fontWeight: 700,
-                            fontSize: '11px',
-                            background: Number(u.total_orders) > 0 ? '#e0f2fe' : '#f1f5f9',
-                            color: Number(u.total_orders) > 0 ? '#0369a1' : '#64748b',
-                          }}
-                        >
-                          {u.total_orders} {Number(u.total_orders) === 1 ? 'order' : 'orders'}
-                        </span>
-                      </td>
-
-                      {/* Lifetime Spend */}
-                      <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 800, fontSize: '13px' }}>
-                        <span style={{ color: Number(u.total_spent) > 0 ? '#059669' : 'var(--muted, #94a3b8)' }}>
-                          {formatCurrency(u.total_spent)}
-                        </span>
-                      </td>
-
-                      {/* Status */}
-                      <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            padding: '3px 9px',
-                            borderRadius: '999px',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            background: u.is_blocked ? '#fee2e2' : '#dcfce7',
-                            color: u.is_blocked ? '#dc2626' : '#15803d',
-                          }}
-                        >
-                          {u.is_blocked ? '● Blocked' : '● Active'}
-                        </span>
                       </td>
 
                       {/* Actions */}
@@ -2313,9 +2316,9 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
         ) : (() => {
             const currentRole = userDetails?.role || selectedUser?.role || 'Customer';
             const isAgent = currentRole === 'Agent';
-            const isVendor = currentRole === 'Vendor' || currentRole === 'Contractor';
-            const isSupplier = currentRole === 'Supplier';
-            const isCustomer = currentRole === 'Customer';
+            const isSupplier = currentRole === 'Supplier' || currentRole === 'Vendor' || Boolean(userDetails?.supplier) || selectedUser?.source_table === 'suppliers';
+            const isVendor = !isSupplier && (currentRole === 'vendor' || currentRole === 'Contractor' || currentRole === 'Service Provider' || currentRole === 'service provider');
+            const isCustomer = !isAgent && !isSupplier && !isVendor;
 
             const agentData = userDetails?.agent;
             const vendorData = userDetails?.vendor;
@@ -2666,7 +2669,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
             }
 
             /* ══════════════════════════════════════════════════════
-               2. VENDOR / CONTRACTOR DETAILS VIEW (Exact match to User's Uploaded Screenshot)
+               2. service provider / CONTRACTOR DETAILS VIEW (Exact match to User's Uploaded Screenshot)
                ══════════════════════════════════════════════════════ */
             if (isVendor) {
               return (
@@ -2685,6 +2688,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <div style={{ width: '46px', height: '46px', borderRadius: '50%', background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4338ca', fontWeight: 800, fontSize: '16px', overflow: 'hidden' }}>
                         {vendorData?.profile_photo ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
                           <img src={`/api/vendor/image/${vendorData.id || selectedUser.real_id}?type=profile`} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
                         ) : (
                           (vendorData?.vendor_name || selectedUser.name || 'V').slice(0, 2).toUpperCase()
@@ -2692,7 +2696,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                       </div>
                       <div>
                         <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text, #111)' }}>
-                          {vendorData?.vendor_name || selectedUser.name || 'Vendor Details'}
+                          {vendorData?.vendor_name || selectedUser.name || 'Service Provider Details'}
                         </h3>
                         <div style={{ fontSize: '12px', color: 'var(--muted, #64748b)', marginTop: '2px' }}>
                           {vendorData?.email || selectedUser.email || '—'}
@@ -2709,7 +2713,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 20px', fontSize: '13px' }}>
                       <div>
-                        <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)', marginBottom: '4px' }}>VENDOR NAME</div>
+                        <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)', marginBottom: '4px' }}>SERVICE PROVIDER NAME</div>
                         <div style={{ fontWeight: 700 }}>{vendorData?.vendor_name || selectedUser.name || '—'}</div>
                       </div>
                       <div>
@@ -2731,46 +2735,92 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                     </div>
                   </div>
 
+                  {/* CONTRACTOR ROLE */}
+                  <div style={{ marginBottom: '24px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted, #475569)', marginBottom: '12px' }}>
+                      PROJECT MANAGEMENT ROLE
+                    </div>
+                    <div style={{ border: '1px solid #86efac', borderRadius: '8px', background: '#f0fdf4', padding: '14px', maxWidth: '480px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: contractorSaving ? 'wait' : 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          disabled={contractorSaving}
+                          checked={Boolean(vendorData?.is_contractor || vendorData?.is_project_contractor || String(vendorData?.business_type || '').toLowerCase().includes('contractor'))}
+                          onChange={(event) => {
+                            const isChecked = event.target.checked;
+                            const currentTrade = vendorData?.contractor_trade || 'CIVIL';
+                            handleContractorChange(vendorData?.id || selectedUser.real_id, isChecked, currentTrade);
+                          }}
+                          style={{ width: '18px', height: '18px', cursor: contractorSaving ? 'wait' : 'pointer' }}
+                        />
+                        <span>
+                          <strong style={{ display: 'block', fontSize: '13px', color: '#166534' }}>Register as Contractor</strong>
+                          <small style={{ color: '#4b5563' }}>Show this service provider in Project Management contractor selection.</small>
+                        </span>
+                      </label>
+
+                      {Boolean(vendorData?.is_contractor || vendorData?.is_project_contractor || String(vendorData?.business_type || '').toLowerCase().includes('contractor')) && (
+                        <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #86efac' }}>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#166534', marginBottom: '6px' }}>
+                            Contractor Trade <span style={{ color: '#dc2626' }}>*</span>
+                          </label>
+                          <select
+                            disabled={contractorSaving}
+                            value={vendorData?.contractor_trade || 'CIVIL'}
+                            onChange={(e) => handleContractorChange(vendorData?.id || selectedUser.real_id, true, e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '8px 12px',
+                              borderRadius: '6px',
+                              border: '1px solid #86efac',
+                              background: '#fff',
+                              fontSize: '13px',
+                              fontWeight: 600,
+                              color: '#0f172a',
+                              cursor: contractorSaving ? 'wait' : 'pointer',
+                            }}
+                          >
+                            <option value="CIVIL">CIVIL — Civil Contractor</option>
+                            <option value="GENERAL">GENERAL — General Contractor</option>
+                            <option value="PLUMBING">PLUMBING — Plumber / Plumbing</option>
+                            <option value="ELECTRICIAN">ELECTRICIAN — Electrician</option>
+                            <option value="MASON">MASON — Mason</option>
+                            <option value="CARPENTER">CARPENTER — Carpenter</option>
+                            <option value="PAINTER">PAINTER — Painter</option>
+                            <option value="FABRICATOR">FABRICATOR — Fabricator</option>
+                            <option value="TILE_FLOORING">TILE_FLOORING — Tile / Flooring</option>
+                            <option value="WATERPROOFING">WATERPROOFING — Waterproofing</option>
+                            <option value="HVAC">HVAC — HVAC</option>
+                            <option value="OTHER">OTHER — Other Trade</option>
+                          </select>
+                          <small style={{ display: 'block', marginTop: '4px', color: '#64748b', fontSize: '11px' }}>
+                            Selected trade will be used for filtering in Project Management.
+                          </small>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   {/* ASSIGNED SERVICES */}
                   <div style={{ marginBottom: '24px' }}>
                     <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted, #475569)', marginBottom: '14px' }}>
                       ASSIGNED SERVICES
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '10px', paddingRight: '4px', marginBottom: '12px' }}>
+                    <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5" style={{ paddingRight: '4px', marginBottom: '12px' }}>
                       {(userDetails?.allServices || []).map((service) => {
                         const sId = Number(service.id);
                         const isChecked = selectedServiceIds.includes(sId);
                         return (
-                          <label
+                          <ServiceCheckboxCard
                             key={service.id}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '10px',
-                              padding: '8px 12px',
-                              borderRadius: '8px',
-                              border: `1px solid ${isChecked ? '#3b82f6' : '#e2e8f0'}`,
-                              background: isChecked ? '#eff6ff' : 'var(--bg, #fff)',
-                              cursor: 'pointer',
-                              fontSize: '12px',
+                            service={service}
+                            checked={isChecked}
+                            onChange={(id, nextChecked) => {
+                              setSelectedServiceIds((prev) =>
+                                nextChecked ? [...prev, id] : prev.filter((x) => x !== id)
+                              );
                             }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={(e) => {
-                                const next = e.target.checked
-                                  ? [...selectedServiceIds, sId]
-                                  : selectedServiceIds.filter((id) => id !== sId);
-                                setSelectedServiceIds(next);
-                              }}
-                              style={{ cursor: 'pointer' }}
-                            />
-                            <QuickServiceIcon value={service.icon} label={service.label} size={24} className="flex-shrink-0" />
-                            <span style={{ fontWeight: 600, color: 'var(--text, #111)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {service.label}
-                            </span>
-                          </label>
+                          />
                         );
                       })}
                     </div>
@@ -2829,6 +2879,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                     {vendorData?.has_aadhar_image || vendorData?.aadhar_image ? (
                       <div style={{ marginTop: '8px' }}>
                         <a href={`/api/vendor/image/${vendorData.id || selectedUser.real_id}?type=aadhaar`} target="_blank" rel="noopener noreferrer">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={`/api/vendor/image/${vendorData.id || selectedUser.real_id}?type=aadhaar`}
                             alt="Aadhaar Card"
@@ -2846,10 +2897,10 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                     )}
                   </div>
 
-                  {/* VENDOR WORKSPACE & LEADS */}
+                  {/* service provider WORKSPACE & LEADS */}
                   <div style={{ marginBottom: '24px' }}>
                     <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted, #475569)', marginBottom: '12px' }}>
-                      VENDOR WORKSPACE & LEADS
+                      service provider WORKSPACE & LEADS
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px', marginBottom: '16px' }}>
@@ -2881,7 +2932,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                         </div>
                       ) : (
                         <div style={{ display: 'grid', gap: '6px' }}>
-                          {userDetails.vendorWorkspace.bookings.map((b) => (
+                          {userDetails?.vendorWorkspace.bookings.map((b) => (
                             <div key={b.id} style={{ padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--border, #e2e8f0)', background: 'var(--bg, #fff)', fontSize: '12px' }}>
                               <div style={{ fontWeight: 700 }}>{b.service_label || 'Booking'} - {b.user_name || 'Customer'}</div>
                               <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)', textTransform: 'uppercase', marginTop: '2px' }}>
@@ -2895,15 +2946,15 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
 
                     <div>
                       <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted, #64748b)', marginBottom: '6px' }}>
-                        CRM LEADS AVAILABLE TO THIS VENDOR
+                        CRM LEADS AVAILABLE TO THIS service provider
                       </div>
                       {(userDetails?.vendorWorkspace?.crm_leads || []).length === 0 ? (
                         <div style={{ padding: '10px', borderRadius: '6px', background: '#f8fafc', color: 'var(--muted, #64748b)', fontSize: '12px' }}>
-                          No CRM lead is available for this vendor&apos;s city.
+                          No CRM lead is available for this service provider&apos;s city.
                         </div>
                       ) : (
                         <div style={{ display: 'grid', gap: '6px' }}>
-                          {userDetails.vendorWorkspace.crm_leads.map((l) => (
+                          {userDetails?.vendorWorkspace.crm_leads.map((l) => (
                             <div key={l.id} style={{ padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--border, #e2e8f0)', background: 'var(--bg, #fff)', fontSize: '12px' }}>
                               <div style={{ fontWeight: 700 }}>{l.client_name} · {l.service_type}</div>
                               <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)', marginTop: '2px' }}>
@@ -2957,7 +3008,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                       }}
                     >
                       <ShieldCheck size={16} />
-                      Approve Vendor
+                      Approve service provider
                     </button>
                     <button
                       type="button"
@@ -3019,7 +3070,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                       </div>
                       <div>
                         <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text, #111)' }}>
-                          {supplierData?.shop_name || supplierData?.business_name || selectedUser.name || 'Supplier Details'}
+                          {supplierData?.shop_name || supplierData?.business_name || selectedUser.name || 'Vendor Details'}
                         </h3>
                         <div style={{ fontSize: '12px', color: 'var(--muted, #64748b)', marginTop: '2px' }}>
                           {supplierData?.email || selectedUser.email || '—'}
@@ -3116,7 +3167,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                   {/* SUPPLIER WORKSPACE & STATS */}
                   <div style={{ marginBottom: '24px' }}>
                     <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted, #475569)', marginBottom: '12px' }}>
-                      SUPPLIER WORKSPACE & STATS
+                      VENDOR WORKSPACE & STATS
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '14px' }}>
                       <div style={{ padding: '14px', borderRadius: '8px', border: '1px solid var(--border, #e2e8f0)', background: 'var(--bg, #fff)' }}>
@@ -3174,7 +3225,7 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                       }}
                     >
                       <ShieldCheck size={16} />
-                      Approve Supplier
+                      Approve Vendor
                     </button>
                     <button
                       type="button"
@@ -3246,7 +3297,13 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                 </div>
 
                 {/* CONTACT & LIFETIME STATS */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '24px', padding: '16px', borderRadius: '10px', background: '#f8fafc', border: '1px solid var(--border, #e2e8f0)', fontSize: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '24px', padding: '16px', borderRadius: '10px', background: '#f8fafc', border: '1px solid var(--border, #e2e8f0)', fontSize: '12px' }}>
+                  <div>
+                    <span style={{ color: 'var(--muted, #64748b)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Status</span>
+                    <strong style={{ fontSize: '13px', color: selectedUser.is_blocked ? '#dc2626' : '#15803d' }}>
+                      {selectedUser.is_blocked ? 'Blocked' : 'Active'}
+                    </strong>
+                  </div>
                   <div>
                     <span style={{ color: 'var(--muted, #64748b)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Phone</span>
                     <strong style={{ fontSize: '13px' }}>{selectedUser.phone || '—'}</strong>
@@ -3254,6 +3311,10 @@ export default function UserManagementAdmin({ isDarkMode = false, initialRoleVie
                   <div>
                     <span style={{ color: 'var(--muted, #64748b)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Delivery City</span>
                     <strong style={{ fontSize: '13px' }}>{selectedUser.delivery_city || 'Not set'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--muted, #64748b)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Last Login</span>
+                    <strong style={{ fontSize: '13px' }}>{selectedUser.last_login_at ? formatDateTime(selectedUser.last_login_at) : 'Never logged in'}</strong>
                   </div>
                   <div>
                     <span style={{ color: 'var(--muted, #64748b)', display: 'block', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Total Orders</span>

@@ -1,5 +1,6 @@
 'use client';
 
+import RequiredAsterisk from './RequiredAsterisk';
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -108,7 +109,7 @@ export default function ForgotPasswordForm({ userType, loginHref, accentColor, a
       if (data.success) {
         setDone(true);
         const destination = allowAccountTypeSelection
-          ? selectedUserType === 'vendor' ? '/vendor/login' : selectedUserType === 'supplier' ? '/supplier/login' : '/login'
+          ? selectedUserType === 'vendor' ? '/vendor/login' : selectedUserType === 'supplier' ? '/supplier/login' : selectedUserType === 'agent' ? '/agent/login' : selectedUserType === 'franchise' ? '/franchise/login' : '/login'
           : loginHref;
         setTimeout(() => router.push(destination), 3000);
       } else {
@@ -222,11 +223,13 @@ export default function ForgotPasswordForm({ userType, loginHref, accentColor, a
                       <option value="user">Customer</option>
                       <option value="vendor">Vendor</option>
                       <option value="supplier">Supplier</option>
+                      <option value="agent">Agent</option>
+                      <option value="franchise">Franchise</option>
                     </select>
                   </div>
                 )}
                 <div style={{ marginBottom: '1.25rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: muted, marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Email Address</label>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: muted, marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Email Address <RequiredAsterisk /></label>
                   <input type="email" value={email} onChange={e => { setEmail(e.target.value); setError(''); }} placeholder="your@email.com" required
                     style={inputStyle}
                     onFocus={e => e.target.style.borderColor = accentColor}
@@ -245,7 +248,7 @@ export default function ForgotPasswordForm({ userType, loginHref, accentColor, a
                 {/* OTP boxes */}
                 <div style={{ marginBottom: '1.5rem' }}>
                   <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: muted, marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Enter 6-Digit OTP
+                    Enter 6-Digit OTP <RequiredAsterisk />
                   </label>
                   <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'space-between' }} onPaste={handleOtpPaste}>
                     {otp.map((digit, i) => (
@@ -285,7 +288,7 @@ export default function ForgotPasswordForm({ userType, loginHref, accentColor, a
 
                 {/* New Password */}
                 <div style={{ marginBottom: '1rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: muted, marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>New Password</label>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: muted, marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>New Password <RequiredAsterisk /></label>
                   <div style={{ position: 'relative' }}>
                     <input type={showPwd ? 'text' : 'password'} value={newPassword} onChange={e => { setNewPassword(e.target.value); setError(''); }} placeholder="Min. 6 characters" required
                       style={{ ...inputStyle, paddingRight: '2.5rem' }}
@@ -300,7 +303,7 @@ export default function ForgotPasswordForm({ userType, loginHref, accentColor, a
                 </div>
 
                 <div style={{ marginBottom: '0.5rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: muted, marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Confirm Password</label>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: muted, marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Confirm Password <RequiredAsterisk /></label>
                   <input type={showPwd ? 'text' : 'password'} value={confirmPassword} onChange={e => { setConfirmPassword(e.target.value); setError(''); }} placeholder="Repeat password" required
                     style={inputStyle}
                     onFocus={e => e.target.style.borderColor = accentColor}

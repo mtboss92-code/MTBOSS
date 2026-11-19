@@ -265,27 +265,45 @@ export function calculateShipping({ items = [], groups = [], customerCity, setti
       0
     );
 
-    // Check free shipping threshold
+    // Check free shipping promotions & threshold rules
+    const freePromotions = Array.isArray(settings?.freePromotions) ? settings.freePromotions : [];
+    const allSameCity = items.every((item) =>
+      sameCity(
+        item.source_city || item.supplierCity || item.vendorCity || item.city || item.pickup_city || canonicalCustomerCity,
+        canonicalCustomerCity
+      )
+    );
+
+    const matchedFreePromo = freePromotions.find((promo) => {
+      const minVal = Number(promo.min_cart_value || 0);
+      const isPromoActive = promo.is_active !== false;
+      const sameCityOnly = Boolean(promo.free_shipping_same_city_only);
+      return isPromoActive && totalOrderValue >= minVal && (!sameCityOnly || allSameCity);
+    });
+
     const minOrderVal = Number(freeRule?.min_order_value);
     const isFreeActive = Boolean(freeRule?.is_active && Number.isFinite(minOrderVal) && minOrderVal > 0);
+    const qualifiesForFreeRule = isFreeActive && totalOrderValue >= minOrderVal && (!freeRule.applicable_only_to_same_city || allSameCity);
 
-    const allSameCity = items.every((item) =>
-      sameCity(item.source_city || item.vendorCity || canonicalCustomerCity, canonicalCustomerCity)
-    );
-    const qualifiesForFree =
-      isFreeActive && totalOrderValue >= minOrderVal && (!freeRule.applicable_only_to_same_city || allSameCity);
+    if (matchedFreePromo || qualifiesForFreeRule) {
+      const label = matchedFreePromo
+        ? (matchedFreePromo.badge_text || `Free shipping promotion applied: ${matchedFreePromo.name} (orders over ₹${Number(matchedFreePromo.min_cart_value).toLocaleString('en-IN')})`)
+        : `Free shipping applied (orders over ₹${minOrderVal.toLocaleString('en-IN')})`;
 
-    if (qualifiesForFree) {
+      const firstSourceCity = items[0]?.source_city || items[0]?.supplierCity || items[0]?.vendorCity || canonicalCustomerCity;
+
       return {
         breakdown: [
           {
             category: 'All Categories',
-            vendorCity: items[0]?.source_city || canonicalCustomerCity,
+            sourceCity: firstSourceCity,
+            supplierCity: firstSourceCity,
+            vendorCity: firstSourceCity,
             customerCity: canonicalCustomerCity,
             orderValue: totalOrderValue,
             distanceKm: null,
             shippingCost: 0,
-            label: `Free shipping applied (orders over ₹${minOrderVal.toLocaleString('en-IN')})`,
+            label,
             free: true,
           },
         ],
@@ -356,9 +374,13 @@ export function calculateShipping({ items = [], groups = [], customerCity, setti
       const tripNote = trips > 1 ? ` (${trips} trips)` : '';
       const capNote = isCapped ? ` [Capped at ₹${cap.toLocaleString('en-IN')}]` : '';
 
+      const groupSourceCity = grp.items[0]?.source_city || grp.items[0]?.supplierCity || grp.items[0]?.vendorCity || canonicalCustomerCity;
+
       breakdown.push({
         category: rule.category,
-        vendorCity: grp.items[0]?.source_city || canonicalCustomerCity,
+        sourceCity: groupSourceCity,
+        supplierCity: groupSourceCity,
+        vendorCity: groupSourceCity,
         customerCity: canonicalCustomerCity,
         orderValue: grp.totalValue,
         quantity: totalQty,
@@ -380,10 +402,10 @@ export function calculateShipping({ items = [], groups = [], customerCity, setti
     if (fallbackItems.length > 0) {
       const fallbackGroups = new Map();
       for (const item of fallbackItems) {
-        const sc = String(item.source_city || item.vendorCity || canonicalCustomerCity).trim();
+        const sc = String(item.source_city || item.serviceproviderCity || canonicalCustomerCity).trim();
         const scKey = sc.toLowerCase();
         if (!fallbackGroups.has(scKey)) {
-          fallbackGroups.set(scKey, { vendorCity: sc, orderValue: 0, items: [] });
+          fallbackGroups.set(scKey, { sourceCity: sc, supplierCity: sc, vendorCity: sc, orderValue: 0, items: [] });
         }
         const fg = fallbackGroups.get(scKey);
         fg.items.push(item);
@@ -391,13 +413,15 @@ export function calculateShipping({ items = [], groups = [], customerCity, setti
       }
 
       for (const [, fg] of fallbackGroups.entries()) {
-        const sourceCity = fg.vendorCity;
+        const sourceCity = fg.sourceCity || fg.vendorCity;
         const coreCost = coreByCity.get(sourceCity.toLowerCase());
 
         if (sameCity(sourceCity, canonicalCustomerCity) && coreCost !== undefined) {
           fallbackShipping += coreCost;
           breakdown.push({
-            vendorCity: sourceCity,
+            sourceCity,
+            supplierCity: sourceCity,
+            serviceproviderCity: sourceCity,
             customerCity: canonicalCustomerCity,
             orderValue: fg.orderValue,
             distanceKm: null,
@@ -412,7 +436,9 @@ export function calculateShipping({ items = [], groups = [], customerCity, setti
           if (!sourceCity || distanceKm === undefined || !distanceRule?.is_active) {
             distanceError = true;
             breakdown.push({
-              vendorCity: sourceCity || 'Source city unavailable',
+              sourceCity: sourceCity || 'Source city unavailable',
+              supplierCity: sourceCity || 'Source city unavailable',
+              serviceproviderCity: sourceCity || 'Source city unavailable',
               customerCity: canonicalCustomerCity,
               orderValue: fg.orderValue,
               distanceKm: null,
@@ -423,7 +449,9 @@ export function calculateShipping({ items = [], groups = [], customerCity, setti
             const cost = Number(distanceKm) * Number(distanceRule.rate_per_km);
             fallbackShipping += cost;
             breakdown.push({
-              vendorCity: sourceCity,
+              sourceCity,
+              supplierCity: sourceCity,
+              serviceproviderCity: sourceCity,
               customerCity: canonicalCustomerCity,
               orderValue: fg.orderValue,
               distanceKm,
@@ -459,7 +487,7 @@ export function calculateShipping({ items = [], groups = [], customerCity, setti
 }
 
 /**
- * Legacy calculation using groups of items by vendorCity.
+ * Legacy calculation using groups of items by city.
  */
 function legacyCalculateShipping({ groups = [], customerCity, settings = {} }) {
   const canonicalCustomerCity = String(customerCity || '').trim();
@@ -483,7 +511,7 @@ function legacyCalculateShipping({ groups = [], customerCity, settings = {} }) {
   );
 
   const breakdown = groups.map((group) => {
-    const sourceCity = String(group.vendorCity || '').trim();
+    const sourceCity = String(group.sourceCity || group.supplierCity || group.vendorCity || '').trim();
     const orderValue = Number(group.orderValue) || 0;
     const coreCost = coreByCity.get(sourceCity.toLowerCase());
 
@@ -493,7 +521,9 @@ function legacyCalculateShipping({ groups = [], customerCity, settings = {} }) {
         (!freeRule.applicable_only_to_same_city || sameCity(sourceCity, canonicalCustomerCity)) &&
         orderValue >= Number(freeRule.min_order_value);
       return {
-        vendorCity: sourceCity,
+        sourceCity,
+        supplierCity: sourceCity,
+        serviceproviderCity: sourceCity,
         customerCity: canonicalCustomerCity,
         orderValue,
         distanceKm: null,
@@ -510,7 +540,9 @@ function legacyCalculateShipping({ groups = [], customerCity, settings = {} }) {
 
     if (!sourceCity || distanceKm === undefined || !distanceRule?.is_active) {
       return {
-        vendorCity: sourceCity || 'Source city unavailable',
+        sourceCity: sourceCity || 'Source city unavailable',
+        supplierCity: sourceCity || 'Source city unavailable',
+        serviceproviderCity: sourceCity || 'Source city unavailable',
         customerCity: canonicalCustomerCity,
         orderValue,
         distanceKm: null,
@@ -526,7 +558,9 @@ function legacyCalculateShipping({ groups = [], customerCity, settings = {} }) {
     const shippingCost = free ? 0 : Number(distanceKm) * Number(distanceRule.rate_per_km);
 
     return {
-      vendorCity: sourceCity,
+      sourceCity,
+      supplierCity: sourceCity,
+      serviceproviderCity: sourceCity,
       customerCity: canonicalCustomerCity,
       orderValue,
       distanceKm,

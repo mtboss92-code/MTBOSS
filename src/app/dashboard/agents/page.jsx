@@ -1,5 +1,7 @@
 'use client';
+import RequiredAsterisk from '../../components/RequiredAsterisk';
 import { useState, useEffect } from 'react';
+import { useCities } from '@/hooks/useCities';
 import { Eye, X, ActionIconButton } from '@/app/components/ui/icons';
 
 const STATUS_OPTIONS = ['Pending', 'Reviewing', 'Approved', 'Rejected'];
@@ -18,7 +20,12 @@ const statusStyle = {
   Rejected:  { bg: '#fff1f2', tx: '#9f1239' },
 };
 
+function normalizePhone(value) {
+  return String(value || '').replace(/\D/g, '').slice(0, 10);
+}
+
 export default function AgentsPage() {
+  const { cities, cityRecords, loading: citiesLoading, error: citiesLoadError } = useCities();
   const [agents, setAgents]       = useState([]);
   const [loading, setLoading]     = useState(true);
   const [selected, setSelected]   = useState(null);
@@ -167,16 +174,105 @@ export default function AgentsPage() {
     }
   };
 
+  const toggleManagerRole = async (id, currentIsManager) => {
+    setUpdating(true);
+    setError('');
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/agents', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id, is_manager: !currentIsManager }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.error || 'Could not update manager role.');
+        return;
+      }
+      setAgents(prev => prev.map(a => a.id === id ? { ...a, is_manager: !currentIsManager } : a));
+      if (selected?.id === id) setSelected(prev => ({ ...prev, is_manager: !currentIsManager }));
+      await fetchAgents();
+    } catch (err) {
+      setError(err.message || 'Could not update manager role.');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const assignAgentManager = async (agentId, managerId) => {
+    setUpdating(true);
+    setError('');
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/agents', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id: agentId, manager_id: managerId ? Number(managerId) : null }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.error || 'Could not assign manager.');
+        return;
+      }
+      const mgrName = data.data?.manager_name || (managerId ? agents.find(a => a.id === Number(managerId))?.name : null);
+      setAgents(prev => prev.map(a => a.id === agentId ? { ...a, manager_id: managerId ? Number(managerId) : null, manager_name: mgrName } : a));
+      if (selected?.id === agentId) setSelected(prev => ({ ...prev, manager_id: managerId ? Number(managerId) : null, manager_name: mgrName }));
+      await fetchAgents();
+    } catch (err) {
+      setError(err.message || 'Could not assign manager.');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   const handleCreateAgent = async (e) => {
     e.preventDefault();
     setCreateSaving(true);
     setError('');
+
+    const phone = normalizePhone(createForm.phone);
+    if (!createForm.name.trim()) {
+      setError('Full name is required.');
+      setCreateSaving(false);
+      return;
+    }
+    if (!createForm.email.trim()) {
+      setError('Email address is required.');
+      setCreateSaving(false);
+      return;
+    }
+    if (!/^[6-9]\d{9}$/.test(phone)) {
+      setError('Phone number must be 10 digits and start with 6, 7, 8 or 9.');
+      setCreateSaving(false);
+      return;
+    }
+    if (!createForm.city.trim()) {
+      setError('City is required.');
+      setCreateSaving(false);
+      return;
+    }
+    if (!createForm.state.trim()) {
+      setError('State is required.');
+      setCreateSaving(false);
+      return;
+    }
+    if (!createForm.agentType) {
+      setError('Agent type is required.');
+      setCreateSaving(false);
+      return;
+    }
+    if (cities.length > 0 && !cities.includes(createForm.city)) {
+      setError(`"${createForm.city}" is not an active service city. Please select a city from the list.`);
+      setCreateSaving(false);
+      return;
+    }
+
     try {
       const token = localStorage.getItem('token');
       const res = await fetch('/api/agents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(createForm),
+        body: JSON.stringify({ ...createForm, phone }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -260,12 +356,17 @@ export default function AgentsPage() {
       a.name.toLowerCase().includes(search.toLowerCase()) ||
       a.email.toLowerCase().includes(search.toLowerCase()) ||
       a.city?.toLowerCase().includes(search.toLowerCase());
-    const matchFilter = filter === 'All' || a.status === filter;
+    const matchFilter = filter === 'All'
+      ? true
+      : filter === 'Managers'
+      ? Boolean(a.is_manager)
+      : a.status === filter;
     return matchSearch && matchFilter;
   });
 
   const counts = {
     All:       agents.length,
+    Managers:  agents.filter(a => a.is_manager).length,
     Pending:   agents.filter(a => a.status === 'Pending').length,
     Reviewing: agents.filter(a => a.status === 'Reviewing').length,
     Approved:  agents.filter(a => a.status === 'Approved').length,
@@ -333,10 +434,12 @@ export default function AgentsPage() {
 
         /* Stats row */
         .ag-stats {
-          display: grid; grid-template-columns: repeat(4, 1fr);
+          display: grid; grid-template-columns: repeat(5, 1fr);
           gap: 0.75rem; margin-bottom: 1rem;
         }
+        @media(max-width:1024px){ .ag-stats { grid-template-columns: repeat(3, 1fr); gap: 0.65rem; } }
         @media(max-width:640px){ .ag-stats { grid-template-columns: 1fr 1fr; } }
+        @media(max-width:420px){ .ag-stats { grid-template-columns: 1fr; } }
         .ag-stat {
           background: var(--surface);
           border: 1px solid var(--border);
@@ -356,7 +459,7 @@ export default function AgentsPage() {
           border: 1px solid var(--border);
           border-radius: 8px; overflow: hidden;
         }
-        .ag-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+        .ag-table { width: 100%; min-width: 960px; border-collapse: collapse; font-size: 0.8125rem; }
         .ag-table th {
           padding: 0.5rem 0.875rem;
           text-align: left;
@@ -365,6 +468,7 @@ export default function AgentsPage() {
           color: var(--muted);
           border-bottom: 1px solid var(--border);
           background: var(--bg);
+          white-space: nowrap;
         }
         .ag-table td {
           padding: 0.65rem 0.875rem;
@@ -434,6 +538,18 @@ export default function AgentsPage() {
         .ag-modal-grid {
           display: grid; grid-template-columns: 1fr 1fr;
           gap: 0.875rem; margin-bottom: 1rem;
+        }
+        @media(max-width:768px){
+          .ag-modal-grid { grid-template-columns: 1fr; gap: 0.65rem; }
+        }
+        .ag-ws-stats {
+          display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 0.875rem;
+        }
+        @media(max-width:1024px){
+          .ag-ws-stats { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media(max-width:480px){
+          .ag-ws-stats { grid-template-columns: 1fr; }
         }
         .ag-field-label {
           font-size: 0.6875rem; font-weight: 600;
@@ -534,9 +650,26 @@ export default function AgentsPage() {
 
           <div style={{ maxWidth: '800px', margin: '0 auto', background: 'var(--card-bg, #fff)', border: '1px solid var(--border)', borderRadius: '8px', padding: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
             <form onSubmit={handleCreateAgent}>
+              {error ? (
+                <div
+                  role="alert"
+                  style={{
+                    marginBottom: '1rem',
+                    padding: '0.75rem 1rem',
+                    borderRadius: 8,
+                    border: '1px solid #fecaca',
+                    background: '#fef2f2',
+                    color: '#b91c1c',
+                    fontSize: '0.8125rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  {error}
+                </div>
+              ) : null}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
                 <div>
-                  <label className="ag-field-label" style={{ display: 'block' }}>Full Name *</label>
+                  <label className="ag-field-label" style={{ display: 'block' }}>Full Name <RequiredAsterisk /></label>
                   <input
                     required
                     className="ag-search"
@@ -547,7 +680,7 @@ export default function AgentsPage() {
                   />
                 </div>
                 <div>
-                  <label className="ag-field-label" style={{ display: 'block' }}>Email *</label>
+                  <label className="ag-field-label" style={{ display: 'block' }}>Email <RequiredAsterisk /></label>
                   <input
                     type="email"
                     required
@@ -559,7 +692,7 @@ export default function AgentsPage() {
                   />
                 </div>
                 <div>
-                  <label className="ag-field-label" style={{ display: 'block' }}>Phone *</label>
+                  <label className="ag-field-label" style={{ display: 'block' }}>Phone <RequiredAsterisk /></label>
                   <input
                     required
                     className="ag-search"
@@ -570,18 +703,34 @@ export default function AgentsPage() {
                   />
                 </div>
                 <div>
-                  <label className="ag-field-label" style={{ display: 'block' }}>City *</label>
-                  <input
+                  <label className="ag-field-label" style={{ display: 'block' }}>City <RequiredAsterisk /></label>
+                  <select
                     required
                     className="ag-search"
                     style={{ width: '100%', boxSizing: 'border-box' }}
                     value={createForm.city}
-                    onChange={e => setCreateForm(prev => ({ ...prev, city: e.target.value }))}
-                    placeholder="e.g. Moradabad"
-                  />
+                    disabled={citiesLoading}
+                    onChange={e => {
+                      const city = e.target.value;
+                      const record = cityRecords.find((row) => row.name === city);
+                      setCreateForm(prev => ({
+                        ...prev,
+                        city,
+                        state: record?.state || prev.state,
+                      }));
+                    }}
+                  >
+                    <option value="">{citiesLoading ? 'Loading cities…' : 'Select city'}</option>
+                    {cities.map((cityName) => (
+                      <option key={cityName} value={cityName}>{cityName}</option>
+                    ))}
+                  </select>
+                  {citiesLoadError ? (
+                    <p style={{ marginTop: 6, fontSize: '0.75rem', color: '#dc2626' }}>{citiesLoadError}</p>
+                  ) : null}
                 </div>
                 <div>
-                  <label className="ag-field-label" style={{ display: 'block' }}>State *</label>
+                  <label className="ag-field-label" style={{ display: 'block' }}>State <RequiredAsterisk /></label>
                   <input
                     required
                     className="ag-search"
@@ -602,8 +751,9 @@ export default function AgentsPage() {
                   />
                 </div>
                 <div>
-                  <label className="ag-field-label" style={{ display: 'block' }}>Agent Type *</label>
+                  <label className="ag-field-label" style={{ display: 'block' }}>Agent Type <RequiredAsterisk /></label>
                   <select
+                    required
                     className="ag-search"
                     style={{ width: '100%', boxSizing: 'border-box' }}
                     value={createForm.agentType}
@@ -844,6 +994,80 @@ export default function AgentsPage() {
                 >
                   {selected.has_project_management_access ? 'Revoke PM Access' : 'Grant PM Access'}
                 </button>
+                <button
+                  type="button"
+                  className="ag-close-btn"
+                  disabled={updating}
+                  onClick={() => {
+                    const confirmMsg = selected.is_manager
+                      ? 'Are you sure you want to remove Manager/Head role from this agent?'
+                      : 'Designate this agent as Head Agent / Manager? They will be able to assign tasks to their team and monitor team performance.';
+                    if (window.confirm(confirmMsg)) {
+                      toggleManagerRole(selected.id, selected.is_manager);
+                    }
+                  }}
+                  style={selected.is_manager ? { color: '#b45309', borderColor: '#f59e0b', background: '#fef3c7', fontWeight: 700 } : { color: '#4f46e5', borderColor: '#6366f1', fontWeight: 600 }}
+                >
+                  {selected.is_manager ? '⭐ Remove Manager Role' : '⭐ Make Head / Manager'}
+                </button>
+              </div>
+            )}
+
+            {/* Manager / Reporting Structure Info */}
+            {selected.status === 'Approved' && (
+              <div style={{ marginTop: '0.75rem', marginBottom: '0.875rem', padding: '0.85rem', border: '1px solid var(--border)', borderRadius: 8, background: selected.is_manager ? '#fffbeb' : 'var(--bg)' }}>
+                {selected.is_manager ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#92400e', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>⭐</span> Head Agent / Manager Role Active
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#b45309', marginTop: 2 }}>
+                        This agent has managerial access in the Agent Portal to assign and monitor tasks for their subordinate team.
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--text)', marginBottom: 2 }}>
+                      👔 Reporting Manager / Team Lead
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--muted)', marginBottom: 8 }}>
+                      Assign which Head Agent / Manager oversees this agent (or leave as Direct to Admin):
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <select
+                        value={selected.manager_id || ''}
+                        onChange={(e) => assignAgentManager(selected.id, e.target.value)}
+                        disabled={updating}
+                        style={{
+                          padding: '0.4rem 0.65rem',
+                          fontSize: '0.8125rem',
+                          borderRadius: 6,
+                          border: '1px solid var(--border)',
+                          background: 'var(--surface)',
+                          color: 'var(--text)',
+                          fontWeight: 600,
+                          minWidth: '240px',
+                        }}
+                      >
+                        <option value="">Direct to Admin (No Manager)</option>
+                        {agents
+                          .filter(a => a.is_manager && a.id !== selected.id && a.status === 'Approved')
+                          .map(mgr => (
+                            <option key={mgr.id} value={mgr.id}>
+                              ⭐ {mgr.name} ({mgr.city}) - Manager
+                            </option>
+                          ))}
+                      </select>
+                      {selected.manager_name && (
+                        <span style={{ fontSize: '0.72rem', color: '#6366f1', fontWeight: 600 }}>
+                          Currently reports to: {selected.manager_name}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -936,7 +1160,7 @@ export default function AgentsPage() {
             ) : workspace && (
               <div style={{ marginTop: '1rem' }}>
                 <div className="ag-field-label" style={{ marginBottom: '0.5rem' }}>Agent Workspace Preview</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '0.875rem' }}>
+                <div className="ag-ws-stats">
                   <div className="ag-stat">
                     <div className="ag-stat-label">Leads</div>
                     <div className="ag-stat-value">{workspace.leads?.length || 0}</div>
@@ -1114,7 +1338,7 @@ export default function AgentsPage() {
             <button
               type="button"
               className="ag-ok-btn"
-              onClick={() => setShowCreateModal(true)}
+              onClick={() => { setError(''); setShowCreateModal(true); }}
               style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
             >
               + Create Agent
@@ -1131,10 +1355,11 @@ export default function AgentsPage() {
         {/* Stats */}
         <div className="ag-stats">
           {[
-            { label: 'Total',    value: counts.All },
-            { label: 'Pending',  value: counts.Pending },
-            { label: 'Approved', value: counts.Approved },
-            { label: 'Rejected', value: counts.Rejected },
+            { label: 'Total',     value: counts.All },
+            { label: '⭐ Managers', value: counts.Managers },
+            { label: 'Pending',   value: counts.Pending },
+            { label: 'Approved',  value: counts.Approved },
+            { label: 'Rejected',  value: counts.Rejected },
           ].map(s => (
             <div key={s.label} className="ag-stat">
               <div className="ag-stat-label">{s.label}</div>
@@ -1145,13 +1370,13 @@ export default function AgentsPage() {
 
         {/* Filter tabs */}
         <div className="ag-filters">
-          {['All', ...STATUS_OPTIONS].map(f => (
+          {['All', 'Managers', ...STATUS_OPTIONS].map(f => (
             <button
               key={f}
               className={`ag-filter-btn${filter === f ? ' active' : ''}`}
               onClick={() => setFilter(f)}
             >
-              {f}
+              {f === 'Managers' ? '⭐ Managers' : f}
               <span className="ag-count">{counts[f] ?? 0}</span>
             </button>
           ))}
@@ -1182,8 +1407,22 @@ export default function AgentsPage() {
                     return (
                       <tr key={agent.id} onClick={() => openAgent(agent)}>
                         <td>
-                          <div className="ag-name">{agent.name}</div>
-                          <div className="ag-muted">{agent.occupation}</div>
+                          <div className="ag-name" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span>{agent.name}</span>
+                            {agent.is_manager && (
+                              <span style={{ fontSize: '0.6875rem', fontWeight: 800, background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: 999 }}>
+                                ⭐ Manager
+                              </span>
+                            )}
+                          </div>
+                          <div className="ag-muted" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <span>{agent.occupation}</span>
+                            {agent.manager_name && (
+                              <span style={{ fontSize: '0.6875rem', color: '#4338ca', background: '#e0e7ff', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
+                                Lead: {agent.manager_name}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td>
                           <div style={{ fontSize: '0.8125rem' }}>{agent.email}</div>

@@ -29,20 +29,53 @@ const ensureLeadManagementSchema = createInitializationGuard(async () => {
     `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS priority VARCHAR(30) DEFAULT 'Normal'`,
     `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS assigned_agent_ids JSONB DEFAULT '[]'::jsonb`,
     `ALTER TABLE agents ADD COLUMN IF NOT EXISTS specializations JSONB NOT NULL DEFAULT '[]'::jsonb`,
+    `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS time_slot VARCHAR(100)`,
+    `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS meeting_date VARCHAR(100)`,
+    `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS address TEXT`,
+    `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS state VARCHAR(120)`,
+    `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS gps_location VARCHAR(100)`,
+    `ALTER TABLE agent_leads ADD COLUMN IF NOT EXISTS alternate_phone VARCHAR(50)`,
+
+    `CREATE INDEX IF NOT EXISTS idx_agent_leads_source_ref ON agent_leads (source_ref_table, source_ref_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_agent_leads_created_at ON agent_leads (created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_agent_leads_status ON agent_leads (status)`,
+    `CREATE INDEX IF NOT EXISTS idx_agent_leads_agent_id ON agent_leads (agent_id)`,
   ];
   for (const sql of alters) await pool.query(sql);
+  // Heavy backfill runs in syncExternalLeads — not on every notification/lite poll.
 });
 
 async function syncExternalLeads({ force = false } = {}) {
   if (!force && lastLeadSyncAt && Date.now() - lastLeadSyncAt < SYNC_TTL_MS) return;
+  try {
+    await pool.query(`
+      UPDATE agent_leads l
+      SET time_slot = COALESCE(l.time_slot, p.time_slot),
+          meeting_date = COALESCE(l.meeting_date, p.meeting_date::text),
+          address = COALESCE(l.address, p.address),
+          state = COALESCE(l.state, p.state),
+          gps_location = COALESCE(l.gps_location, p.gps_location),
+          alternate_phone = COALESCE(l.alternate_phone, p.alternate_phone)
+      FROM primary_service_enquiries p
+      WHERE l.source_ref_table = 'primary_service_enquiries'
+        AND l.source_ref_id = p.id
+        AND (l.time_slot IS NULL OR l.meeting_date IS NULL OR l.address IS NULL);
+    `);
+  } catch (err) {
+    console.warn('Backfill primary service leads error:', err.message);
+  }
   const syncs = [
     `INSERT INTO agent_leads
-       (city, client_name, client_phone, client_email, service_type, lead_type, status,
-        notes, client_requirement, lead_source, source_ref_table, source_ref_id, assigned_by_role)
+       (city, state, address, client_name, client_phone, alternate_phone, client_email, service_type, lead_type, status,
+        notes, client_requirement, lead_source, source_ref_table, source_ref_id, assigned_by_role,
+        time_slot, meeting_date, gps_location)
      SELECT
        COALESCE(NULLIF(city, ''), 'Unassigned') AS city,
+       state,
+       address,
        name,
        phone,
+       alternate_phone,
        email,
        service_title,
        'Primary Service',
@@ -52,7 +85,10 @@ async function syncExternalLeads({ force = false } = {}) {
        'primary-service',
        'primary_service_enquiries',
        id,
-       'system'
+       'system',
+       time_slot,
+       meeting_date::text,
+       gps_location
      FROM primary_service_enquiries p
      WHERE NOT EXISTS (
        SELECT 1 FROM agent_leads l
@@ -60,21 +96,25 @@ async function syncExternalLeads({ force = false } = {}) {
      )`,
     `INSERT INTO agent_leads
        (city, client_name, client_phone, client_email, service_type, lead_type, status,
-        notes, client_requirement, lead_source, source_ref_table, source_ref_id, assigned_by_role)
+        notes, client_requirement, lead_source, source_ref_table, source_ref_id, assigned_by_role,
+        time_slot, meeting_date, address)
      SELECT
-       COALESCE(NULLIF(service_city, ''), NULLIF(city, ''), 'Unassigned'),
+       COALESCE(NULLIF(service_city, ''), 'Unassigned'),
        COALESCE(NULLIF(user_name, ''), 'Customer'),
        COALESCE(NULLIF(user_phone, ''), '-'),
        user_email,
-       COALESCE(NULLIF(service_name, ''), NULLIF(service_title, ''), 'Quick Service'),
+       COALESCE(NULLIF(service_subcategory, ''), 'Quick Service'),
        'Quick Service',
        'New',
        service_address,
-       COALESCE(NULLIF(description, ''), NULLIF(notes, '')),
+       service_description,
        'quick-service',
        'service_bookings',
        id,
-       'system'
+       'system',
+       booking_time,
+       booking_date::text,
+       service_address
      FROM service_bookings s
      WHERE NOT EXISTS (
        SELECT 1 FROM agent_leads l
@@ -173,6 +213,7 @@ async function getLeadRows({
   page = 1,
   limit = 100,
   unbounded = false,
+  lite = false,
 } = {}) {
   const params = [];
   const filters = [];
@@ -201,19 +242,44 @@ async function getLeadRows({
   }
 
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
-  const orderSql = `
-     ORDER BY
-       CASE
-         WHEN l.status = 'Lost' OR l.lead_stage = 'Lost' THEN 2
-         WHEN l.status = 'New' OR l.lead_stage = 'New' THEN 0
-         ELSE 1
-       END ASC,
-       l.created_at DESC`;
+  const orderSql = ` ORDER BY l.created_at DESC, l.id DESC`;
+
+  // Notification / lite polls only need identity + status timestamps — skip heavy joins.
+  if (lite && !unbounded) {
+    const safePage = Math.max(1, parseInt(page, 10) || 1);
+    const safeLimit = Math.min(200, Math.max(1, parseInt(limit, 10) || 100));
+    const offset = (safePage - 1) * safeLimit;
+    params.push(safeLimit, offset);
+    const result = await pool.query(
+      `SELECT
+         l.id, l.client_name, l.service_type, l.lead_source, l.status, l.lead_stage,
+         l.created_at, l.updated_at
+       FROM agent_leads l
+       ${where}
+       ${orderSql}
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+    return {
+      rows: result.rows,
+      total: result.rows.length + offset,
+      page: safePage,
+      limit: safeLimit,
+    };
+  }
 
   if (unbounded) {
     const result = await pool.query(
       `SELECT
          l.*,
+         COALESCE(l.time_slot, pse.time_slot, sb.booking_time, NULL) AS time_slot,
+         COALESCE(l.meeting_date::text, pse.meeting_date::text, sb.booking_date::text, NULL) AS meeting_date,
+         COALESCE(l.address, pse.address, sb.service_address, NULL) AS address,
+         COALESCE(l.state, pse.state, NULL) AS state,
+         COALESCE(l.gps_location, pse.gps_location, NULL) AS gps_location,
+         COALESCE(l.alternate_phone, pse.alternate_phone, NULL) AS alternate_phone,
+         CASE WHEN l.status = 'Converted' THEN COALESCE(l.converted_project_id, pm.id) ELSE NULL END AS converted_project_id,
+         op.id AS operational_project_id,
          a.name AS agent_name,
          a.email AS agent_email,
          a.phone AS agent_phone,
@@ -226,6 +292,10 @@ async function getLeadRows({
        LEFT JOIN agents a ON a.id = l.agent_id
        LEFT JOIN franchises f ON f.id = l.assigned_franchise_id
        LEFT JOIN vendors v ON v.id = l.assigned_vendor_id
+       LEFT JOIN pm_projects pm ON (pm.id = l.converted_project_id OR pm.source_lead_id = l.id)
+       LEFT JOIN projects op ON (op.source_lead_id = l.id AND op.project_kind = 'operational')
+       LEFT JOIN primary_service_enquiries pse ON (l.source_ref_table = 'primary_service_enquiries' AND pse.id = l.source_ref_id)
+       LEFT JOIN service_bookings sb ON (l.source_ref_table = 'service_bookings' AND sb.id = l.source_ref_id)
        ${where}
        ${orderSql}`,
       params
@@ -242,7 +312,14 @@ async function getLeadRows({
   const result = await pool.query(
     `SELECT
        l.*,
-       CASE WHEN l.status = 'Converted' THEN COALESCE(l.converted_project_id, pm.id, op.id) ELSE NULL END AS converted_project_id,
+       COALESCE(l.time_slot, pse.time_slot, sb.booking_time, NULL) AS time_slot,
+       COALESCE(l.meeting_date::text, pse.meeting_date::text, sb.booking_date::text, NULL) AS meeting_date,
+       COALESCE(l.address, pse.address, sb.service_address, NULL) AS address,
+       COALESCE(l.state, pse.state, NULL) AS state,
+       COALESCE(l.gps_location, pse.gps_location, NULL) AS gps_location,
+       COALESCE(l.alternate_phone, pse.alternate_phone, NULL) AS alternate_phone,
+       CASE WHEN l.status = 'Converted' THEN COALESCE(l.converted_project_id, pm.id) ELSE NULL END AS converted_project_id,
+       op.id AS operational_project_id,
        a.name AS agent_name,
        a.email AS agent_email,
        a.phone AS agent_phone,
@@ -257,6 +334,8 @@ async function getLeadRows({
      LEFT JOIN vendors v ON v.id = l.assigned_vendor_id
      LEFT JOIN pm_projects pm ON (pm.id = l.converted_project_id OR pm.source_lead_id = l.id)
      LEFT JOIN projects op ON (op.source_lead_id = l.id AND op.project_kind = 'operational')
+     LEFT JOIN primary_service_enquiries pse ON (l.source_ref_table = 'primary_service_enquiries' AND pse.id = l.source_ref_id)
+     LEFT JOIN service_bookings sb ON (l.source_ref_table = 'service_bookings' AND sb.id = l.source_ref_id)
      ${where}
      ${orderSql}
      LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -270,14 +349,25 @@ export async function GET(req) {
     if (!requireRole(req, 'admin')) {
       return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
     }
-    await ensureLeadManagementSchema();
 
     const { searchParams } = new URL(req.url);
+    const liteEarly = searchParams.get('lite') === '1';
+    // Notification polls only read core agent_leads columns — skip DDL bootstrap.
+    if (!liteEarly) {
+      await ensureLeadManagementSchema();
+    }
+
     const singleLeadId = searchParams.get('leadId');
     if (singleLeadId) {
       const leadRes = await pool.query(
         `SELECT
            l.*,
+           COALESCE(l.time_slot, pse.time_slot, sb.booking_time, NULL) AS time_slot,
+           COALESCE(l.meeting_date::text, pse.meeting_date::text, sb.booking_date::text, NULL) AS meeting_date,
+           COALESCE(l.address, pse.address, sb.service_address, NULL) AS address,
+           COALESCE(l.state, pse.state, NULL) AS state,
+           COALESCE(l.gps_location, pse.gps_location, NULL) AS gps_location,
+           COALESCE(l.alternate_phone, pse.alternate_phone, NULL) AS alternate_phone,
            a.name AS agent_name,
            a.email AS agent_email,
            a.phone AS agent_phone,
@@ -290,7 +380,8 @@ export async function GET(req) {
            CASE WHEN l.status = 'Converted' THEN COALESCE(p.site_address, op.location) ELSE NULL END AS project_site_address,
            CASE WHEN l.status = 'Converted' THEN COALESCE(p.status, op.status, op.project_status) ELSE NULL END AS project_status,
            CASE WHEN l.status = 'Converted' THEN COALESCE(p.contract_value, op.deal_amount::numeric, 0) ELSE 0 END AS project_contract_value,
-           CASE WHEN l.status = 'Converted' THEN COALESCE(l.converted_project_id, p.id, op.id) ELSE NULL END AS converted_project_id,
+           CASE WHEN l.status = 'Converted' THEN COALESCE(l.converted_project_id, p.id) ELSE NULL END AS converted_project_id,
+           op.id AS operational_project_id,
            CASE WHEN l.status = 'Converted' THEN COALESCE(p.id, op.id) ELSE NULL END AS project_id
          FROM agent_leads l
          LEFT JOIN agents a ON a.id = l.agent_id
@@ -298,6 +389,8 @@ export async function GET(req) {
          LEFT JOIN vendors v ON v.id = l.assigned_vendor_id
          LEFT JOIN pm_projects p ON (p.id = l.converted_project_id OR p.source_lead_id = l.id)
          LEFT JOIN projects op ON (op.source_lead_id = l.id AND op.project_kind = 'operational')
+         LEFT JOIN primary_service_enquiries pse ON (l.source_ref_table = 'primary_service_enquiries' AND pse.id = l.source_ref_id)
+         LEFT JOIN service_bookings sb ON (l.source_ref_table = 'service_bookings' AND sb.id = l.source_ref_id)
          WHERE l.id = $1`,
         [singleLeadId]
       );
@@ -414,7 +507,7 @@ export async function GET(req) {
         return new Response(xlsx, {
           headers: {
             'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'Content-Disposition': 'attachment; filename="mtboss-leads.xlsx"',
+            'Content-Disposition': 'attachment; filename="MTBOSS-leads.xlsx"',
             'Cache-Control': 'no-store',
           },
         });
@@ -428,14 +521,14 @@ export async function GET(req) {
       return new Response(csv, {
         headers: {
           'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': 'attachment; filename="mtboss-leads.csv"',
+          'Content-Disposition': 'attachment; filename="MTBOSS-leads.csv"',
         },
       });
     }
 
     const page = searchParams.get('page') || '1';
     const limit = searchParams.get('limit') || '100';
-    const { rows, total, page: p, limit: l } = await getLeadRows({ ...filters, page, limit });
+    const { rows, total, page: p, limit: l } = await getLeadRows({ ...filters, page, limit, lite });
     const dirs = lite
       ? { agents: [], franchises: [], vendors: [] }
       : await getAssignableDirectories();
@@ -455,6 +548,7 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
+  let client;
   try {
     const admin = requireRole(req, 'admin');
     if (!admin) {
@@ -473,8 +567,38 @@ export async function POST(req) {
     if (!client_name || !client_phone || !city) {
       return NextResponse.json({ success: false, error: 'Client name, phone and city are required' }, { status: 400 });
     }
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // Lock this customer identity for the duration of the request. This closes
+    // the gap before the browser can render its disabled "Saving…" button.
+    const normalizedPhone = String(client_phone).replace(/\D/g, '');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `admin-lead:${normalizedPhone}:${String(client_name).trim().toLowerCase()}:${String(city).trim().toLowerCase()}`,
+    ]);
+    const duplicate = await client.query(
+      `SELECT *
+         FROM agent_leads
+        WHERE source_ref_table IS NULL
+          AND REGEXP_REPLACE(client_phone, '[^0-9]', '', 'g') = $1
+          AND LOWER(TRIM(client_name)) = LOWER(TRIM($2))
+          AND LOWER(TRIM(city)) = LOWER(TRIM($3))
+          AND created_at > NOW() - INTERVAL '5 minutes'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`,
+      [normalizedPhone, client_name, city]
+    );
+    if (duplicate.rows[0]) {
+      await client.query('COMMIT');
+      return NextResponse.json({
+        success: true,
+        data: duplicate.rows[0],
+        duplicate: true,
+        message: 'This lead was already saved.',
+      });
+    }
     if (agent_id) {
-      const approvedAgent = await pool.query(
+      const approvedAgent = await client.query(
         `SELECT id FROM agents
           WHERE id = $1
             AND status = 'Approved'
@@ -484,19 +608,26 @@ export async function POST(req) {
         [agent_id, city]
       );
       if (!approvedAgent.rows[0]) {
+        await client.query('ROLLBACK');
         return NextResponse.json({ success: false, error: 'Select an active approved agent from the lead city.' }, { status: 400 });
       }
     }
     if (assigned_franchise_id) {
-      const match = await pool.query(`SELECT id FROM franchises WHERE id = $1 AND status = 'Approved' AND LOWER(TRIM(COALESCE(city,''))) = LOWER(TRIM($2))`, [assigned_franchise_id, city]);
-      if (!match.rows[0]) return NextResponse.json({ success: false, error: 'Select an approved franchise from the lead city.' }, { status: 400 });
+      const match = await client.query(`SELECT id FROM franchises WHERE id = $1 AND status = 'Approved' AND LOWER(TRIM(COALESCE(city,''))) = LOWER(TRIM($2))`, [assigned_franchise_id, city]);
+      if (!match.rows[0]) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ success: false, error: 'Select an approved franchise from the lead city.' }, { status: 400 });
+      }
     }
     if (assigned_vendor_id) {
-      const match = await pool.query(`SELECT id FROM vendors WHERE id = $1 AND is_approved = TRUE AND status = 'active' AND package_status = 'active' AND (package_expires_at IS NULL OR package_expires_at > NOW()) AND LOWER(TRIM(COALESCE(city,''))) = LOWER(TRIM($2))`, [assigned_vendor_id, city]);
-      if (!match.rows[0]) return NextResponse.json({ success: false, error: 'Select a paid active approved vendor from the lead city.' }, { status: 400 });
+      const match = await client.query(`SELECT id FROM vendors WHERE id = $1 AND is_approved = TRUE AND status = 'active' AND package_status = 'active' AND (package_expires_at IS NULL OR package_expires_at > NOW()) AND LOWER(TRIM(COALESCE(city,''))) = LOWER(TRIM($2))`, [assigned_vendor_id, city]);
+      if (!match.rows[0]) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ success: false, error: 'Select a paid active approved vendor from the lead city.' }, { status: 400 });
+      }
     }
 
-    const result = await pool.query(
+    const result = await client.query(
       `INSERT INTO agent_leads
         (agent_id, assigned_franchise_id, assigned_vendor_id, city, client_name, client_phone, client_email,
          service_type, lead_type, status, follow_up_date, notes, client_requirement,
@@ -521,10 +652,14 @@ export async function POST(req) {
       ]
     );
 
+    await client.query('COMMIT');
     return NextResponse.json({ success: true, data: result.rows[0] }, { status: 201 });
   } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Lead management POST error:', error);
     return NextResponse.json({ success: false, error: 'Server error' }, { status: 500 });
+  } finally {
+    client?.release();
   }
 }
 

@@ -1,4 +1,5 @@
 'use client';
+import RequiredAsterisk from './RequiredAsterisk';
 
 import { useEffect, useMemo, useState } from 'react';
 import { COMPANY_CONTACT } from '../lib/company';
@@ -256,9 +257,37 @@ const DEFAULT_SETTINGS = {
     ])
   ),
   materialFactors: Object.fromEntries(CATEGORY_SPECS.map((spec) => [spec.key, spec.factor])),
+  supervisionPercent: 3.5,
+  contingencyPercent: 2.5,
+  wastagePercent: 3.5,
+  additionalCharges: {
+    supervisionPercent: 3.5,
+    contingencyPercent: 2.5,
+    wastagePercent: 3.5,
+  },
 };
 
+function cleanPercentage(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const next = Number(value);
+  if (!Number.isFinite(next) || next < 0 || next > 100) return fallback;
+  return Math.round(next * 100) / 100;
+}
+
 function mergeCalculatorSettings(settings = {}) {
+  const supervisionPercent = cleanPercentage(
+    settings.supervisionPercent ?? settings.additionalCharges?.supervisionPercent,
+    DEFAULT_SETTINGS.supervisionPercent
+  );
+  const contingencyPercent = cleanPercentage(
+    settings.contingencyPercent ?? settings.additionalCharges?.contingencyPercent,
+    DEFAULT_SETTINGS.contingencyPercent
+  );
+  const wastagePercent = cleanPercentage(
+    settings.wastagePercent ?? settings.additionalCharges?.wastagePercent,
+    DEFAULT_SETTINGS.wastagePercent
+  );
+
   return {
     cityRates: {
       ...DEFAULT_SETTINGS.cityRates,
@@ -280,6 +309,14 @@ function mergeCalculatorSettings(settings = {}) {
       ...DEFAULT_SETTINGS.materialFactors,
       ...(settings.materialFactors || {}),
     },
+    supervisionPercent,
+    contingencyPercent,
+    wastagePercent,
+    additionalCharges: {
+      supervisionPercent,
+      contingencyPercent,
+      wastagePercent,
+    },
   };
 }
 
@@ -292,6 +329,17 @@ const formatCurrency = (value) =>
 
 const formatNumber = (value) =>
   new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Number.isFinite(value) ? value : 0);
+
+const SQFT_PER_SQM = 10.7639;
+
+const formatPerUnit = (amount, builtUpArea, unit = 'sqft', isApprox = false) => {
+  if (!builtUpArea || builtUpArea <= 0 || !Number.isFinite(amount)) return '-';
+  const perSqft = amount / builtUpArea;
+  const rate = unit === 'sqm' ? perSqft * SQFT_PER_SQM : perSqft;
+  const unitLabel = unit === 'sqm' ? 'sq.m' : 'sqft';
+  const prefix = isApprox ? '~' : '';
+  return `${prefix}${formatCurrency(Math.round(rate))} / ${unitLabel}`;
+};
 
 function getProductPrice(product, city, quality) {
   if (quality && city && product.price_matrix && typeof product.price_matrix === 'object') {
@@ -422,6 +470,14 @@ function makeEstimateSnapshot({ project, estimate, phaseTotals, quoteForm }) {
       transportTotal: estimate.transportTotal,
       supervisionTotal: estimate.supervisionTotal,
       contingencyTotal: estimate.contingencyTotal,
+      supervisionPercent: estimate.supervisionPercent,
+      contingencyPercent: estimate.contingencyPercent,
+      wastagePercent: estimate.wastagePercent,
+    },
+    percentages: {
+      supervisionPercent: estimate.supervisionPercent,
+      contingencyPercent: estimate.contingencyPercent,
+      wastagePercent: estimate.wastagePercent,
     },
     phaseTotals,
     lineItems: estimate.lineItems.map((item) => ({
@@ -453,7 +509,7 @@ function buildReportHtml(snapshot) {
   <html>
     <head>
       <meta charset="utf-8" />
-      <title>MTBoss Construction Budget Estimate</title>
+      <title>MTBOSS Construction Budget Estimate</title>
       <style>
         * { box-sizing: border-box; }
         body { margin: 0; background: #f4f5f2; color: #111; font-family: Arial, sans-serif; }
@@ -493,9 +549,9 @@ function buildReportHtml(snapshot) {
       <div class="page">
         <div class="top">
           <div class="brand">
-            <img src="/logo.png" alt="MTBoss" />
+            <img src="/logo.png" alt="MTBOSS" />
             <div>
-              <h1>MTBoss Construction</h1>
+              <h1>MTBOSS Construction</h1>
               <p>Construction, materials, site execution and property services</p>
               <p>{COMPANY_CONTACT.email} | {COMPANY_CONTACT.phone}</p>
             </div>
@@ -546,29 +602,29 @@ function buildReportHtml(snapshot) {
             <div class="line"><b>Material Total</b><strong>${formatCurrency(snapshot.totals.materialTotal)}</strong></div>
             <div class="line"><b>Labour Cost</b><strong>${formatCurrency(snapshot.totals.labourTotal)}</strong></div>
             <div class="line"><b>Transport</b><strong>${formatCurrency(snapshot.totals.transportTotal)}</strong></div>
-            <div class="line"><b>Supervision</b><strong>${formatCurrency(snapshot.totals.supervisionTotal)}</strong></div>
-            <div class="line"><b>Contingency</b><strong>${formatCurrency(snapshot.totals.contingencyTotal)}</strong></div>
+            <div class="line"><b>Supervision (${snapshot.percentages?.supervisionPercent ?? snapshot.totals?.supervisionPercent ?? 3.5}%)</b><strong>${formatCurrency(snapshot.totals.supervisionTotal)}</strong></div>
+            <div class="line"><b>Contingency (${snapshot.percentages?.contingencyPercent ?? snapshot.totals?.contingencyPercent ?? 2.5}%)</b><strong>${formatCurrency(snapshot.totals.contingencyTotal)}</strong></div>
           </div>
         </div>
 
         <div class="ad">
-          <strong>Next Step:</strong> MTBoss can arrange a site visit, detailed BOQ, material procurement support, vendor coordination, labour planning and end-to-end construction execution. Share this estimate with our team to convert it into a detailed project proposal.
+          <strong>Next Step:</strong> MTBOSS can arrange a site visit, detailed BOQ, material procurement support, vendor coordination, labour planning and end-to-end construction execution. Share this estimate with our team to convert it into a detailed project proposal.
         </div>
 
         <div class="disclaimer">
-          <strong>Important Disclaimer:</strong> This budget is an approximate estimate generated from calculator assumptions, selected materials and city-level rates. Actual project value may vary after site visit, soil condition review, architectural/structural drawings, local material rates, labour availability, finishing choices, transport distance, statutory requirements and real site measurements. Final pricing should be confirmed only after an MTBoss site inspection and detailed technical assessment.
+          <strong>Important Disclaimer:</strong> This budget is an approximate estimate generated from calculator assumptions, selected materials and city-level rates. Actual project value may vary after site visit, soil condition review, architectural/structural drawings, local material rates, labour availability, finishing choices, transport distance, statutory requirements and real site measurements. Final pricing should be confirmed only after an MTBOSS site inspection and detailed technical assessment.
         </div>
 
         <div class="footer">
           <div>
-            <strong>MTBoss Office</strong>
+            <strong>MTBOSS Office</strong>
             Harthala Kanth Road Behind Kr Collection, near Domino's,<br />
             Uttar Pradesh, India
           </div>
           <div>
             <strong>Contact Us</strong>
             Phone: <a href={COMPANY_CONTACT.telHref}>{COMPANY_CONTACT.phone}</a><br />
-            Email: <a href="mailto:mtboss2016@gmail.com">mtboss2016@gmail.com</a><br />
+            Email: <a href="mailto:MTBOSS2016@gmail.com">MTBOSS2016@gmail.com</a><br />
             Web: <a href="/contact">Contact Us</a>
           </div>
         </div>
@@ -601,6 +657,7 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
   const [included, setIncluded] = useState(() =>
     CATEGORY_SPECS.reduce((acc, spec) => ({ ...acc, [spec.key]: spec.type === 'Mandatory' || spec.phase !== 'Finishing' }), {})
   );
+  const [costUnit, setCostUnit] = useState('sqft');
   const [quoteOpen, setQuoteOpen] = useState(false);
   const [quoteStep, setQuoteStep] = useState('details');
   const [quoteForm, setQuoteForm] = useState({ name: '', email: '', phone: '', address: '' });
@@ -617,7 +674,7 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
       try {
         const [productRes, settingsRes, cityRes] = await Promise.all([
           fetch('/api/calculator-products'),
-          fetch('/api/calculator-settings'),
+          fetch('/api/calculator-settings', { cache: 'no-store' }),
           fetch('/api/cities?fields=lite'),
         ]);
         const productData = await productRes.json();
@@ -726,7 +783,10 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
     const area = Math.max(Number(project.area) || 0, 1);
     const floors = Math.max(Number(project.floors) || 1, 1);
     const builtUpArea = area * floors;
-    const floorWastage = 1 + Math.max(floors - 1, 0) * 0.035;
+    const supervisionPercent = cleanPercentage(settings.supervisionPercent, 3.5);
+    const contingencyPercent = cleanPercentage(settings.contingencyPercent, 2.5);
+    const wastagePercent = cleanPercentage(settings.wastagePercent, 3.5);
+    const floorWastage = 1 + Math.max(floors - 1, 0) * (wastagePercent / 100);
 
     const lineItems = CATEGORY_SPECS.filter((spec) => included[spec.key]).map((spec) => {
       const options = productsByCategory.get(spec.key) || [];
@@ -758,8 +818,8 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
     const labourBase = builtUpArea * effectiveLabourRate * quality.labourMultiplier * foundation.labourMultiplier;
     const labourTotal = Math.round(labourBase);
     const transportTotal = Math.round(builtUpArea * cityRate.transport);
-    const supervisionTotal = Math.round((materialTotal + labourTotal) * 0.035);
-    const contingencyTotal = Math.round((materialTotal + labourTotal + transportTotal) * 0.025);
+    const supervisionTotal = Math.round((materialTotal + labourTotal) * (supervisionPercent / 100));
+    const contingencyTotal = Math.round((materialTotal + labourTotal + transportTotal) * (contingencyPercent / 100));
     const grandTotal = materialTotal + labourTotal + transportTotal + supervisionTotal + contingencyTotal;
 
     return {
@@ -777,6 +837,9 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
       cityRate,
       quality,
       foundation,
+      supervisionPercent,
+      contingencyPercent,
+      wastagePercent,
     };
   }, [included, productsByCategory, project, selectedProducts, settings, rateOverrides]);
 
@@ -784,6 +847,91 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
     acc[item.spec.phase] = (acc[item.spec.phase] || 0) + item.amount;
     return acc;
   }, {});
+
+  const isZeroArea = !Number(project.area) || Number(project.area) <= 0;
+  const displayBuiltUpArea = isZeroArea ? 0 : estimate.builtUpArea;
+
+  const packageRates = useMemo(() => {
+    const cityRate = settings.cityRates[project.city] || settings.cityRates.Moradabad;
+    const foundation = settings.foundationTypes[project.foundation] || settings.foundationTypes.Normal;
+    const area = Math.max(Number(project.area) || 0, 1);
+    const floors = Math.max(Number(project.floors) || 1, 1);
+    const builtUpArea = area * floors;
+    const supervisionPercent = cleanPercentage(settings.supervisionPercent, 3.5);
+    const contingencyPercent = cleanPercentage(settings.contingencyPercent, 2.5);
+    const wastagePercent = cleanPercentage(settings.wastagePercent, 3.5);
+    const floorWastage = 1 + Math.max(floors - 1, 0) * (wastagePercent / 100);
+
+    const rates = {};
+
+    Object.keys(settings.qualityLevels).forEach((tierKey) => {
+      if (tierKey === project.quality) {
+        rates[tierKey] = {
+          grandTotal: estimate.grandTotal,
+          perSqft: estimate.perSqft,
+        };
+        return;
+      }
+
+      const quality = settings.qualityLevels[tierKey] || settings.qualityLevels.Standard;
+
+      let materialTotal = 0;
+      CATEGORY_SPECS.forEach((spec) => {
+        if (!included[spec.key]) return;
+
+        const categoryProducts = products
+          .filter((product) => product.category?.toLowerCase() === spec.key.toLowerCase())
+          .map((product, index) => normalizeProduct(product, spec, index));
+        const availableProducts = categoryProducts.filter((product) =>
+          isProductAvailableForSelection(product, project.city, tierKey)
+        );
+        const fallback = spec.fallbackProducts.map((product, index) => normalizeProduct(product, spec, index));
+        const tierMatches = getTierProducts(spec, tierProducts, project.city, tierKey);
+        const options = tierMatches.length > 0 ? tierMatches : categoryProducts.length > 0 ? availableProducts : fallback;
+        const selected = options[0];
+
+        const rawBaseFactor = selected?.factorOverride || settings.materialFactors[spec.key] || spec.factor;
+        const baseFactor = getEffectiveRate('qty_' + spec.key.toLowerCase(), tierKey, rawBaseFactor, rateOverrides);
+        const structureMultiplier = spec.phase === 'Structure' ? foundation.materialMultiplier : 1;
+        const finishMultiplier = spec.phase === 'Finishing' ? quality.finishMultiplier : 1;
+        const factor = baseFactor * structureMultiplier * floorWastage * finishMultiplier;
+        const rawQuantity = builtUpArea * factor;
+        const quantity = Math.max(Math.ceil(rawQuantity), 1);
+        const rawBasePrice = selected ? getProductPrice(selected, project.city, tierKey) : 0;
+        const basePrice = getEffectiveRate('rate_' + spec.key.toLowerCase(), tierKey, rawBasePrice, rateOverrides);
+        const price = Math.round(basePrice);
+        materialTotal += quantity * price;
+      });
+
+      const effectiveLabourRate = getEffectiveRate('labour_rate', tierKey, cityRate.labour, rateOverrides);
+      const labourBase = builtUpArea * effectiveLabourRate * quality.labourMultiplier * foundation.labourMultiplier;
+      const labourTotal = Math.round(labourBase);
+      const transportTotal = Math.round(builtUpArea * cityRate.transport);
+      const supervisionTotal = Math.round((materialTotal + labourTotal) * (supervisionPercent / 100));
+      const contingencyTotal = Math.round((materialTotal + labourTotal + transportTotal) * (contingencyPercent / 100));
+      const grandTotal = materialTotal + labourTotal + transportTotal + supervisionTotal + contingencyTotal;
+
+      rates[tierKey] = {
+        grandTotal,
+        perSqft: builtUpArea > 0 ? grandTotal / builtUpArea : 0,
+      };
+    });
+
+    return rates;
+  }, [
+    settings,
+    project.city,
+    project.quality,
+    project.foundation,
+    project.area,
+    project.floors,
+    included,
+    products,
+    tierProducts,
+    rateOverrides,
+    estimate.grandTotal,
+    estimate.perSqft,
+  ]);
 
   // Automatic lead sync on calculation change (debounced)
   useEffect(() => {
@@ -972,7 +1120,7 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
             lineHeight: '1.6',
             marginBottom: '32px'
           }}>
-            Please log in to unlock the MTBoss Budget Calculator. Get live cost updates, customized material specifications, and download professional engineering reports.
+            Please log in to unlock the MTBOSS Budget Calculator. Get live cost updates, customized material specifications, and download professional engineering reports.
           </p>
           <a
             href="/login?redirect=/calculator"
@@ -1079,7 +1227,7 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
         .boq-chip { display: inline-flex; align-items: center; gap: 5px; height: 28px; border: 1px solid var(--boq-line); border-radius: 999px; padding: 0 10px; color: var(--boq-muted); background: var(--boq-soft); font-size: .72rem; font-weight: 900; white-space: nowrap; }
         .boq-quality-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 18px; }
         .boq-quality {
-          min-height: 112px !important;
+          min-height: 124px !important;
           border: 1px solid var(--boq-line) !important;
           border-radius: 8px !important;
           background: var(--boq-soft) !important;
@@ -1111,6 +1259,18 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
         .boq-quality span { display: block; color: var(--boq-muted); font-size: .74rem; line-height: 1.42; }
         .boq-quality.active span,
         .boq-quality:hover span { color: #333333 !important; }
+        .boq-quality-rate {
+          display: block;
+          margin-top: 10px;
+          font-size: .82rem;
+          font-weight: 800;
+          color: var(--boq-text);
+          letter-spacing: -0.01em;
+        }
+        .boq-quality.active .boq-quality-rate {
+          color: #111 !important;
+          font-weight: 900;
+        }
         .boq-items { display: grid; gap: 12px; padding: 18px; }
         .boq-item {
           display: grid;
@@ -1122,23 +1282,103 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
           padding: 14px;
           background: var(--boq-surface);
         }
-        .boq-item.disabled { opacity: .56; }
+        .boq-item.disabled {
+          background: var(--boq-surface);
+        }
+        .boq-item.disabled .boq-icon {
+          opacity: 0.45;
+        }
+        .boq-item.disabled h3 {
+          color: var(--boq-muted);
+        }
+        .boq-item.disabled .boq-select-box {
+          opacity: 0.45;
+        }
+        .boq-item.disabled .boq-amount {
+          opacity: 0.45;
+        }
         .boq-icon { width: 44px; height: 44px; border-radius: 8px; display: grid; place-items: center; background: var(--boq-soft); color: var(--boq-blue); border: 1px solid var(--boq-line); }
         .boq-item h3 { margin: 0 0 5px; font-size: .92rem; font-weight: 900; letter-spacing: 0; }
         .boq-meta { display: flex; flex-wrap: wrap; gap: 7px; color: var(--boq-muted); font-size: .72rem; font-weight: 800; }
-        .boq-toggle {
-          width: 38px;
-          height: 22px;
-          border: 0;
-          border-radius: 999px;
-          background: #b8beb8;
-          padding: 3px;
+        .boq-toggle-wrap {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 7px;
           cursor: pointer;
+          user-select: none;
         }
-        .boq-toggle span { display: block; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .16s; }
-        .boq-toggle.active { background: var(--boq-green); }
-        .boq-toggle.active span { transform: translateX(16px); }
-        .boq-toggle:disabled { cursor: not-allowed; }
+        .boq-toggle {
+          position: relative;
+          width: 46px;
+          height: 24px;
+          border: 1.5px solid transparent !important;
+          border-radius: 999px !important;
+          background-color: #cbd5e1 !important;
+          background-image: none !important;
+          box-shadow: inset 0 1px 3px rgba(0,0,0,0.12) !important;
+          padding: 2px !important;
+          cursor: pointer;
+          transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
+          transform: none !important;
+          flex-shrink: 0;
+          display: inline-flex;
+          align-items: center;
+        }
+        .boq-toggle:hover:not(:disabled) {
+          background-color: #94a3b8 !important;
+          background-image: none !important;
+          transform: none !important;
+          box-shadow: inset 0 1px 3px rgba(0,0,0,0.16) !important;
+        }
+        .boq-toggle:active:not(:disabled) {
+          transform: none !important;
+        }
+        .boq-toggle .boq-toggle-knob,
+        .boq-toggle span {
+          display: block;
+          width: 18px;
+          height: 18px;
+          border-radius: 50% !important;
+          background: #ffffff !important;
+          background-image: none !important;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.25) !important;
+          transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+          transform: translateX(2px) !important;
+        }
+        .boq-toggle.active {
+          background-color: #16a34a !important;
+          background-image: none !important;
+          border-color: #15803d !important;
+          box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.25) !important;
+        }
+        .boq-toggle.active:hover:not(:disabled) {
+          background-color: #15803d !important;
+          background-image: none !important;
+          transform: none !important;
+        }
+        .boq-toggle.active .boq-toggle-knob,
+        .boq-toggle.active span {
+          transform: translateX(22px) !important;
+        }
+        .boq-toggle-label {
+          font-size: 0.72rem;
+          font-weight: 800;
+          letter-spacing: 0.02em;
+          text-transform: uppercase;
+          cursor: pointer;
+          transition: color 0.15s ease;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .boq-toggle-label.is-on {
+          color: #16a34a;
+        }
+        .boq-toggle-label.is-off {
+          color: #64748b;
+        }
+        .boq-toggle:disabled { cursor: not-allowed; opacity: 0.5; }
         .boq-amount { text-align: right; }
         .boq-amount strong { display: block; font-size: .96rem; color: var(--boq-text); }
         .boq-amount span { display: block; color: var(--boq-muted); font-size: .72rem; margin-top: 3px; }
@@ -1148,9 +1388,47 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
         .boq-total-band span { display: block; color: rgba(255,255,255,.7); font-size: .75rem; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
         .boq-total-band strong { display: block; margin-top: 8px; font-size: 2.05rem; line-height: 1; }
         .boq-total-band small { display: block; margin-top: 8px; color: #f8dc7e; font-size: .82rem; font-weight: 900; }
+        .boq-unit-toggle {
+          display: inline-flex;
+          align-items: center;
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.16);
+          border-radius: 999px;
+          padding: 3px;
+          gap: 2px;
+        }
+        .boq-unit-btn {
+          background: transparent;
+          border: 0;
+          color: rgba(255, 255, 255, 0.7);
+          font-size: .72rem;
+          font-weight: 800;
+          padding: 4px 10px;
+          border-radius: 999px;
+          cursor: pointer;
+          transition: all .15s ease;
+          white-space: nowrap;
+        }
+        .boq-unit-btn:hover {
+          color: #fff;
+        }
+        .boq-unit-btn.active {
+          background: var(--boq-accent);
+          color: #111;
+          font-weight: 900;
+        }
         .boq-summary-body { padding: 18px; display: grid; gap: 12px; }
         .boq-line-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; color: var(--boq-muted); font-size: .82rem; }
         .boq-line-row strong { color: var(--boq-text); font-size: .88rem; }
+        .boq-line-val { text-align: right; }
+        .boq-line-unit-rate {
+          display: block;
+          font-size: .72rem;
+          color: var(--boq-muted);
+          font-weight: 700;
+          margin-top: 2px;
+          line-height: 1.2;
+        }
         .boq-divider { height: 1px; background: var(--boq-line); margin: 4px 0; }
         .boq-stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
         .boq-stat { border: 1px solid var(--boq-line); background: var(--boq-soft); border-radius: 8px; padding: 12px; }
@@ -1228,6 +1506,28 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
         .boq-report-note { padding: 14px; border: 1px solid rgba(215,169,35,.65); background: #fff8dc; color: #1f2937; border-radius: 8px; line-height: 1.55; font-size: .82rem; }
         .dark-mode .boq-modal-overlay,
         .boq-page.dark .boq-modal-overlay { background: rgba(0,0,0,.68); }
+        .dark-mode .boq-toggle,
+        .boq-page.dark .boq-toggle {
+          background-color: #3f3f46 !important;
+        }
+        .dark-mode .boq-toggle:hover:not(:disabled),
+        .boq-page.dark .boq-toggle:hover:not(:disabled) {
+          background-color: #52525b !important;
+        }
+        .dark-mode .boq-toggle.active,
+        .boq-page.dark .boq-toggle.active {
+          background-color: #16a34a !important;
+          border-color: #22c55e !important;
+          box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25) !important;
+        }
+        .dark-mode .boq-toggle-label.is-on,
+        .boq-page.dark .boq-toggle-label.is-on {
+          color: #4ade80;
+        }
+        .dark-mode .boq-toggle-label.is-off,
+        .boq-page.dark .boq-toggle-label.is-off {
+          color: #94a3b8;
+        }
         .dark-mode .boq-modal,
         .boq-page.dark .boq-modal {
           background: var(--boq-surface);
@@ -1390,6 +1690,9 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
                     >
                       <strong>{item.label}</strong>
                       <span>{item.note}</span>
+                      <span className="boq-quality-rate">
+                        {formatPerUnit(packageRates[key]?.grandTotal, displayBuiltUpArea, costUnit, true)}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -1433,21 +1736,35 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
                           </div>
                           <div className="boq-select-wrap">
                             {spec.type === 'Mandatory' ? null : (
-                              <button
-                                className={`boq-toggle${isIncluded ? ' active' : ''}`}
-                                type="button"
+                              <div
+                                className="boq-toggle-wrap"
                                 onClick={() => toggleIncluded(spec)}
-                                aria-label={`Toggle ${spec.title}`}
+                                title={isIncluded ? `${spec.title} is ON (Included). Click to exclude.` : `${spec.title} is OFF (Excluded). Click to include.`}
                               >
-                                <span />
-                              </button>
+                                <button
+                                  className={`boq-toggle no-global-btn${isIncluded ? ' active' : ''}`}
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={isIncluded}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleIncluded(spec);
+                                  }}
+                                  aria-label={`Toggle ${spec.title}`}
+                                >
+                                  <span className="boq-toggle-knob" />
+                                </button>
+                                <span className={`boq-toggle-label ${isIncluded ? 'is-on' : 'is-off'}`}>
+                                  {isIncluded ? 'ON · Included' : 'OFF · Excluded'}
+                                </span>
+                              </div>
                             )}
+                            <div className="boq-select-box" style={{ position: 'relative' }}>
                             <select
                               className="boq-select"
                               value={selectedProducts[spec.key] || options[0]?.id || ''}
                               onChange={(e) => selectProduct(spec.key, e.target.value)}
                               disabled={!isIncluded}
-                              style={{ marginTop: spec.type === 'Mandatory' ? 0 : 8 }}
                             >
                               {options.length === 0 && (
                                 <option value="">No brand available</option>
@@ -1460,7 +1777,8 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
                                 </option>
                               ))}
                             </select>
-                            <ChevronDown className="boq-select-icon" size={16} style={{ top: spec.type === 'Mandatory' ? '50%' : '68%' }} />
+                            <ChevronDown className="boq-select-icon" size={16} />
+                            </div>
                           </div>
                           <div className="boq-amount">
                             <strong>{item ? formatCurrency(item.amount) : formatCurrency(0)}</strong>
@@ -1475,9 +1793,33 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
 
             <aside className="boq-panel boq-summary">
               <div className="boq-total-band">
-                <span>Total Estimate</span>
-                <strong>{formatCurrency(estimate.grandTotal)}</strong>
-                <small>{formatCurrency(estimate.perSqft)} per sqft</small>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
+                  <div>
+                    <span>Total Estimate</span>
+                    <strong>{formatCurrency(estimate.grandTotal)}</strong>
+                    <small>
+                      {displayBuiltUpArea > 0
+                        ? `${formatCurrency(Math.round((estimate.grandTotal / displayBuiltUpArea) * (costUnit === 'sqm' ? SQFT_PER_SQM : 1)))} per ${costUnit === 'sqm' ? 'sq.m' : 'sqft'}`
+                        : '-'}
+                    </small>
+                  </div>
+                  <div className="boq-unit-toggle" role="group" aria-label="Cost rate unit">
+                    <button
+                      type="button"
+                      className={`boq-unit-btn${costUnit === 'sqft' ? ' active' : ''}`}
+                      onClick={() => setCostUnit('sqft')}
+                    >
+                      per sqft
+                    </button>
+                    <button
+                      type="button"
+                      className={`boq-unit-btn${costUnit === 'sqm' ? ' active' : ''}`}
+                      onClick={() => setCostUnit('sqm')}
+                    >
+                      per sq.m
+                    </button>
+                  </div>
+                </div>
               </div>
               <div className="boq-summary-body">
                 <div className="boq-stat-grid">
@@ -1503,29 +1845,59 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
                 {['Structure', 'Masonry', 'Services', 'Finishing'].map((phase) => (
                   <div className="boq-line-row" key={phase}>
                     <span>{phase}</span>
-                    <strong>{formatCurrency(phaseTotals[phase] || 0)}</strong>
+                    <div className="boq-line-val">
+                      <strong>{formatCurrency(phaseTotals[phase] || 0)}</strong>
+                      <span className="boq-line-unit-rate">
+                        {formatPerUnit(phaseTotals[phase] || 0, displayBuiltUpArea, costUnit)}
+                      </span>
+                    </div>
                   </div>
                 ))}
                 <div className="boq-divider" />
                 <div className="boq-line-row">
                   <span>Material total</span>
-                  <strong>{formatCurrency(estimate.materialTotal)}</strong>
+                  <div className="boq-line-val">
+                    <strong>{formatCurrency(estimate.materialTotal)}</strong>
+                    <span className="boq-line-unit-rate">
+                      {formatPerUnit(estimate.materialTotal, displayBuiltUpArea, costUnit)}
+                    </span>
+                  </div>
                 </div>
                 <div className="boq-line-row">
                   <span>Labour cost</span>
-                  <strong>{formatCurrency(estimate.labourTotal)}</strong>
+                  <div className="boq-line-val">
+                    <strong>{formatCurrency(estimate.labourTotal)}</strong>
+                    <span className="boq-line-unit-rate">
+                      {formatPerUnit(estimate.labourTotal, displayBuiltUpArea, costUnit)}
+                    </span>
+                  </div>
                 </div>
                 <div className="boq-line-row">
                   <span>Transport</span>
-                  <strong>{formatCurrency(estimate.transportTotal)}</strong>
+                  <div className="boq-line-val">
+                    <strong>{formatCurrency(estimate.transportTotal)}</strong>
+                    <span className="boq-line-unit-rate">
+                      {formatPerUnit(estimate.transportTotal, displayBuiltUpArea, costUnit)}
+                    </span>
+                  </div>
                 </div>
                 <div className="boq-line-row">
-                  <span>Supervision</span>
-                  <strong>{formatCurrency(estimate.supervisionTotal)}</strong>
+                  <span>Supervision ({estimate.supervisionPercent}%)</span>
+                  <div className="boq-line-val">
+                    <strong>{formatCurrency(estimate.supervisionTotal)}</strong>
+                    <span className="boq-line-unit-rate">
+                      {formatPerUnit(estimate.supervisionTotal, displayBuiltUpArea, costUnit)}
+                    </span>
+                  </div>
                 </div>
                 <div className="boq-line-row">
-                  <span>Contingency</span>
-                  <strong>{formatCurrency(estimate.contingencyTotal)}</strong>
+                  <span>Contingency ({estimate.contingencyPercent}%)</span>
+                  <div className="boq-line-val">
+                    <strong>{formatCurrency(estimate.contingencyTotal)}</strong>
+                    <span className="boq-line-unit-rate">
+                      {formatPerUnit(estimate.contingencyTotal, displayBuiltUpArea, costUnit)}
+                    </span>
+                  </div>
                 </div>
                 <div className="boq-divider" />
                 <div className="boq-line-row">
@@ -1565,15 +1937,15 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
             {quoteStep === 'details' && (
               <form className="boq-quote-form" onSubmit={requestQuoteOtp}>
                 <div className="boq-report-note">
-                  Fill your contact details to receive an OTP. After verification, you can download a professional MTBoss budget estimate report with logo, BOQ, summary and disclaimer.
+                  Fill your contact details to receive an OTP. After verification, you can download a professional MTBOSS budget estimate report with logo, BOQ, summary and disclaimer.
                 </div>
                 <div className="boq-quote-grid">
                   <div className="boq-quote-field">
-                    <label>Full Name *</label>
+                    <label>Full Name <RequiredAsterisk /></label>
                     <input value={quoteForm.name} onChange={(e) => updateQuoteForm('name', e.target.value)} required placeholder="Your name" />
                   </div>
                   <div className="boq-quote-field">
-                    <label>Mobile Number *</label>
+                    <label>Mobile Number <RequiredAsterisk /></label>
                     <input
                       type="tel"
                       value={quoteForm.phone}
@@ -1609,11 +1981,11 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
                   />
                 </div>
                 <div className="boq-quote-field">
-                  <label>Site Address *</label>
+                  <label>Site Address <RequiredAsterisk /></label>
                   <textarea value={quoteForm.address} onChange={(e) => updateQuoteForm('address', e.target.value)} required placeholder="Plot/street, city, state and PIN" />
                 </div>
                 <div className="boq-quote-field">
-                  <label>Site Image *</label>
+                  <label>Site Image <RequiredAsterisk /></label>
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
@@ -1637,7 +2009,7 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
                   Enter the OTP sent to your email. The same OTP verifies your quote request and unlocks the report download.
                 </div>
                 <div className="boq-quote-field">
-                  <label>6 Digit OTP *</label>
+                  <label>6 Digit OTP <RequiredAsterisk /></label>
                   <input
                     value={otp}
                     onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
@@ -1664,7 +2036,7 @@ export default function ConstructionCalculator({ initialIsLoggedIn = false }) {
             {quoteStep === 'verified' && (
               <div className="boq-quote-form">
                 <div className="boq-report-note">
-                  Verification complete. Your report includes a detailed BOQ, total estimate, selected brands, MTBoss contact details and an approximation disclaimer for site-visit validation.
+                  Verification complete. Your report includes a detailed BOQ, total estimate, selected brands, MTBOSS contact details and an approximation disclaimer for site-visit validation.
                 </div>
                 {quoteMsg && <div className="boq-quote-msg">{quoteMsg}</div>}
                 <button className="boq-action primary" type="button" onClick={downloadVerifiedReport}>

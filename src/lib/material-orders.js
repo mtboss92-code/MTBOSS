@@ -2,33 +2,33 @@ import pool from '@/lib/db';
 import { createInitializationGuard } from '@/lib/api-utils';
 
 export const MATERIAL_ORDER_STATUSES = [
-  'open',
-  'accepted',
-  'confirmed',
-  'processing',
-  'packed',
-  'dispatched',
-  'out_for_delivery',
-  'delivered',
-  'fulfilled',
-  'cancelled',
+    'open',
+    'accepted',
+    'confirmed',
+    'processing',
+    'packed',
+    'dispatched',
+    'out_for_delivery',
+    'delivered',
+    'fulfilled',
+    'cancelled',
 ];
 
 export const MATERIAL_ORDER_STATUS_LABELS = {
-  open: 'Order Placed',
-  accepted: 'Accepted',
-  confirmed: 'Confirmed',
-  processing: 'Processing',
-  packed: 'Packed',
-  dispatched: 'Dispatched',
-  out_for_delivery: 'Out for Delivery',
-  delivered: 'Delivered',
-  fulfilled: 'Delivered',
-  cancelled: 'Cancelled',
+    open: 'Order Placed',
+    accepted: 'Accepted',
+    confirmed: 'Confirmed',
+    processing: 'Processing',
+    packed: 'Packed',
+    dispatched: 'Dispatched',
+    out_for_delivery: 'Out for Delivery',
+    delivered: 'Delivered',
+    fulfilled: 'Delivered',
+    cancelled: 'Cancelled',
 };
 
-export const ensureMaterialOrderSchema = createInitializationGuard(async () => {
-  await pool.query(`
+export const ensureMaterialOrderSchema = createInitializationGuard(async() => {
+    await pool.query(`
     CREATE TABLE IF NOT EXISTS material_enquiries (
       id SERIAL PRIMARY KEY,
       user_name VARCHAR(255) NOT NULL,
@@ -63,7 +63,8 @@ export const ensureMaterialOrderSchema = createInitializationGuard(async () => {
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
-  await pool.query(`
+   
+    await pool.query(`
     ALTER TABLE material_enquiries
       ADD COLUMN IF NOT EXISTS user_id INTEGER,
       ADD COLUMN IF NOT EXISTS order_reference VARCHAR(40),
@@ -71,37 +72,49 @@ export const ensureMaterialOrderSchema = createInitializationGuard(async () => {
       ADD COLUMN IF NOT EXISTS assigned_entity_id INTEGER,
       ADD COLUMN IF NOT EXISTS status_note TEXT,
       ADD COLUMN IF NOT EXISTS estimated_delivery_date DATE,
-      ADD COLUMN IF NOT EXISTS order_intent VARCHAR(20)
-      ,ADD COLUMN IF NOT EXISTS shipping_cost NUMERIC(12,2) DEFAULT 0
-      ,ADD COLUMN IF NOT EXISTS shipping_breakdown JSONB DEFAULT '[]'::jsonb
-      ,ADD COLUMN IF NOT EXISTS product_total NUMERIC(12,2) DEFAULT 0
-      ,ADD COLUMN IF NOT EXISTS grand_total NUMERIC(12,2) DEFAULT 0
+      ADD COLUMN IF NOT EXISTS order_intent VARCHAR(20),
+      ADD COLUMN IF NOT EXISTS shipping_cost NUMERIC(12,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS shipping_breakdown JSONB DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS product_total NUMERIC(12,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS grand_total NUMERIC(12,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS wallet_used NUMERIC(12,2) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS wallet_redeem_status VARCHAR(30) NOT NULL DEFAULT 'NONE',
+      ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'COD',
+      ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'PENDING',
+      ADD COLUMN IF NOT EXISTS payment_gateway VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS payment_gateway_id VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS payment_completed_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS return_status VARCHAR(40) DEFAULT 'NONE',
+      ADD COLUMN IF NOT EXISTS return_reason VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS return_action VARCHAR(30),
+      ADD COLUMN IF NOT EXISTS return_requested_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS return_details JSONB DEFAULT '{}'::jsonb
   `);
-  await pool.query(`
+    await pool.query(`
     UPDATE material_enquiries
        SET order_reference = 'MO-' || TO_CHAR(COALESCE(created_at, NOW()), 'YYYYMMDD') || '-' || LPAD(id::TEXT, 6, '0')
      WHERE order_reference IS NULL OR TRIM(order_reference) = ''
   `);
-  await pool.query(`
+    await pool.query(`
     UPDATE material_enquiries
        SET assigned_role = 'supplier',
            assigned_entity_id = accepted_by_supplier_id
      WHERE accepted_by_supplier_id IS NOT NULL
        AND (assigned_role IS NULL OR assigned_entity_id IS NULL)
   `);
-  await pool.query(`
+    await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS material_enquiries_order_reference_uidx
     ON material_enquiries (order_reference)
   `);
-  await pool.query(`
+    await pool.query(`
     CREATE INDEX IF NOT EXISTS material_enquiries_user_idx
     ON material_enquiries (user_id, created_at DESC)
   `);
-  await pool.query(`
+    await pool.query(`
     CREATE INDEX IF NOT EXISTS material_enquiries_assignment_idx
     ON material_enquiries (assigned_role, assigned_entity_id, created_at DESC)
   `);
-  await pool.query(`
+    await pool.query(`
     CREATE TABLE IF NOT EXISTS material_order_events (
       id BIGSERIAL PRIMARY KEY,
       order_id INTEGER NOT NULL REFERENCES material_enquiries(id) ON DELETE CASCADE,
@@ -114,11 +127,11 @@ export const ensureMaterialOrderSchema = createInitializationGuard(async () => {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await pool.query(`
+    await pool.query(`
     CREATE INDEX IF NOT EXISTS material_order_events_order_idx
     ON material_order_events (order_id, created_at ASC, id ASC)
   `);
-  await pool.query(`
+    await pool.query(`
     INSERT INTO material_order_events
       (order_id, status, title, note, actor_role, actor_name, created_at)
     SELECT me.id, me.status,
@@ -128,7 +141,7 @@ export const ensureMaterialOrderSchema = createInitializationGuard(async () => {
              WHEN 'cancelled' THEN 'Cancelled'
              ELSE 'Order placed'
            END,
-           me.status_note, 'system', 'MTBoss', COALESCE(me.created_at, NOW())
+           me.status_note, 'system', 'MTBOSS', COALESCE(me.created_at, NOW())
       FROM material_enquiries me
      WHERE NOT EXISTS (
        SELECT 1 FROM material_order_events event WHERE event.order_id = me.id
@@ -137,34 +150,34 @@ export const ensureMaterialOrderSchema = createInitializationGuard(async () => {
 });
 
 export async function addMaterialOrderEvent(client, {
-  orderId,
-  status,
-  title,
-  note = null,
-  actorRole,
-  actorId = null,
-  actorName = null,
+    orderId,
+    status,
+    title,
+    note = null,
+    actorRole,
+    actorId = null,
+    actorName = null,
 }) {
-  const inserted = await client.query(
-    `INSERT INTO material_order_events
+    const inserted = await client.query(
+        `INSERT INTO material_order_events
       (order_id, status, title, note, actor_role, actor_id, actor_name)
      VALUES ($1,$2,$3,$4,$5,$6,$7)
-     RETURNING id`,
-    [orderId, status, title, note, actorRole, actorId, actorName]
-  );
-  try {
-    const { notifyUserForMaterialOrderEvent } = await import('@/lib/user-notifications');
-    await notifyUserForMaterialOrderEvent(client, orderId, {
-      status,
-      title,
-      note,
-      eventId: inserted.rows[0]?.id,
-    });
-  } catch (notifyError) {
-    console.error('User notification for order event failed:', notifyError);
-  }
+     RETURNING id`, [orderId, status, title, note, actorRole, actorId, actorName]
+    );
+    try {
+        const { notifyUserForMaterialOrderEvent } = await
+        import ('@/lib/user-notifications');
+        await notifyUserForMaterialOrderEvent(client, orderId, {
+            status,
+            title,
+            note,
+            eventId: inserted.rows[0] ? inserted.rows[0].id : null,
+        });
+    } catch (notifyError) {
+        console.error('User notification for order event failed:', notifyError);
+    }
 }
 
 export function materialOrderStatusLabel(status) {
-  return MATERIAL_ORDER_STATUS_LABELS[status] || status;
+    return MATERIAL_ORDER_STATUS_LABELS[status] || status;
 }

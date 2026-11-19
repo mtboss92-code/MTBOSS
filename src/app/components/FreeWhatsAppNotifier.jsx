@@ -17,13 +17,8 @@ const TRACKED_ENDPOINTS = new Map([
   ['/api/professional-services', 'Professional Registration'],
   ['/api/user/primary-services', 'Construction Service Request'],
   ['/api/auth/signup', 'Customer Registration'],
-  ['/api/vendor/signup', 'Vendor Registration'],
+  ['/api/vendor/signup', 'Service Provider Registration'],
   ['/api/supplier/signup', 'Supplier Registration'],
-  ['/api/agent/login', 'Agent Login'],
-  ['/api/auth/login', 'Customer/Admin Login'],
-  ['/api/vendor/login', 'Vendor Login'],
-  ['/api/supplier/login', 'Supplier Login'],
-  ['/api/franchise/login', 'Franchise Login'],
 ]);
 
 const BLOCKED_KEYS = /password|confirm|otp|token|secret|hash|aadhaar|pan|account|ifsc|bank|latitude|longitude|resume_data|authorization/i;
@@ -75,8 +70,8 @@ export default function FreeWhatsAppNotifier() {
   useEffect(() => {
     const adminNumber = process.env.NEXT_PUBLIC_ADMIN_WHATSAPP_NUMBER;
     if (!adminNumber) return undefined;
-    if (typeof window === 'undefined' || window.__mtboss_whatsapp_fetch_patched__) return undefined;
-    window.__mtboss_whatsapp_fetch_patched__ = true;
+    if (typeof window === 'undefined' || window.__MTBOSS_whatsapp_fetch_patched__) return undefined;
+    window.__MTBOSS_whatsapp_fetch_patched__ = true;
 
     const originalFetch = window.fetch.bind(window);
 
@@ -122,7 +117,7 @@ export default function FreeWhatsAppNotifier() {
 
     return () => {
       window.fetch = originalFetch;
-      delete window.__mtboss_whatsapp_fetch_patched__;
+      delete window.__MTBOSS_whatsapp_fetch_patched__;
     };
   }, []);
 

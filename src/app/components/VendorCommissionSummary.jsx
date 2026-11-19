@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import './ShopNowManager.css';
 
 export default function VendorCommissionSummary({ isDarkMode = false }) {
   const [data, setData] = useState(null);
@@ -49,6 +50,7 @@ export default function VendorCommissionSummary({ isDarkMode = false }) {
 
   return (
     <div
+      className={`shop-admin-root ${isDarkMode ? 'dark-mode' : ''}`}
       style={{
         background: 'var(--shop-admin-card-bg, var(--surface, #ffffff))',
         border: '1px solid var(--shop-admin-border, #e5e7eb)',

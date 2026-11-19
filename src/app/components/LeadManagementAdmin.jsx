@@ -1,4 +1,5 @@
 "use client";
+import RequiredAsterisk from './RequiredAsterisk';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Eye, Download, RefreshCw, Plus, X, ArrowLeft, ActionIconButton } from '@/app/components/ui/icons';
 import LeadDetailView from './LeadDetailView';
@@ -59,7 +60,9 @@ export default function LeadManagementAdmin({ isDarkMode }) {
   const [convertingLead, setConvertingLead] = useState(null);
   const [conversionData, setConversionData] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSavingLead, setIsSavingLead] = useState(false);
   const isSubmittingRef = useRef(false);
+  const isSavingLeadRef = useRef(false);
   const idempotencyKeyRef = useRef(null);
   const searchInputRef = useRef(null);
   const searchHostRef = useRef(null);
@@ -102,8 +105,8 @@ export default function LeadManagementAdmin({ isDarkMode }) {
   const loadLeads = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      // Silent polls skip heavy external sync (TTL-gated server-side) and keep assignees warm.
-      const qs = silent ? '?limit=200&lite=0' : '?limit=200';
+      // Silent polls skip heavy external sync (TTL-gated server-side) and large assignee directory dump.
+      const qs = silent ? '?limit=200&lite=1' : '?limit=200';
       const res = await fetch(`/api/admin/lead-management${qs}`, {
         headers: { Authorization: `Bearer ${token()}` },
       });
@@ -153,9 +156,24 @@ export default function LeadManagementAdmin({ isDarkMode }) {
       .sort((a, b) => a.localeCompare(b));
   }, [leads]);
 
+  const getLeadAgentIds = useCallback((lead) => {
+    if (!lead) return [];
+    const ids = new Set();
+    if (lead.agent_id) ids.add(String(lead.agent_id));
+    if (Array.isArray(lead.assigned_agent_ids)) {
+      lead.assigned_agent_ids.forEach((id) => id && ids.add(String(id)));
+    } else if (typeof lead.assigned_agent_ids === 'string') {
+      try {
+        const parsed = JSON.parse(lead.assigned_agent_ids);
+        if (Array.isArray(parsed)) parsed.forEach((id) => id && ids.add(String(id)));
+      } catch {}
+    }
+    return Array.from(ids);
+  }, []);
+
   const byAgentCount = useMemo(() => {
-    return leads.filter((lead) => Boolean(lead.agent_id)).length;
-  }, [leads]);
+    return leads.filter((lead) => getLeadAgentIds(lead).length > 0).length;
+  }, [leads, getLeadAgentIds]);
 
   const agentOptions = useMemo(() => {
     const map = new Map();
@@ -163,17 +181,20 @@ export default function LeadManagementAdmin({ isDarkMode }) {
       if (a?.id) map.set(String(a.id), { id: String(a.id), name: a.name || `Agent #${a.id}` });
     });
     leads.forEach((l) => {
-      if (l.agent_id && !map.has(String(l.agent_id))) {
-        map.set(String(l.agent_id), { id: String(l.agent_id), name: l.agent_name || `Agent #${l.agent_id}` });
-      }
+      const ids = getLeadAgentIds(l);
+      ids.forEach((aid) => {
+        if (!map.has(aid)) {
+          map.set(aid, { id: aid, name: (l.agent_id && String(l.agent_id) === aid && l.agent_name) || `Agent #${aid}` });
+        }
+      });
     });
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [agents, leads]);
+  }, [agents, leads, getLeadAgentIds]);
 
   const filteredLeads = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
 
-    return leads.filter((lead) => {
+    const result = leads.filter((lead) => {
       const matchesSearch = !query || [
         lead.client_name,
         lead.client_phone,
@@ -187,8 +208,9 @@ export default function LeadManagementAdmin({ isDarkMode }) {
         lead.client_requirement,
       ].some((value) => String(value ?? '').toLocaleLowerCase().includes(query));
 
+      const leadAgentIds = getLeadAgentIds(lead);
       const matchesAgent = !byAgentTab || (
-        Boolean(lead.agent_id) && (!selectedAgentId || String(lead.agent_id) === String(selectedAgentId))
+        leadAgentIds.length > 0 && (!selectedAgentId || leadAgentIds.includes(String(selectedAgentId)))
       );
 
       return matchesSearch
@@ -197,7 +219,34 @@ export default function LeadManagementAdmin({ isDarkMode }) {
         && (!source || lead.lead_source === source)
         && (!city || lead.city === city);
     });
-  }, [leads, search, status, source, city, byAgentTab, selectedAgentId]);
+
+    // Keep accidental repeat submissions from appearing as separate leads in
+    // the admin list. The API prevents new duplicates; this also cleans up
+    // identical legacy/manual submissions without deleting any records.
+    const seen = new Set();
+    const uniqueResult = result.filter((lead) => {
+      const date = lead.created_at ? new Date(lead.created_at).toISOString().slice(0, 10) : '';
+      const phone = String(lead.client_phone || '').replace(/\D/g, '');
+      const key = [
+        String(lead.lead_source || '').trim().toLowerCase(),
+        String(lead.client_name || '').trim().toLowerCase(),
+        phone,
+        String(lead.city || '').trim().toLowerCase(),
+        date,
+      ].join('|');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    // Ensure the newest leads are always shown at the top of the table
+    return [...uniqueResult].sort((a, b) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      if (timeB !== timeA) return timeB - timeA;
+      return (Number(b.id) || 0) - (Number(a.id) || 0);
+    });
+  }, [leads, search, status, source, city, byAgentTab, selectedAgentId, getLeadAgentIds]);
 
   const stats = useMemo(() => ({
     total: filteredLeads.length,
@@ -208,20 +257,30 @@ export default function LeadManagementAdmin({ isDarkMode }) {
 
   async function createLead(event) {
     event.preventDefault();
+    if (isSavingLeadRef.current) return;
+    isSavingLeadRef.current = true;
+    setIsSavingLead(true);
     setMessage('');
-    const res = await fetch('/api/admin/lead-management', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json();
-    if (data.success) {
-      setForm(emptyForm);
-      setMessage('Lead created successfully.');
-      setIsCreatingLead(false);
-      await loadLeads();
-    } else {
-      setMessage(data.error || 'Could not create lead.');
+    try {
+      const res = await fetch('/api/admin/lead-management', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setForm(emptyForm);
+        setMessage(data.duplicate ? 'This lead was already saved; duplicate entry was prevented.' : 'Lead created successfully.');
+        setIsCreatingLead(false);
+        await loadLeads();
+      } else {
+        setMessage(data.error || 'Could not create lead.');
+      }
+    } catch {
+      setMessage('Could not create lead.');
+    } finally {
+      isSavingLeadRef.current = false;
+      setIsSavingLead(false);
     }
   }
 
@@ -400,6 +459,43 @@ export default function LeadManagementAdmin({ isDarkMode }) {
           outline: 2px solid var(--accent, #f59e0b) !important;
           outline-offset: -2px;
         }
+        .lm-stats-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 12px;
+        }
+        @media(max-width: 1024px) {
+          .lm-stats-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+        @media(max-width: 480px) {
+          .lm-stats-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        .lm-controls-grid {
+          display: grid;
+          grid-template-columns: minmax(220px, 2fr) repeat(auto-fit, minmax(130px, 1fr)) auto;
+          gap: 10px;
+          margin-bottom: 12px;
+        }
+        @media(max-width: 1024px) {
+          .lm-controls-grid {
+            grid-template-columns: 1fr 1fr;
+          }
+          .lm-controls-grid > *:first-child {
+            grid-column: span 2;
+          }
+        }
+        @media(max-width: 600px) {
+          .lm-controls-grid {
+            grid-template-columns: 1fr;
+          }
+          .lm-controls-grid > *:first-child {
+            grid-column: auto;
+          }
+        }
       `}</style>
 
       {detailLeadId ? (
@@ -529,6 +625,7 @@ export default function LeadManagementAdmin({ isDarkMode }) {
             <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
               <button
                 type="submit"
+                  disabled={isSavingLead}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -540,14 +637,16 @@ export default function LeadManagementAdmin({ isDarkMode }) {
                   padding: '0.65rem 1.25rem',
                   fontWeight: 900,
                   fontSize: '0.85rem',
-                  cursor: 'pointer',
+                    cursor: isSavingLead ? 'wait' : 'pointer',
+                    opacity: isSavingLead ? 0.7 : 1,
                 }}
               >
                 <Plus size={16} strokeWidth={2} aria-hidden="true" />
-                Submit Lead
+                {isSavingLead ? 'Saving…' : 'Submit Lead'}
               </button>
               <button
                 type="button"
+                disabled={isSavingLead}
                 onClick={() => {
                   setIsCreatingLead(false);
                   setMessage('');
@@ -605,7 +704,7 @@ export default function LeadManagementAdmin({ isDarkMode }) {
 
       {message && <div style={{ padding: '0.75rem 1rem', border: `1px solid ${border}`, background: surface, color: text, borderRadius: 6, fontSize: '0.82rem', fontWeight: 700 }}>{message}</div>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 12 }}>
+      <div className="lm-stats-grid">
         {[
           ['Total Leads', stats.total],
           ['New', stats.new],
@@ -690,14 +789,7 @@ export default function LeadManagementAdmin({ isDarkMode }) {
             </button>
           )}
         </div>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: byAgentTab
-            ? 'minmax(200px,2fr) repeat(4,minmax(120px,1fr)) auto'
-            : 'minmax(220px,2fr) repeat(3,minmax(130px,1fr)) auto',
-          gap: 10,
-          marginBottom: 12,
-        }}>
+        <div className="lm-controls-grid">
           <div ref={searchHostRef} />
           <select aria-label="Filter leads by city" style={inputStyle} value={city} onChange={(e) => setCity(e.target.value)}>
             <option value="">All cities</option>
@@ -743,12 +835,12 @@ export default function LeadManagementAdmin({ isDarkMode }) {
           </button>
         </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
+        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', width: '100%' }}>
+          <table style={{ width: '100%', minWidth: '960px', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
             <thead>
               <tr style={{ background: surface }}>
                 {['Client', 'Service', 'Source', 'Status', 'Stage', 'Franchise', 'Vendor', 'Agent', 'Follow Up', 'Action'].map((head) => (
-                  <th key={head} style={{ padding: '0.6rem', textAlign: 'left', color: muted, fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '.07em' }}>{head}</th>
+                  <th key={head} style={{ padding: '0.6rem', textAlign: 'left', color: muted, fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '.07em', whiteSpace: 'nowrap' }}>{head}</th>
                 ))}
               </tr>
             </thead>
@@ -781,7 +873,15 @@ export default function LeadManagementAdmin({ isDarkMode }) {
                     <div style={{ color: muted }}>{lead.client_phone}</div>
                     <div style={{ color: muted, fontSize: '0.7rem' }}>{lead.city}</div>
                   </td>
-                  <td style={{ padding: '0.6rem', color: muted }}>{lead.service_type || '-'}<br />{lead.lead_type || ''}</td>
+                  <td style={{ padding: '0.6rem', color: muted }}>
+                    <div style={{ color: text, fontWeight: 700 }}>{lead.service_type || '-'}</div>
+                    <div style={{ fontSize: '0.72rem' }}>{lead.lead_type || ''}</div>
+                    {lead.time_slot && (
+                      <div style={{ marginTop: 3, display: 'inline-block', fontSize: '0.68rem', fontWeight: 800, color: 'var(--accent, #2563eb)', background: isDarkMode ? '#1e293b' : '#eff6ff', padding: '1px 6px', borderRadius: 4 }}>
+                        ⏰ {lead.time_slot}
+                      </div>
+                    )}
+                  </td>
                   <td style={{ padding: '0.6rem', color: muted }}>{lead.lead_source || '-'}</td>
                   <td style={{ padding: '0.6rem' }}>
                     <select
@@ -816,7 +916,10 @@ export default function LeadManagementAdmin({ isDarkMode }) {
                   <td style={{ padding: '0.6rem' }}>
                     <select style={inputStyle} value={lead.agent_id || ''} onChange={(e) => updateLead(lead.id, { agent_id: e.target.value })}>
                       <option value="">Not assigned</option>
-                      {agents.map((item) => <option key={item.id} value={item}>{item.name}</option>)}
+                      {agents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                      {lead.agent_id && !agents.some((ag) => String(ag.id) === String(lead.agent_id)) && (
+                        <option value={lead.agent_id}>{lead.agent_name || `Agent #${lead.agent_id}`}</option>
+                      )}
                     </select>
                   </td>
                   <td style={{ padding: '0.6rem', color: muted, whiteSpace: 'nowrap' }}>{lead.follow_up_date ? new Date(lead.follow_up_date).toLocaleDateString('en-IN') : '-'}</td>
@@ -870,8 +973,14 @@ export default function LeadManagementAdmin({ isDarkMode }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 10 }}>
               {[
                 ['Phone', selected.client_phone],
+                ['Alternate Phone', selected.alternate_phone || '-'],
                 ['Email', selected.client_email || '-'],
                 ['City', selected.city],
+                ['State', selected.state || '-'],
+                ['Address', selected.address || '-'],
+                ['Preferred Time Slot', selected.time_slot || '-'],
+                ['Meeting Date', selected.meeting_date ? new Date(selected.meeting_date).toLocaleDateString('en-IN') : '-'],
+                ['GPS Location', selected.gps_location || '-'],
                 ['Service', selected.service_type || '-'],
                 ['Lead Type', selected.lead_type || '-'],
                 ['Source', selected.lead_source || '-'],
@@ -932,11 +1041,11 @@ export default function LeadManagementAdmin({ isDarkMode }) {
                     <div style={{ fontSize: '0.85rem', fontWeight: 900, color: text, marginBottom: 8 }}>New Party Details</div>
                     <div style={{ display: 'grid', gap: 8 }}>
                       <div>
-                        <label style={labelStyle}>Client Name *</label>
+                        <label style={labelStyle}>Client Name <RequiredAsterisk /></label>
                         <input style={inputStyle} value={conversionData.newParty.name} onChange={e => setConversionData(p => ({ ...p, newParty: { ...p.newParty, name: e.target.value } }))} required disabled={isSubmitting} />
                       </div>
                       <div>
-                        <label style={labelStyle}>Phone *</label>
+                        <label style={labelStyle}>Phone <RequiredAsterisk /></label>
                         <input style={inputStyle} value={conversionData.newParty.phone} onChange={e => setConversionData(p => ({ ...p, newParty: { ...p.newParty, phone: e.target.value } }))} required disabled={isSubmitting} />
                       </div>
                       <div>
@@ -955,19 +1064,19 @@ export default function LeadManagementAdmin({ isDarkMode }) {
                   <div style={{ fontSize: '0.85rem', fontWeight: 900, color: text, marginBottom: 8 }}>Project Details</div>
                   <div style={{ display: 'grid', gap: 8 }}>
                     <div>
-                      <label style={labelStyle}>Project Name *</label>
+                      <label style={labelStyle}>Project Name <RequiredAsterisk /></label>
                       <input style={inputStyle} value={conversionData.project.name} onChange={e => setConversionData(p => ({ ...p, project: { ...p.project, name: e.target.value } }))} required disabled={isSubmitting} />
                     </div>
                     <div>
-                      <label style={labelStyle}>Start Date *</label>
+                      <label style={labelStyle}>Start Date <RequiredAsterisk /></label>
                       <input type="date" style={inputStyle} value={conversionData.project.start_date} onChange={e => setConversionData(p => ({ ...p, project: { ...p.project, start_date: e.target.value } }))} required disabled={isSubmitting} />
                     </div>
                     <div>
-                      <label style={labelStyle}>Contract Value (Rs) *</label>
+                      <label style={labelStyle}>Contract Value (Rs) <RequiredAsterisk /></label>
                       <input type="number" style={inputStyle} value={conversionData.project.contract_value} onChange={e => setConversionData(p => ({ ...p, project: { ...p.project, contract_value: e.target.value } }))} required disabled={isSubmitting} />
                     </div>
                     <div>
-                      <label style={labelStyle}>Site / City *</label>
+                      <label style={labelStyle}>Site / City <RequiredAsterisk /></label>
                       <input style={inputStyle} value={conversionData.project.site_address} onChange={e => setConversionData(p => ({ ...p, project: { ...p.project, site_address: e.target.value } }))} required disabled={isSubmitting} />
                     </div>
                   </div>

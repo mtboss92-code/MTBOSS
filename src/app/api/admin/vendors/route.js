@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { requireAdmin } from '@/lib/agent-auth';
+import { createInitializationGuard } from '@/lib/api-utils';
 import { ensureServiceCitiesSchema } from '@/lib/service-cities';
 import { getManagedCities } from '@/lib/cities';
 import { ensurePackageSchema } from '@/lib/packages';
 
-// ═══════════════════════════════════════════════════════════════════════
-// VERIFY ADMIN TOKEN
-// ═══════════════════════════════════════════════════════════════════════
+const ensureVendorAdminColumns = createInitializationGuard(async () => {
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pan_number VARCHAR(20)`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pan_image BYTEA`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pan_image_mime VARCHAR(100)`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_number VARCHAR(30)`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_image BYTEA`);
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_image_mime VARCHAR(100)`);
+});
 
 // ═══════════════════════════════════════════════════════════════════════
 // GET - FETCH ALL VENDORS
@@ -22,8 +28,6 @@ export async function GET(req) {
         { status: 401 }
       );
     }
-    await ensureServiceCitiesSchema();
-    await ensurePackageSchema();
 
     const { searchParams } = new URL(req.url);
     const status = String(searchParams.get('status') || '').trim();
@@ -32,6 +36,13 @@ export async function GET(req) {
     const offset = (page - 1) * limit;
     const countsOnly = searchParams.get('counts') === '1';
     const lite = searchParams.get('lite') === '1' || countsOnly;
+
+    // Count-only badge endpoints must not run package/cities DDL on every poll.
+    if (!countsOnly) {
+      await ensureServiceCitiesSchema();
+      await ensurePackageSchema();
+      await ensureVendorAdminColumns();
+    }
 
     const vals = [];
     const where = [];
@@ -75,6 +86,10 @@ export async function GET(req) {
             v.aadhar_number,
             (v.profile_photo IS NOT NULL) AS profile_photo,
             (v.aadhar_image  IS NOT NULL) AS aadhar_image,
+            v.pan_number,
+            (v.pan_image IS NOT NULL) AS pan_image,
+            v.gst_number,
+            (v.gst_image IS NOT NULL) AS gst_image,
             v.status, v.verification_status, v.is_approved,
             v.package_id, v.package_name, v.package_price, v.package_status,
             v.created_at, v.updated_at,
@@ -143,12 +158,19 @@ export async function PUT(req) {
       );
     }
 
+    const body = await req.json();
     const {
       vendor_id,
       action, // 'approve', 'reject', 'activate', 'deactivate'
       services, // Array of quick_service_ids to assign
+      is_contractor,
+      is_project_contractor,
+      isContractor,
+      contractor_trade,
+      contractorTrade,
+      trade,
       admin_notes
-    } = await req.json();
+    } = body;
 
     if (!vendor_id || !action) {
       return NextResponse.json(
@@ -161,6 +183,7 @@ export async function PUT(req) {
     try {
       await client.query('BEGIN');
       await ensureServiceCitiesSchema();
+      await client.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS is_contractor BOOLEAN NOT NULL DEFAULT FALSE`);
 
       if (action === 'approve') {
         // Approve vendor and assign services
@@ -290,6 +313,56 @@ export async function PUT(req) {
           success: true,
           message: 'Vendor deactivated successfully',
           data: vendorResult.rows[0]
+        });
+      } else if (action === 'update_contractor') {
+        const flag = Boolean(is_contractor ?? is_project_contractor ?? isContractor);
+        const resolvedTrade = flag ? String(contractor_trade || contractorTrade || trade || 'CIVIL').trim().toUpperCase() : null;
+
+        await client.query(`
+          ALTER TABLE vendors 
+          ADD COLUMN IF NOT EXISTS is_project_contractor BOOLEAN NOT NULL DEFAULT FALSE,
+          ADD COLUMN IF NOT EXISTS contractor_trade VARCHAR(100)
+        `);
+
+        const vendorResult = await client.query(
+          `UPDATE vendors
+           SET is_contractor = $1,
+               is_project_contractor = $1,
+               contractor_trade = $2,
+               business_type = CASE WHEN $1 THEN 'Contractor' ELSE 'Vendor' END,
+               updated_at = NOW()
+           WHERE id = $3
+           RETURNING id, vendor_name, email, phone, is_contractor, is_project_contractor, contractor_trade, business_type`,
+          [flag, resolvedTrade, vendor_id]
+        );
+        if (!vendorResult.rows[0]) {
+          await client.query('ROLLBACK');
+          return NextResponse.json({ error: 'Vendor not found' }, { status: 404 });
+        }
+
+        const vRow = vendorResult.rows[0];
+
+        // Ensure pm_vendors is in sync immediately
+        if (flag) {
+          await client.query(
+            `INSERT INTO pm_vendors (external_vendor_id, name, phone, trade, is_active)
+             VALUES ($1, $2, $3, $4, TRUE)
+             ON CONFLICT (external_vendor_id) WHERE external_vendor_id IS NOT NULL
+             DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, trade = EXCLUDED.trade, is_active = TRUE`,
+            [vRow.id, vRow.vendor_name || vRow.email, vRow.phone, vRow.contractor_trade || 'CIVIL']
+          );
+        } else {
+          await client.query(
+            `UPDATE pm_vendors SET is_active = FALSE WHERE external_vendor_id = $1`,
+            [vRow.id]
+          );
+        }
+
+        await client.query('COMMIT');
+        return NextResponse.json({
+          success: true,
+          message: flag ? 'Vendor registered as Contractor successfully' : 'Contractor status removed',
+          data: vRow
         });
       } else if (action === 'update_services') {
         const serviceIds = [...new Set(

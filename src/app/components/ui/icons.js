@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 
-// Re-export all Lucide React icons used across MT-Boss
+// Re-export all Lucide React icons used across MTBOSS
 export {
   LayoutDashboard,
   UserCog,
@@ -18,9 +18,12 @@ export {
   Store,
   CalendarClock,
   CalendarDays,
+  Calendar,
   MessageSquare,
   MessageSquareText,
   Users,
+  UserCheck,
+  UserX,
   IdCard,
   BarChart3,
   History,

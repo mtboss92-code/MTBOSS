@@ -1,9 +1,11 @@
 "use client";
+import RequiredAsterisk from '../components/RequiredAsterisk';
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { COMPANY_CONTACT } from "../lib/company";
 import { useCities } from "@/hooks/useCities";
 import { useFaqs } from "@/hooks/useFaqs";
+import { INDIAN_STATES } from "@/lib/pan-india";
 
 function useDarkMode() {
   const [dark, setDark] = useState(false);
@@ -28,7 +30,7 @@ function useInView(threshold = 0.1) {
     );
     if (ref.current) observer.observe(ref.current);
     return () => observer.disconnect();
-  }, []);
+  }, [threshold]);
   return [ref, inView];
 }
 
@@ -91,7 +93,7 @@ const faqs = [
 
 export default function AgentPage() {
   const dark = useDarkMode();
-  const { cities, loading: citiesLoading, error: citiesError } = useCities();
+  const { cities, cityRecords, loading: citiesLoading, error: citiesError } = useCities();
   const dynamicFaqs = useFaqs('agent');
   const [activeFaq, setActiveFaq] = useState(null);
   const [submitted, setSubmitted] = useState(false);
@@ -120,6 +122,9 @@ export default function AgentPage() {
     if (name === 'phone') {
       const rawDigits = value.replace(/\D/g, '');
       setForm(prev => ({ ...prev, phone: rawDigits && /^[6-9]/.test(rawDigits) ? rawDigits.slice(0, 10) : '' }));
+    } else if (name === 'city') {
+      const record = cityRecords.find((row) => row.name.toLowerCase() === value.toLowerCase());
+      setForm((prev) => ({ ...prev, city: value, state: record?.state || prev.state }));
     } else {
       setForm(prev => ({ ...prev, [name]: value }));
     }
@@ -134,7 +139,7 @@ export default function AgentPage() {
       `📧 *Email:* ${f.email}`,
       `📱 *Phone:* ${f.phone}`,
       `💼 *Occupation:* ${f.occupation}`,
-      `📍 *Location:* ${f.city}, ${f.state}`,
+      `*Location:* ${f.city}, ${f.state}`,
       `🏷️ *Agent Type:* ${f.agentType}`,
       `🎯 *Experience:* ${f.experience || 'Not provided'}`,
       `👥 *Network Size:* ${f.network || 'Not provided'}`,
@@ -147,27 +152,36 @@ export default function AgentPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    const phoneDigits = String(form.phone || '').replace(/\D/g, '').slice(0, 10);
     const phoneRegex = /^[6-9]\d{9}$/;
-    if (!form.phone) { setError('Phone number is required.'); return; }
-    if (!phoneRegex.test(form.phone)) { setError('Enter a valid 10-digit Indian mobile number (starts with 6-9).'); return; }
+    if (!form.name.trim()) { setError('Full name is required.'); return; }
+    if (!form.email.trim()) { setError('Email address is required.'); return; }
+    if (!phoneDigits) { setError('Phone number is required.'); return; }
+    if (!phoneRegex.test(phoneDigits)) { setError('Enter a valid 10-digit Indian mobile number (starts with 6-9).'); return; }
+    if (!form.city) { setError('City is required.'); return; }
+    if (!form.state) { setError('State is required.'); return; }
+    if (!form.agentType) { setError('Agent type is required.'); return; }
+    if (!form.occupation.trim()) { setError('Current occupation is required.'); return; }
     setLoading(true);
+
+    const payload = { ...form, phone: phoneDigits };
 
     try {
       // Save to DB → shows on admin dashboard
       const dbRes = await fetch("/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       const dbData = await dbRes.json();
-      if (!dbData.success) {
+      if (!dbRes.ok || !dbData.success) {
         setError(dbData.error || "Something went wrong. Please try again.");
         setLoading(false);
         return;
       }
 
       // Email notification
-      await fetch("https://formsubmit.co/ajax/mtboss2016@gmail.com", {
+      await fetch("https://formsubmit.co/ajax/MTBOSS2016@gmail.com", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
@@ -562,19 +576,19 @@ export default function AgentPage() {
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className={labelClass}>Full Name *</label>
+                    <label className={labelClass}>Full Name <RequiredAsterisk /></label>
                     <input type="text" name="name" required placeholder="Your full name" value={form.name} onChange={handleChange} className={inputClass} />
                   </div>
                   <div>
-                    <label className={labelClass}>Email Address *</label>
+                    <label className={labelClass}>Email Address <RequiredAsterisk /></label>
                     <input type="email" name="email" required placeholder="your@email.com" value={form.email} onChange={handleChange} className={inputClass} />
                   </div>
                   <div>
-                    <label className={labelClass}>Phone Number *</label>
-                    <input type="tel" name="phone" placeholder="10-digit mobile number" value={form.phone} onChange={handleChange} maxLength={10} inputMode="numeric" className={inputClass} />
+                    <label className={labelClass}>Phone Number <RequiredAsterisk /></label>
+                    <input type="tel" name="phone" required placeholder="10-digit mobile number" value={form.phone} onChange={handleChange} maxLength={10} inputMode="numeric" className={inputClass} />
                   </div>
                   <div>
-                    <label className={labelClass}>Current Occupation *</label>
+                    <label className={labelClass}>Current Occupation <RequiredAsterisk /></label>
                     <input type="text" name="occupation" required placeholder="e.g. Real Estate Broker, Engineer" value={form.occupation} onChange={handleChange} className={inputClass} />
                   </div>
                 </div>
@@ -587,26 +601,26 @@ export default function AgentPage() {
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className={labelClass}>City *</label>
-                    <select name="city" required value={form.city} onChange={handleChange} className={inputClass} disabled={citiesLoading}>
-                      <option value="">{citiesLoading ? "Loading cities..." : "Select city"}</option>
-                      {cities.map(city => <option key={city} value={city}>{city}</option>)}
-                    </select>
-                    {citiesError && <p className="mt-1 text-xs text-red-500">{citiesError}</p>}
+                    <label className={labelClass}>City <RequiredAsterisk /></label>
+                    <input
+                      type="text"
+                      name="city"
+                      required
+                      placeholder="Enter your city"
+                      value={form.city}
+                      onChange={handleChange}
+                      className={inputClass}
+                      list="agent-city-list"
+                    />
+                    <datalist id="agent-city-list">
+                      {cities.map(city => <option key={city} value={city} />)}
+                    </datalist>
                   </div>
                   <div>
-                    <label className={labelClass}>State *</label>
+                    <label className={labelClass}>State <RequiredAsterisk /></label>
                     <select name="state" required value={form.state} onChange={handleChange} className={inputClass}>
                       <option value="">Select State</option>
-                      {[
-                        "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar",
-                        "Chhattisgarh", "Delhi", "Goa", "Gujarat", "Haryana",
-                        "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala",
-                        "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya",
-                        "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan",
-                        "Sikkim", "Tamil Nadu", "Telangana", "Tripura",
-                        "Uttar Pradesh", "Uttarakhand", "West Bengal",
-                      ].map((s) => (
+                      {INDIAN_STATES.map((s) => (
                         <option key={s} value={s}>{s}</option>
                       ))}
                     </select>
@@ -621,7 +635,7 @@ export default function AgentPage() {
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className={labelClass}>Agent Type *</label>
+                    <label className={labelClass}>Agent Type <RequiredAsterisk /></label>
                     <select name="agentType" required value={form.agentType} onChange={handleChange} className={inputClass}>
                       <option value="">Select Type</option>
                       <option value="Property Agent">Property Agent</option>
@@ -671,7 +685,12 @@ export default function AgentPage() {
               {/* Agreement */}
               <div className={`p-4 rounded-sm border ${dark ? "bg-zinc-900 border-zinc-700" : "bg-sky-50 border-sky-100"}`}>
                 <label className="flex items-start gap-3 cursor-pointer">
-                  <input type="checkbox" required className="mt-0.5 accent-[var(--brand-blue)]" />
+                  <input
+                    type="checkbox"
+                    required
+                    className="mt-0.5 h-6 w-6 min-h-6 min-w-6 shrink-0 cursor-pointer accent-[var(--brand-blue)]"
+                    aria-label="Confirm agent registration information"
+                  />
                   <span className={`text-[11px] leading-relaxed ${dark ? "text-zinc-400" : "text-zinc-600"}`}>
                     I confirm that the information provided is accurate. I agree to MTBOSS Construction&apos;s agent terms and understand that registration does not guarantee agent status until verified.
                   </span>
@@ -735,7 +754,7 @@ export default function AgentPage() {
               Call Now
             </a>
             <a
-              href="mailto:mtboss2016@gmail.com"
+              href="mailto:MTBOSS2016@gmail.com"
               className="inline-flex items-center justify-center gap-3 px-8 py-4 border-2 border-white text-white font-black uppercase text-xs tracking-widest hover:bg-white hover:text-zinc-800 transition-all"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

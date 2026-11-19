@@ -559,59 +559,7 @@ const Content = () => {
               </ul>
             </section>
 
-            <section>
-              <h3 className="mb-3 text-xl font-semibold text-gray-900 sm:text-2xl">
-                How MTBOSS Approaches a Decoration and Finishing Project
-              </h3>
-
-              <ul className="ml-4 list-inside list-disc space-y-2">
-                <li>
-                  <strong>Step 1 — Enquiry and discussion:</strong> Contact
-                  MTBOSS with your rooms, style preferences and budget through
-                  website, phone or WhatsApp.
-                </li>
-                <li>
-                  <strong>Step 2 — Site visit and study:</strong> The team looks
-                  at the rooms, light, colours, furniture and condition of walls
-                  and ceilings. Share your locality in Bareilly, and the team
-                  will confirm arrangements.
-                </li>
-                <li>
-                  <strong>Step 3 — Style and colour direction:</strong> Palettes,
-                  lighting ideas and styling directions are shared and refined
-                  with your feedback.
-                </li>
-                <li>
-                  <strong>Step 4 — Estimate:</strong> The Budget Calculator and
-                  current material rates help prepare a realistic cost outline.
-                </li>
-                <li>
-                  <strong>Step 5 — Specifications and agreement:</strong> Scope,
-                  material and finish specifications, timeline and payment
-                  stages are documented.
-                </li>
-                <li>
-                  <strong>Step 6 — Preparation:</strong> Repairs, surface
-                  preparation, and any wiring or woodwork needed for the plan.
-                </li>
-                <li>
-                  <strong>Step 7 — Painting and wall finishes:</strong> Paint,
-                  textures and wall treatments are applied in the right order.
-                </li>
-                <li>
-                  <strong>Step 8 — Lighting and fittings:</strong> Fixtures,
-                  lights and hardware are installed and tested.
-                </li>
-                <li>
-                  <strong>Step 9 — Styling and final touches:</strong> Furniture
-                  placement, soft furnishings and decor are finalised.
-                </li>
-                <li>
-                  <strong>Step 10 — Inspection and handover:</strong> Final
-                  walkthrough and snag correction before handover.
-                </li>
-              </ul>
-            </section>
+           
 
             <section>
               <h3 className="mb-3 text-xl font-semibold text-gray-900 sm:text-2xl">
@@ -876,21 +824,21 @@ const Content = () => {
                 <li>
                   <strong>Website:</strong>{" "}
                   <a
-                    href="https://www.mtboss.in"
+                    href="https://www.MTBOSS.in"
                     className="text-blue-600 underline"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    https://www.mtboss.in
+                    https://www.MTBOSS.in
                   </a>
                 </li>
                 <li>
                   <strong>Email:</strong>{" "}
                   <a
-                    href="mailto:mtboss2016@gmail.com"
+                    href="mailto:MTBOSS2016@gmail.com"
                     className="text-blue-600 underline"
                   >
-                    mtboss2016@gmail.com
+                    MTBOSS2016@gmail.com
                   </a>
                 </li>
                 <li>

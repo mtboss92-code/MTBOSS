@@ -4,13 +4,21 @@ import { fileURLToPath } from "url";
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
-// Load env before Next inlines NEXT_PUBLIC_* values (root .env is canonical; src/.env optional).
-dotenv.config({ path: path.join(projectRoot, ".env") });
-dotenv.config({ path: path.join(projectRoot, "src", ".env") });
+// Load env before Next inlines NEXT_PUBLIC_* values.
+// Prefer `.env.local` (does not override vars already set by the shell), then `.env`, then `src/.env`.
+dotenv.config({ path: path.join(projectRoot, ".env.local"), override: false });
+dotenv.config({ path: path.join(projectRoot, ".env"), override: false });
+dotenv.config({ path: path.join(projectRoot, "src", ".env"), override: false });
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  staticPageGenerationTimeout: 120,
+  // This repository has its own lockfile inside a parent workspace. Explicitly
+  // setting the tracing root prevents Next from selecting the parent project.
+  outputFileTracingRoot: projectRoot,
   /* config options here */
+  allowedDevOrigins: ["10.221.79.102"],
+  
   experimental: {
     // Compile in the main process and use threads for type checking. This avoids
     // child-process spawn failures on restricted Windows environments.
@@ -23,6 +31,11 @@ const nextConfig = {
   distDir: process.env.NODE_ENV === 'development' ? '.next-dev' : '.next',
   reactCompiler: true,
   images: {
+    // Cloudinary images occasionally time out when fetched through Next's
+    // development image-optimization proxy on Windows. Let the browser load
+    // the already CDN-hosted images directly, which prevents /_next/image 500s
+    // without changing any Image component or its URL.
+    unoptimized: true,
     qualities: [70, 75, 80],
     remotePatterns: [
       { protocol: 'https', hostname: 'res.cloudinary.com' },
