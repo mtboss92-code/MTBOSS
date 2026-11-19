@@ -584,6 +584,19 @@ export default function Storefront({ categories, products, offers = [], content,
   const [selectedPriceRanges, setSelectedPriceRanges] = useState([]);
   const [openFilterMenu, setOpenFilterMenu] = useState(null);
   const [renderState, setRenderState] = useState({ key: '', limit: PRODUCTS_PER_BATCH });
+  // CSS `display:none` still mounts the entire hidden storefront. On desktop
+  // that meant the mobile shop (including its quick-services tree and product
+  // calculations) ran alongside the desktop shop, occupying the main thread.
+  // Mount exactly one storefront for the current viewport instead.
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)');
+    const syncViewport = () => setIsMobileViewport(media.matches);
+    syncViewport();
+    media.addEventListener('change', syncViewport);
+    return () => media.removeEventListener('change', syncViewport);
+  }, []);
 
   const toggleFilter = (setList, val) => {
     setList((prev) => (prev.includes(val) ? prev.filter((item) => item !== val) : [...prev, val]));
@@ -1363,7 +1376,7 @@ export default function Storefront({ categories, products, offers = [], content,
     else url.searchParams.delete('q');
     window.history.replaceState(window.history.state, '', url);
     if (typeof window !== 'undefined') {
-      if (!noScroll) window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (!options.noScroll) window.scrollTo({ top: 0, behavior: 'smooth' });
     }
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   };
@@ -1371,7 +1384,7 @@ export default function Storefront({ categories, products, offers = [], content,
   return (
     <div className={`shop-page${cartOpen ? ' store-cart-is-open' : ''}`}>
       {/* Mobile Quick-Commerce View (viewport <= 768px) */}
-      <div className="storefront-mobile">
+      {isMobileViewport && <div className="storefront-mobile">
         <MobileStorefront
           categories={categories}
           mainCategories={mainCategories}
@@ -1399,10 +1412,10 @@ export default function Storefront({ categories, products, offers = [], content,
           promotions={promotions}
           onOpenLocationModal={onOpenLocationModal}
         />
-      </div>
+      </div>}
 
       {/* Desktop Storefront View (viewport > 768px) */}
-      <div className="storefront-desktop">
+      {!isMobileViewport && <div className="storefront-desktop">
         <header className="store-header" ref={storeHeaderRef}>
           <div className="store-header-inner">
             <Link href="/" className="store-brand" aria-label="MTBOSS home"><picture className="store-brand-picture"><Image src="/logo.png" alt="MTBOSS" width={46} height={46} sizes="(max-width: 560px) 34px, (max-width: 800px) 39px, 46px" /></picture><small>SHOP</small></Link>
@@ -2152,7 +2165,7 @@ export default function Storefront({ categories, products, offers = [], content,
 
         </main>
 
-      </div>
+      </div>}
     </div>
   );
 }
