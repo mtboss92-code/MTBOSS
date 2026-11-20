@@ -181,7 +181,10 @@ export default function ShopPage() {
     // Category names and display groups are managed from the admin panel.
     // Always read the latest lightweight tree when Shop Now opens; product
     // data remains independently cached/batched below.
-    fetch("/api/shop-categories?fields=lite&fresh=1", { cache: 'no-store' })
+    // Timestamp makes this a distinct request at CDN/proxy layers too. A
+    // static `fresh=1` URL can itself be served from a previously cached
+    // response after an admin sync.
+    fetch(`/api/shop-categories?fields=lite&fresh=1&t=${Date.now()}`, { cache: 'no-store' })
       .then(parseJsonResponse)
       .then((d) => { if (d?.success) setCategories(d.data || []); })
       .catch(console.error)

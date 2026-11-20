@@ -359,7 +359,9 @@ export async function GET(req) {
     }
     return NextResponse.json(
       { success: true, data: result.rows },
-      isAdmin ? undefined : { headers: publicCacheHeaders },
+      isAdmin
+        ? undefined
+        : { headers: fresh ? { 'Cache-Control': 'no-store, max-age=0' } : publicCacheHeaders },
     );
   } catch (error) {
     console.error('GET shop-categories error:', error.message);
