@@ -209,8 +209,8 @@ export const DIRECT_NAV_BUTTONS = ['Chemicals', 'Paints'];
 export function resolveCategoryNav(tree = CATEGORY_NAV_TREE, categories = [], products = []) {
   return tree.map((parent) => {
     const parentCategory = findCategoryByLabel(parent.label, categories);
-
-    const childrenLabels = [...parent.children];
+    let childrenLabels = [...parent.children];
+    let configuredGroups = [];
     if (parentCategory) {
       let rawSubs = parentCategory.subcategories;
       if (typeof rawSubs === 'string') {
@@ -235,12 +235,51 @@ export function resolveCategoryNav(tree = CATEGORY_NAV_TREE, categories = [], pr
           }
         });
       }
+
+      // Admin-managed Shop Now groups replace the long raw subcategory list
+      // in the dropdown only. The parent category and original subcategory
+      // data remain untouched.
+      let rawGroups = parentCategory.shop_display_groups;
+      if (typeof rawGroups === 'string') {
+        try { rawGroups = JSON.parse(rawGroups); } catch { rawGroups = []; }
+      }
+      if (Array.isArray(rawGroups) && rawGroups.length > 0) {
+        const activeGroups = rawGroups
+          .filter((group) => group && group.is_active !== false && String(group.name || '').trim())
+          .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
+        const grouped = new Set(activeGroups.flatMap((group) => Array.isArray(group.subcategories) ? group.subcategories.map(normalizeName) : []));
+        const rawSubcategories = [];
+        [rawSubs, rawTypes].forEach((source) => {
+          if (Array.isArray(source)) source.forEach((entry) => {
+            const label = typeof entry === 'object' && entry !== null ? entry.name : entry;
+            if (label && !rawSubcategories.some((item) => namesMatch(item, label))) rawSubcategories.push(String(label).trim());
+          });
+        });
+        configuredGroups = activeGroups.map((group) => ({
+          label: String(group.name).trim(),
+          members: Array.isArray(group.subcategories) ? group.subcategories.map(String).filter(Boolean) : [],
+        }));
+        childrenLabels = [
+          ...configuredGroups.map((group) => group.label),
+          ...rawSubcategories.filter((label) => !grouped.has(normalizeName(label))),
+        ];
+      }
     }
 
     return {
       id: parent.id,
       label: parent.label,
       children: childrenLabels.map((label) => {
+        const group = configuredGroups.find((entry) => namesMatch(entry.label, label));
+        if (group) {
+          return {
+            label,
+            categoryId: parentCategory?.id ?? 'all',
+            search: '',
+            memberSubcategories: group.members,
+            disabled: false,
+          };
+        }
         const exactCategory = findCategoryByLabel(label, categories);
         if (exactCategory) {
           return {
@@ -433,7 +472,8 @@ export function getSubcategoriesForParent(parentDefOrLabel, categories = [], pro
   const parentTree = CATEGORY_NAV_TREE.find((t) => t.id === parent.id || namesMatch(t.label, parent.label));
   const parentDb = findCategoryByLabel(parent.label, categories);
 
-  const labels = parentTree ? [...parentTree.children] : (parent.children ? [...parent.children] : []);
+  let labels = parentTree ? [...parentTree.children] : (parent.children ? [...parent.children] : []);
+  let groupMembers = new Map();
   if (parentDb) {
     let rawSubs = parentDb.subcategories;
     if (typeof rawSubs === 'string') {
@@ -446,6 +486,20 @@ export function getSubcategoriesForParent(parentDefOrLabel, categories = [], pro
           labels.push(name.trim());
         }
       });
+    }
+
+    let rawGroups = parentDb.shop_display_groups;
+    if (typeof rawGroups === 'string') {
+      try { rawGroups = JSON.parse(rawGroups); } catch { rawGroups = []; }
+    }
+    if (Array.isArray(rawGroups) && rawGroups.length > 0) {
+      const groups = rawGroups
+        .filter((group) => group && group.is_active !== false && String(group.name || '').trim())
+        .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
+      const assigned = new Set(groups.flatMap((group) => Array.isArray(group.subcategories) ? group.subcategories.map(normalizeName) : []));
+      const savedSubs = Array.isArray(rawSubs) ? rawSubs.map((entry) => typeof entry === 'object' && entry ? entry.name : entry).filter(Boolean).map(String) : [];
+      labels = [...groups.map((group) => String(group.name).trim()), ...savedSubs.filter((label) => !assigned.has(normalizeName(label)))];
+      groupMembers = new Map(groups.map((group) => [String(group.name).trim(), Array.isArray(group.subcategories) ? group.subcategories.map(String).filter(Boolean) : []]));
     }
   }
 
@@ -463,7 +517,8 @@ export function getSubcategoriesForParent(parentDefOrLabel, categories = [], pro
     }
 
     images = Array.from(new Set(images.filter(Boolean)));
-    const matchingProductsCount = products.filter((p) => productMatchesLeaf(p, label, parent.label)).length;
+    const memberSubcategories = groupMembers.get(label) || null;
+    const matchingProductsCount = products.filter((p) => productMatchesCategoryAndSub(p, parent.label, memberSubcategories || label)).length;
 
     return {
       id: childDb?.id ?? `sub-${normalizeName(label).replace(/[^a-z0-9]+/g, '-')}`,
@@ -475,6 +530,7 @@ export function getSubcategoriesForParent(parentDefOrLabel, categories = [], pro
       images,
       count: matchingProductsCount,
       categoryId: childDb?.id ?? null,
+      memberSubcategories,
     };
   });
 }
@@ -494,6 +550,9 @@ export function productMatchesParent(product, parentLabel, allParents = MAIN_NAV
 
 export function productMatchesCategoryAndSub(product, parentLabel, subLabel, allParents = MAIN_NAV_DEFINITIONS) {
   if (!product) return false;
+  if (Array.isArray(subLabel)) {
+    return subLabel.some((label) => productMatchesLeaf(product, label, parentLabel || label));
+  }
   if (subLabel) {
     return productMatchesLeaf(product, subLabel, parentLabel || subLabel);
   }

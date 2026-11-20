@@ -133,8 +133,9 @@ export default function ShopCategoryNav({
   const handleLeafSelect = (child, parent) => {
     if (child.disabled && !child.search && child.categoryId == null) return;
     onSelectCategory?.(child.categoryId ?? "all", {
-      search: child.search || child.label,
+      search: child.memberSubcategories ? '' : (child.search || child.label),
       subcategory: child.label,
+      subcategoryMembers: child.memberSubcategories || null,
       parentCategory: parent?.label || null,
       parentId: parent?.id || null,
     });

@@ -568,6 +568,7 @@ export default function Storefront({ categories, products, offers = [], content,
   const [activeCategory, setActiveCategory] = useState("all");
   const [selectedParentNav, setSelectedParentNav] = useState(null);
   const [selectedSubNav, setSelectedSubNav] = useState(null);
+  const [selectedSubNavMembers, setSelectedSubNavMembers] = useState(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [cityOpen, setCityOpen] = useState(false);
   const [productManagerHref, setProductManagerHref] = useState('');
@@ -995,6 +996,7 @@ export default function Storefront({ categories, products, offers = [], content,
   const goToAllCategories = ({ noScroll = false } = {}) => {
     setSelectedParentNav(null);
     setSelectedSubNav(null);
+    setSelectedSubNavMembers(null);
     setActiveCategory('all');
     setSearch('');
     resetAttributeFilters();
@@ -1015,6 +1017,7 @@ export default function Storefront({ categories, products, offers = [], content,
     if (parentDef?.isDirect) {
       setSelectedParentNav(parentDef.label);
       setSelectedSubNav(parentDef.label);
+      setSelectedSubNavMembers(null);
       setSearch('');
       resetAttributeFilters();
       if (typeof window !== 'undefined') {
@@ -1027,6 +1030,7 @@ export default function Storefront({ categories, products, offers = [], content,
     } else {
       setSelectedParentNav(parentDef?.label || pLabel);
       setSelectedSubNav(null);
+      setSelectedSubNavMembers(null);
       setSearch('');
       resetAttributeFilters();
       if (typeof window !== 'undefined') {
@@ -1042,10 +1046,11 @@ export default function Storefront({ categories, products, offers = [], content,
     }
   };
 
-  const handleSelectSubcategory = (subLabel, parentLabel = null, { noScroll = false } = {}) => {
+  const handleSelectSubcategory = (subLabel, parentLabel = null, { noScroll = false, subcategoryMembers = null } = {}) => {
     const parent = parentLabel || selectedParentNav;
     setSelectedParentNav(parent);
     setSelectedSubNav(subLabel);
+    setSelectedSubNavMembers(Array.isArray(subcategoryMembers) && subcategoryMembers.length ? subcategoryMembers : null);
     setSearch('');
     resetAttributeFilters();
     if (typeof window !== 'undefined') {
@@ -1061,7 +1066,7 @@ export default function Storefront({ categories, products, offers = [], content,
   const availableAttributes = useMemo(() => {
     return collectUniqueAttributes(
       catalog.filter((p) => {
-        if (selectedSubNav) return productMatchesCategoryAndSub(p, selectedParentNav, selectedSubNav);
+        if (selectedSubNav) return productMatchesCategoryAndSub(p, selectedParentNav, selectedSubNavMembers || selectedSubNav);
         if (selectedParentNav && selectedParentNav !== 'all') return productMatchesCategoryAndSub(p, selectedParentNav, null);
         if (activeCategory !== 'all') {
           const catId = p.category?.id != null ? String(p.category.id) : '';
@@ -1075,7 +1080,7 @@ export default function Storefront({ categories, products, offers = [], content,
       selectedParentNav || (typeof activeCategory === 'string' ? activeCategory : ''),
       selectedSubNav
     );
-  }, [catalog, selectedSubNav, selectedParentNav, activeCategory, categories]);
+  }, [catalog, selectedSubNav, selectedSubNavMembers, selectedParentNav, activeCategory, categories]);
 
   const hasActiveAttributeFilters = selectedSubcategories.length > 0 || selectedBrands.length > 0 || selectedThicknesses.length > 0 || selectedSizes.length > 0 || selectedTypes.length > 0 || selectedColors.length > 0 || selectedMaterials.length > 0 || selectedGrades.length > 0 || selectedPackSizes.length > 0 || selectedPriceRanges.length > 0;
 
@@ -1083,7 +1088,7 @@ export default function Storefront({ categories, products, offers = [], content,
     catalog.filter((product) => {
       // 1. Hierarchy Match
       if (selectedSubNav) {
-        if (!productMatchesCategoryAndSub(product, selectedParentNav, selectedSubNav)) {
+        if (!productMatchesCategoryAndSub(product, selectedParentNav, selectedSubNavMembers || selectedSubNav)) {
           return false;
         }
       } else if (selectedParentNav && selectedParentNav !== 'all') {
@@ -1210,7 +1215,7 @@ export default function Storefront({ categories, products, offers = [], content,
   // Options calculation for HomeRun popovers
   const baseHierarchyProducts = useMemo(() => {
     return catalog.filter((p) => {
-      if (selectedSubNav) return productMatchesCategoryAndSub(p, selectedParentNav, selectedSubNav);
+      if (selectedSubNav) return productMatchesCategoryAndSub(p, selectedParentNav, selectedSubNavMembers || selectedSubNav);
       if (selectedParentNav && selectedParentNav !== 'all') return productMatchesCategoryAndSub(p, selectedParentNav, null);
       if (activeCategory !== 'all') {
         const catId = p.category?.id != null ? String(p.category.id) : '';
@@ -1221,14 +1226,14 @@ export default function Storefront({ categories, products, offers = [], content,
       }
       return true;
     });
-  }, [catalog, selectedSubNav, selectedParentNav, activeCategory, categories]);
+  }, [catalog, selectedSubNav, selectedSubNavMembers, selectedParentNav, activeCategory, categories]);
 
   const popoverCategoryOptions = useMemo(() => {
     if (parentSubcategories.length > 0) {
       return parentSubcategories.map((sub) => ({
         label: sub.name,
         value: sub.name,
-        count: catalog.filter((p) => productMatchesCategoryAndSub(p, currentParentCategory?.label, sub.name)).length
+        count: catalog.filter((p) => productMatchesCategoryAndSub(p, currentParentCategory?.label, sub.memberSubcategories || sub.name)).length
       })).filter((opt) => opt.count > 0);
     }
     return mainCategories.map((cat) => ({
@@ -1351,7 +1356,7 @@ export default function Storefront({ categories, products, offers = [], content,
     }
 
     if (parentCategory && subcategory) {
-      handleSelectSubcategory(subcategory, parentCategory);
+      handleSelectSubcategory(subcategory, parentCategory, { subcategoryMembers: options.subcategoryMembers });
       return;
     }
 
@@ -1695,7 +1700,7 @@ export default function Storefront({ categories, products, offers = [], content,
                         type="button"
                         key={sub.name}
                         className={`store-category store-category-${tone}`}
-                        onClick={() => handleSelectSubcategory(sub.name, currentParentCategory?.label)}
+                        onClick={() => handleSelectSubcategory(sub.name, currentParentCategory?.label, { subcategoryMembers: sub.memberSubcategories })}
                       >
                         <span className="store-category-art" style={{ position: 'relative', display: 'block', overflow: 'hidden' }}>
                           {subImgs.length > 0 ? (

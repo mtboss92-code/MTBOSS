@@ -54,6 +54,9 @@ const ensureTable = createInitializationGuard(async () => {
     await pool.query(`ALTER TABLE shop_categories ADD COLUMN IF NOT EXISTS emoji_image   TEXT`);
     await pool.query(`ALTER TABLE shop_categories ADD COLUMN IF NOT EXISTS shipping_charge NUMERIC(10,2) DEFAULT 0`);
     await pool.query(`ALTER TABLE shop_categories ADD COLUMN IF NOT EXISTS images        JSONB DEFAULT '[]'`);
+    // Shop Now presentation only. It never changes the original admin
+    // category/subcategory hierarchy or product assignments.
+    await pool.query(`ALTER TABLE shop_categories ADD COLUMN IF NOT EXISTS shop_display_groups JSONB DEFAULT '[]'::jsonb`);
   } catch (error) {
     console.error('ensureTable error:', error.message);
     throw error;
@@ -161,6 +164,13 @@ export const NAVBAR_PRESET_CATEGORIES = [
 ];
 
 export async function syncNavbarCategories() {
+  // The parent navbar is fixed by the storefront design. Publishing now only
+  // invalidates the public category cache: Shop Now reads each parent's saved
+  // subcategories/display groups directly from the admin-managed category.
+  // Do not remap products, overwrite subcategories, or delete categories.
+  invalidatePublicCategoriesCache();
+  return;
+
   try {
     await pool.query(`
       UPDATE supplier_materials
@@ -313,9 +323,13 @@ export async function GET(req) {
     }
 
     const isAdmin = searchParams.get('admin') === 'true';
+    // Shop Now asks for a fresh category tree after an admin changes names or
+    // display groups.  Keep the short in-process cache for normal visitors,
+    // while allowing that explicit request to bypass stale browser/CDN data.
+    const fresh = searchParams.get('fresh') === '1';
     if (isAdmin && !requireRole(req, 'admin')) return unauthorized();
 
-    if (!isAdmin && publicCategoriesCache.rows && publicCategoriesCache.expiresAt > Date.now()) {
+    if (!isAdmin && !fresh && publicCategoriesCache.rows && publicCategoriesCache.expiresAt > Date.now()) {
       return NextResponse.json({ success: true, data: publicCategoriesCache.rows }, { headers: publicCacheHeaders });
     }
     if (isAdmin && adminCategoriesCache.rows && adminCategoriesCache.expiresAt > Date.now()) {
@@ -325,7 +339,7 @@ export async function GET(req) {
     const fields = searchParams.get('fields');
     const slim = fields === 'list' || fields === 'lite';
     const selectSql = slim
-      ? `SELECT id, name, image, emoji, emoji_image, label, label_color, price_range, unit, sort_order, is_active, shipping_charge, subcategories, types`
+      ? `SELECT id, name, image, emoji, emoji_image, label, label_color, price_range, unit, sort_order, is_active, shipping_charge, subcategories, shop_display_groups, types`
       : `SELECT *`;
 
     const result = isAdmin
@@ -370,7 +384,7 @@ export async function POST(req) {
 
     if (!requireRole(req, 'admin')) return unauthorized();
 
-    const { name, image, images, emoji, emoji_image, label, label_color, price_range, unit, types, subcategories, city_prices, shipping_charge } = body;
+    const { name, image, images, emoji, emoji_image, label, label_color, price_range, unit, types, subcategories, shop_display_groups, city_prices, shipping_charge } = body;
     if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
     const normalizedCityPrices = await canonicalCityPrices(city_prices);
     if (!normalizedCityPrices) return NextResponse.json({ error: 'City prices must use active managed cities' }, { status: 400 });
@@ -385,14 +399,15 @@ export async function POST(req) {
     const result = await pool.query(
       `INSERT INTO shop_categories
          (name, image, emoji, emoji_image, label, label_color, price_range, unit, sort_order,
-          is_active, types, subcategories, city_prices, shipping_charge, images, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE,$10::jsonb,$11::jsonb,$12::jsonb,$13,$14::jsonb,NOW(),NOW())
+          is_active, types, subcategories, shop_display_groups, city_prices, shipping_charge, images, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14,$15::jsonb,NOW(),NOW())
        RETURNING *`,
       [
         name, coverImage, emoji || '🛒', emoji_image || null, label || '', label_color || 'yellow',
         price_range || '', unit || '', parseInt(max) + 1,
         JSON.stringify(Array.isArray(types) ? types : []),
         JSON.stringify(Array.isArray(subcategories) ? subcategories : []),
+        JSON.stringify(Array.isArray(shop_display_groups) ? shop_display_groups : []),
         JSON.stringify(normalizedCityPrices),
         shipping_charge || 0,
         JSON.stringify(allImages),
@@ -414,7 +429,7 @@ export async function PUT(req) {
 
     const {
       id, name, image, images, emoji, emoji_image, label, label_color,
-      price_range, unit, is_active, types, subcategories, city_prices, shipping_charge,
+      price_range, unit, is_active, types, subcategories, shop_display_groups, city_prices, shipping_charge,
     } = await req.json();
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
     const normalizedCityPrices = await canonicalCityPrices(city_prices);
@@ -429,14 +444,15 @@ export async function PUT(req) {
       `UPDATE shop_categories
        SET name=$1, image=$2, emoji=$3, emoji_image=$4, label=$5, label_color=$6,
            price_range=$7, unit=$8, is_active=$9,
-           types=$10::jsonb, subcategories=$11::jsonb,
-           city_prices=$12::jsonb, shipping_charge=$13, images=$14::jsonb, updated_at=NOW()
-       WHERE id=$15 RETURNING *`,
+           types=$10::jsonb, subcategories=$11::jsonb, shop_display_groups=$12::jsonb,
+           city_prices=$13::jsonb, shipping_charge=$14, images=$15::jsonb, updated_at=NOW()
+       WHERE id=$16 RETURNING *`,
       [
         name, coverImage, emoji || '🛒', emoji_image || null, label || '', label_color || 'yellow',
         price_range || '', unit || '', is_active ?? true,
         JSON.stringify(Array.isArray(types) ? types : []),
         JSON.stringify(Array.isArray(subcategories) ? subcategories : []),
+        JSON.stringify(Array.isArray(shop_display_groups) ? shop_display_groups : []),
         JSON.stringify(normalizedCityPrices),
         shipping_charge || 0,
         JSON.stringify(allImages),

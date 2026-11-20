@@ -180,7 +180,10 @@ export default function ShopPage() {
   useEffect(() => {
     // The storefront only needs the lightweight category shape. Avoid
     // transferring editor-only image/configuration fields during first paint.
-    fetch("/api/shop-categories?fields=lite", { cache: 'force-cache' })
+    // Category names and display groups are managed from the admin panel.
+    // Always read the latest lightweight tree when Shop Now opens; product
+    // data remains independently cached/batched below.
+    fetch("/api/shop-categories?fields=lite&fresh=1", { cache: 'no-store' })
       .then(parseJsonResponse)
       .then((d) => { if (d?.success) setCategories(d.data || []); })
       .catch(console.error)

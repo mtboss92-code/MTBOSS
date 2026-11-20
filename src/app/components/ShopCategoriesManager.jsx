@@ -401,6 +401,56 @@ function EmojiUpload({ emojiText, emojiImage, onTextChange, onImageChange, t }) 
   );
 }
 
+/* ── Shop Now-only subcategory groups ───────────────────────────────────── */
+function ShopDisplayGroupsEditor({ subcategories, groups, onChange, t }) {
+  const [name, setName] = useState('');
+  const subNames = (Array.isArray(subcategories) ? subcategories : [])
+    .map((item) => typeof item === 'object' && item ? item.name : item)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+  const safeGroups = Array.isArray(groups) ? groups : [];
+  const addGroup = () => {
+    const label = name.trim();
+    if (!label || safeGroups.some((group) => group.name?.toLowerCase() === label.toLowerCase())) return;
+    onChange([...safeGroups, { id: `group-${Date.now()}`, name: label, subcategories: [], is_active: true, sort_order: safeGroups.length + 1 }]);
+    setName('');
+  };
+  const updateGroup = (index, patch) => onChange(safeGroups.map((group, i) => i === index ? { ...group, ...patch } : group));
+  const removeGroup = (index) => onChange(safeGroups.filter((_, i) => i !== index));
+  return (
+    <section style={{ border: `1px solid ${t.border}`, borderRadius: 6, padding: 14, background: t.card }}>
+      <strong style={{ fontSize: 12, color: t.text }}>Shop Now Category Display Management</strong>
+      <p style={{ fontSize: 11, color: t.sub, margin: '5px 0 12px' }}>
+        Parent navbar category remains unchanged. Create optional combined dropdown entries; original subcategories and products stay unchanged.
+      </p>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <input value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addGroup(); } }} placeholder="e.g. Blocks, Bricks & Sand" style={{ flex: 1, border: `1px solid ${t.border}`, borderRadius: 4, padding: '8px 10px', background: t.inputBg, color: t.text }} />
+        <button type="button" onClick={addGroup} style={{ background: t.accent, border: 0, borderRadius: 4, color: t.accentFg, padding: '8px 12px', fontWeight: 700, cursor: 'pointer' }}>+ Add group</button>
+      </div>
+      {safeGroups.map((group, index) => (
+        <div key={group.id || `${group.name}-${index}`} style={{ borderTop: `1px solid ${t.border}`, paddingTop: 10, marginTop: 10 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input value={group.name || ''} onChange={(event) => updateGroup(index, { name: event.target.value })} style={{ flex: 1, border: `1px solid ${t.border}`, borderRadius: 4, padding: '7px 9px', background: t.inputBg, color: t.text, fontWeight: 700 }} />
+            <label style={{ fontSize: 11, color: t.sub, whiteSpace: 'nowrap' }}><input type="checkbox" checked={group.is_active !== false} onChange={(event) => updateGroup(index, { is_active: event.target.checked })} /> Active</label>
+            <button type="button" onClick={() => removeGroup(index)} style={{ border: '1px solid #fecaca', borderRadius: 4, background: '#fff1f2', color: '#dc2626', padding: '6px 8px', cursor: 'pointer' }}>Delete</button>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 9 }}>
+            {subNames.map((sub) => {
+              const checked = (group.subcategories || []).some((entry) => entry.toLowerCase() === sub.toLowerCase());
+              const assignedElsewhere = safeGroups.some((other, otherIndex) => otherIndex !== index && (other.subcategories || []).some((entry) => entry.toLowerCase() === sub.toLowerCase()));
+              return <label key={sub} title={assignedElsewhere ? 'Remove this subcategory from its current display group first.' : ''} style={{ fontSize: 11, color: assignedElsewhere ? t.muted : t.text, background: t.tagBg, border: `1px solid ${t.border}`, padding: '4px 7px', borderRadius: 4, opacity: assignedElsewhere ? 0.55 : 1 }}><input type="checkbox" checked={checked} disabled={assignedElsewhere} onChange={(event) => {
+                const current = group.subcategories || [];
+                updateGroup(index, { subcategories: event.target.checked ? [...current, sub] : current.filter((entry) => entry.toLowerCase() !== sub.toLowerCase()) });
+              }} /> {sub}</label>;
+            })}
+          </div>
+        </div>
+      ))}
+      {!safeGroups.length && <p style={{ margin: 0, color: t.muted, fontSize: 11 }}>No display groups. Shop Now will show each saved subcategory normally.</p>}
+    </section>
+  );
+}
+
 /* ── Dynamic tag-list editor (for types / subcategories) ─────────────────── */
 function TagListEditor({ label, helpText, items, onChange, placeholder, t }) {
   const [inputVal, setInputVal] = useState('');
@@ -922,6 +972,7 @@ export default function ShopCategoriesManager({ isDarkMode }) {
   const [emojiImage, setEmojiImage] = useState('');
   const [types, setTypes]           = useState([]);           // array of strings
   const [subcategories, setSubs]    = useState([]);           // array of strings
+  const [shopDisplayGroups, setShopDisplayGroups] = useState([]);
   const [cityPrices, setCityPrices] = useState({});          // { "Delhi": { price_range, unit } }
   const [pendingCity, setPendingCity] = useState('');       // city selected in the "Add City" dropdown
   const [saving, setSaving]         = useState(false);
@@ -930,7 +981,7 @@ export default function ShopCategoriesManager({ isDarkMode }) {
   const [syncing, setSyncing]         = useState(false);
 
   const handleSyncNavbar = async () => {
-    if (!confirm('This will align all shop categories and subcategories to match the Navbar structure (Building Materials, Carpentry, Plumbing, Electrical, Furniture & Architectural Hardware, New Launches, Chemicals, Paints). Existing products will be mapped cleanly. Do you want to proceed?')) {
+    if (!confirm('Publish the currently saved admin subcategories and Shop Now display groups? Parent navbar categories and products will not be changed.')) {
       return;
     }
     setSyncing(true);
@@ -945,7 +996,7 @@ export default function ShopCategoriesManager({ isDarkMode }) {
       });
       const d = await res.json();
       if (d.success) {
-        flash('Shop categories synced to Navbar structure successfully!');
+        flash('Saved subcategories and display groups published to Shop Now.');
         await load();
       } else {
         flash(d.error || 'Failed to sync categories', 'error');
@@ -1004,6 +1055,7 @@ export default function ShopCategoriesManager({ isDarkMode }) {
     setEmojiImage('');
     setTypes([]);
     setSubs([]);
+    setShopDisplayGroups([]);
     setCityPrices({});
     setPendingCity('');
   }
@@ -1027,6 +1079,7 @@ export default function ShopCategoriesManager({ isDarkMode }) {
     setEmojiImage(cat.emoji_image || '');
     setTypes(Array.isArray(cat.types) ? cat.types : []);
     setSubs(Array.isArray(cat.subcategories) ? cat.subcategories : []);
+    setShopDisplayGroups(Array.isArray(cat.shop_display_groups) ? cat.shop_display_groups : []);
     // city_prices may arrive as JSONB object, string, or null
     let cp = cat.city_prices;
     if (typeof cp === 'string') { try { cp = JSON.parse(cp); } catch { cp = {}; } }
@@ -1055,6 +1108,7 @@ export default function ShopCategoriesManager({ isDarkMode }) {
         emoji_image: emojiImage || null,
         types: derivedTypes,
         subcategories,
+        shop_display_groups: shopDisplayGroups,
         city_prices: cityPrices
       };
       let res;
@@ -1312,6 +1366,17 @@ export default function ShopCategoriesManager({ isDarkMode }) {
                     t={t}
                   />
                 </div>
+
+                {editCat && (
+                  <div style={{ gridColumn: 'span 2', borderTop: `1px solid ${t.border}`, paddingTop: '20px', marginTop: '4px' }}>
+                    <ShopDisplayGroupsEditor
+                      subcategories={subcategories}
+                      groups={shopDisplayGroups}
+                      onChange={setShopDisplayGroups}
+                      t={t}
+                    />
+                  </div>
+                )}
 
                 {/* ── City-wise Pricing ──────────────────────────────── */}
                 <div style={{ gridColumn: 'span 2', borderTop: `1px solid ${t.border}`, paddingTop: '20px', marginTop: '4px' }}>
