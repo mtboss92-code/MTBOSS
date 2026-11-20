@@ -219,7 +219,8 @@ export function resolveCategoryNav(tree = CATEGORY_NAV_TREE, categories = [], pr
       if (typeof rawSubs === 'string') {
         try { rawSubs = JSON.parse(rawSubs); } catch {}
       }
-      if (Array.isArray(rawSubs)) {
+      const hasSavedSubcategories = Array.isArray(rawSubs) && rawSubs.length > 0;
+      if (hasSavedSubcategories) {
         rawSubs.forEach((entry) => {
           const name = typeof entry === 'object' && entry !== null ? entry.name : entry;
           if (name && typeof name === 'string' && !childrenLabels.some((l) => namesMatch(l, name))) {
@@ -231,7 +232,11 @@ export function resolveCategoryNav(tree = CATEGORY_NAV_TREE, categories = [], pr
       if (typeof rawTypes === 'string') {
         try { rawTypes = JSON.parse(rawTypes); } catch {}
       }
-      if (Array.isArray(rawTypes)) {
+      // `types` is legacy data. Some old Sync runs left the original preset
+      // values there, so merging it with a saved subcategory list re-adds
+      // deleted items (Brick, Block, Fine Sand, etc.). Use it only for
+      // records that do not yet have admin-managed subcategories.
+      if (!hasSavedSubcategories && Array.isArray(rawTypes)) {
         rawTypes.forEach((entry) => {
           if (entry && typeof entry === 'string' && !childrenLabels.some((l) => namesMatch(l, entry))) {
             childrenLabels.push(entry.trim());
@@ -252,7 +257,7 @@ export function resolveCategoryNav(tree = CATEGORY_NAV_TREE, categories = [], pr
           .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
         const grouped = new Set(activeGroups.flatMap((group) => Array.isArray(group.subcategories) ? group.subcategories.map(normalizeName) : []));
         const rawSubcategories = [];
-        [rawSubs, rawTypes].forEach((source) => {
+        [rawSubs, hasSavedSubcategories ? [] : rawTypes].forEach((source) => {
           if (Array.isArray(source)) source.forEach((entry) => {
             const label = typeof entry === 'object' && entry !== null ? entry.name : entry;
             if (label && !rawSubcategories.some((item) => namesMatch(item, label))) rawSubcategories.push(String(label).trim());
