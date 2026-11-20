@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -20,17 +20,15 @@ import {
   findCategoryByLabel,
 } from "./categoryNavTree";
 import MobileStorefront from "./MobileStorefront";
-import ProductGalleryCarousel from "./ProductGalleryCarousel";
 import AutoSwipeGallery from "./AutoSwipeGallery";
 import HeroBannerGallery from "./HeroBannerGallery";
 import { defaultHeroImages } from "@/lib/shop-storefront-defaults";
-import { getCartStep } from "@/lib/cart-step";
 import {
-  getCategoryAttributeConfig,
-  extractProductAttributes,
   matchesAttribute,
   collectUniqueAttributes,
 } from "@/lib/product-attributes";
+import { useShopCatalogue, useShopSections } from "@/hooks/useShopCatalogue";
+import { mergeSelectedFacetOptions, SHOP_LIST_DEFAULT_LIMIT } from "@/lib/shop-catalogue";
 
 const SEARCH_PLACEHOLDERS = [
   'Search "Cement"',
@@ -43,14 +41,16 @@ const SEARCH_PLACEHOLDERS = [
   'Search "Tiles & Adhesives"',
 ];
 
-const PRODUCTS_PER_BATCH = 24;
+const PRODUCTS_PER_BATCH = SHOP_LIST_DEFAULT_LIMIT;
 
-function cloudinaryCardImageUrl(value, width = 480) {
+export function cloudinaryCardImageUrl(value, width = 480) {
   const src = normalizeShopImageUrl(value);
   if (!/^https:\/\/res\.cloudinary\.com\//i.test(src)) return src;
   // Do not download the original product upload for a small catalogue card.
   // `f_auto` selects the best browser format and `q_auto` keeps the payload
   // small while retaining useful product detail.
+  // Skip if a transform is already present (avoid double-transform URLs).
+  if (/\/image\/upload\/[^/]+,[^/]+\//.test(src)) return src;
   return src.replace('/image/upload/', `/image/upload/f_auto,q_auto,c_limit,w_${width}/`);
 }
 
@@ -110,7 +110,7 @@ export function ShopImage({ src, alt = '', className = '', ...props }) {
   // Product URLs can point to any supplier's CDN. Use a regular image for
   // those URLs so Next.js remote-host allowlisting cannot hide valid images.
   if (isExternal && !isNextImageSafe) {
-    const { fill, sizes, quality, priority, unoptimized, style, ...imgProps } = props;
+    const { fill, sizes, quality, priority, unoptimized, style, fetchPriority, ...imgProps } = props;
     // eslint-disable-next-line @next/next/no-img-element
     return <img
       {...imgProps}
@@ -118,6 +118,8 @@ export function ShopImage({ src, alt = '', className = '', ...props }) {
       src={normalizedSrc}
       alt={alt}
       loading={priority ? 'eager' : 'lazy'}
+      fetchPriority={fetchPriority || (priority ? 'high' : 'auto')}
+      decoding={priority ? 'sync' : 'async'}
       style={{
         ...(fill ? { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' } : {}),
         ...style,
@@ -159,7 +161,7 @@ function categoryStyle(name = "") {
   return { tone: "green", Icon: Package };
 }
 
-function ProductVisual({ image, category, name, compact = false }) {
+function ProductVisual({ image, category, name, compact = false, priority = false }) {
   const { tone, Icon } = categoryStyle(category?.name || name);
   return (
     <div className={`store-visual store-visual-${tone}${compact ? " store-visual-compact" : ""}`}>
@@ -168,8 +170,9 @@ function ProductVisual({ image, category, name, compact = false }) {
           src={cloudinaryCardImageUrl(image || category.image, compact ? 160 : 480)}
           alt={name}
           fill
-          sizes={compact ? '68px' : '(max-width: 560px) 50vw, (max-width: 1100px) 25vw, 220px'}
+          sizes={compact ? '68px' : '(max-width: 560px) 50vw, (max-width: 900px) 33vw, 25vw'}
           quality={70}
+          priority={priority}
         />
       ) : (
         <><span className="store-visual-ring" /><Icon size={compact ? 27 : 54} strokeWidth={1.4} aria-hidden="true" /></>
@@ -294,7 +297,7 @@ function applyOffer(product, offer) {
   };
 }
 
-function ProductCard({ product, quantity, canAdd, onAdd, onChangeQty, onQuote, onBuy, selectedCity, promotions = [], shippingSettings }) {
+const ProductCard = memo(function ProductCard({ product, quantity, canAdd, onAdd, onChangeQty, onQuote, onBuy, selectedCity, promotions = [], shippingSettings, priority = false }) {
   const productImage = getProductImage(product, product.category);
   const price = Number(product.price);
   const hasFixedPrice = Number.isFinite(price) && price > 0;
@@ -316,7 +319,7 @@ function ProductCard({ product, quantity, canAdd, onAdd, onChangeQty, onQuote, o
   const activePromos = getProductPromotions(product, promotions);
 
   return (
-    <article className="store-product-card">
+    <article className="store-product-card" data-product-id={detailId}>
       {(product.offer?.display_badge || discount > 0) && (
         <span className="store-discount-badge">{product.offer?.display_badge || `${discount}% OFF`}</span>
       )}
@@ -324,8 +327,16 @@ function ProductCard({ product, quantity, canAdd, onAdd, onChangeQty, onQuote, o
         href={detailHref}
         className="store-product-image-button"
         aria-label={`View ${product.name} details`}
+        onClick={() => {
+          try {
+            sessionStorage.setItem('MTBOSS-shop-scroll', JSON.stringify({
+              path: window.location.pathname + window.location.search,
+              y: window.scrollY || 0,
+            }));
+          } catch { /* ignore */ }
+        }}
       >
-        <ProductVisual image={productImage} category={product.category} name={product.name} />
+        <ProductVisual image={productImage} category={product.category} name={product.name} priority={priority} />
       </Link>
       <div className="store-product-details">
         {/* Delivery / Trust & Promotion Line */}
@@ -439,7 +450,7 @@ function ProductCard({ product, quantity, canAdd, onAdd, onChangeQty, onQuote, o
       </div>
     </article>
   );
-}
+});
 
 
 function FilterPopover({ label, options = [], selected = [], onToggle, onReset, isOpen, onOpen, onClose }) {
@@ -506,8 +517,16 @@ function FilterPopover({ label, options = [], selected = [], onToggle, onReset, 
   );
 }
 
-function PriceSortPopover({ selectedPriceRanges = [], onTogglePriceRange, onResetPrice, isOpen, onOpen, onClose }) {
+function PriceSortPopover({ selectedPriceRanges = [], priceOptions = [], onTogglePriceRange, onResetPrice, isOpen, onOpen, onClose }) {
   const hasSelected = selectedPriceRanges.length > 0;
+  const options = priceOptions.length
+    ? priceOptions
+    : [
+      { label: 'Under ₹500', value: 'under-500' },
+      { label: '₹500 - ₹1,000', value: '500-1000' },
+      { label: '₹1,000 - ₹5,000', value: '1000-5000' },
+      { label: 'Above ₹5,000', value: 'above-5000' },
+    ];
   return (
     <div className="homerun-filter-popover-wrap">
       <button
@@ -541,12 +560,7 @@ function PriceSortPopover({ selectedPriceRanges = [], onTogglePriceRange, onRese
             )}
           </div>
           <div className="homerun-filter-popover-list">
-            {[
-              { label: 'Under ₹500', value: 'under-500' },
-              { label: '₹500 - ₹1,000', value: '500-1000' },
-              { label: '₹1,000 - ₹5,000', value: '1000-5000' },
-              { label: 'Above ₹5,000', value: 'above-5000' },
-            ].map((opt) => (
+            {options.map((opt) => (
               <label key={opt.value} className="homerun-filter-option">
                 <input
                   type="checkbox"
@@ -554,6 +568,9 @@ function PriceSortPopover({ selectedPriceRanges = [], onTogglePriceRange, onRese
                   onChange={() => onTogglePriceRange(opt.value)}
                 />
                 <span>{opt.label}</span>
+                {opt.count != null && (
+                  <span style={{ color: '#9ca3af', fontSize: '12px' }}>({opt.count})</span>
+                )}
               </label>
             ))}
           </div>
@@ -584,12 +601,50 @@ export default function Storefront({ categories, products, offers = [], content,
   const [selectedPackSizes, setSelectedPackSizes] = useState([]);
   const [selectedPriceRanges, setSelectedPriceRanges] = useState([]);
   const [openFilterMenu, setOpenFilterMenu] = useState(null);
-  const [renderState, setRenderState] = useState({ key: '', limit: PRODUCTS_PER_BATCH });
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const loadMoreRef = useRef(null);
   // CSS `display:none` still mounts the entire hidden storefront. On desktop
   // that meant the mobile shop (including its quick-services tree and product
   // calculations) ran alongside the desktop shop, occupying the main thread.
   // Mount exactly one storefront for the current viewport instead.
-  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  // null = viewport not measured yet (prevents a desktop fetch flash on phones).
+  const [isMobileViewport, setIsMobileViewport] = useState(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Warm the hero LCP candidate as soon as storefront content is known.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const raw = (content?.hero_images || defaultHeroImages || [])[0];
+    if (!raw) return undefined;
+    const href = /^https:\/\/res\.cloudinary\.com\//i.test(String(raw))
+      && !/\/image\/upload\/[^/]+,[^/]+\//.test(String(raw))
+      ? String(raw).replace('/image/upload/', '/image/upload/f_auto,q_auto,c_fill,w_900/')
+      : String(raw);
+    let link = document.querySelector('link[data-shop-hero-preload]');
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'preload';
+      link.as = 'image';
+      link.setAttribute('data-shop-hero-preload', '1');
+      document.head.appendChild(link);
+    }
+    link.href = href;
+    return undefined;
+  }, [content?.hero_images]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (debouncedSearch) url.searchParams.set('q', debouncedSearch);
+    else url.searchParams.delete('q');
+    if (sortBy && sortBy !== 'featured') url.searchParams.set('sort', sortBy);
+    else url.searchParams.delete('sort');
+    window.history.replaceState(window.history.state, '', url);
+  }, [debouncedSearch, sortBy]);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)');
@@ -820,11 +875,15 @@ export default function Storefront({ categories, products, offers = [], content,
       const catParam = params.get('category');
       const subParam = params.get('subcategory');
       const query = params.get('q') || '';
+      const sortParam = params.get('sort') || 'featured';
 
       if (query) {
         setSearch(query);
       } else {
         setSearch('');
+      }
+      if (['featured', 'newest', 'price-asc', 'price-desc', 'name'].includes(sortParam)) {
+        setSortBy(sortParam);
       }
 
       if (catParam || subParam) {
@@ -873,113 +932,158 @@ export default function Storefront({ categories, products, offers = [], content,
     };
   }, []);
 
-  const catalog = useMemo(() => {
-    const fromCategories = categories.flatMap((category) => {
-      const listed = products.filter((product) => {
-        const prodCat = (typeof product.category === 'object' ? product.category?.name : product.category) || '';
-        const assignedCategory = prodCat.trim().toLowerCase();
-        const categoryName = (category.name || '').trim().toLowerCase();
-        if (!assignedCategory) return product.name?.toLowerCase().includes(categoryName);
-        return assignedCategory === categoryName ||
-          assignedCategory.replace(/\s+/g, '') === categoryName.replace(/\s+/g, '') ||
-          assignedCategory.replace(/&/g, 'and') === categoryName.replace(/&/g, 'and');
-      });
-      if (listed.length) return listed.map((product) => ({
-        id: `supplier-${product.id}`,
-        product_id: product.id,
-        product_code: product.product_code,
-        sku: product.sku,
-        barcode: product.barcode,
-        mpn: product.mpn,
-        keywords: product.keywords,
-        name: product.name,
-        category,
-        subcategory: product.subcategory,
-        unit: product.unit || category.unit || "unit",
-        price: product.price,
-        mrp: product.mrp ?? product.compare_at_price,
-        image: product.image_url || category?.image || "",
-        description: product.description,
-        quote_price_range: product.quote_price_range,
-        brand: product.brand,
-        compare_at_price: product.mrp ?? product.compare_at_price,
-        discount_percent: product.discount_percent,
-        gst_percent: product.gst_percent,
-        is_tax_inclusive: product.is_tax_inclusive,
-        is_featured_deal: product.is_featured_deal === true,
-        images: product.images,
-        specifications: product.specifications,
-        bulk_pricing: product.bulk_pricing,
-        quantity: product.quantity,
-        stock_status: product.stock_status,
-        has_variants: product.has_variants === true,
-        supplier_id: product.supplier_id,
-        available_cities: product.available_cities,
-        created_at: product.created_at,
-        fromSupplier: true,
-      })).map((product) => {
-        const matchingOffers = offers.filter((offer) => offerMatches(offer, product, category));
-        const offer = matchingOffers.sort((a, b) => {
-          const score = (item) => (item.category ? 4 : 0) + (item.subcategory ? 2 : 0) + (item.brand ? 1 : 0);
-          return score(b) - score(a) || Number(a.sort_order) - Number(b.sort_order);
-        })[0];
-        return applyOffer(product, offer);
-      });
-      // Subcategories are categories/filters, not products. Only real products should be displayed.
-      return [];
-    });
+  const searchTerm = debouncedSearch.toLowerCase();
+  const hasAttributeFilters = selectedSubcategories.length > 0
+    || selectedBrands.length > 0
+    || selectedThicknesses.length > 0
+    || selectedSizes.length > 0
+    || selectedTypes.length > 0
+    || selectedColors.length > 0
+    || selectedMaterials.length > 0
+    || selectedGrades.length > 0
+    || selectedPackSizes.length > 0
+    || selectedPriceRanges.length > 0;
 
-    const mappedProductIds = new Set(fromCategories.map((p) => p.product_id || p.id));
-    const extraProducts = products
-      .filter((p) => p && !mappedProductIds.has(p.id) && !mappedProductIds.has(`supplier-${p.id}`))
-      .map((product) => {
-        const syntheticCategory = {
-          id: `custom-${product.category || 'other'}`,
-          name: product.category || 'Other Materials',
-          image: product.image_url || '',
-          unit: product.unit || 'unit',
-        };
-        const item = {
-          id: `supplier-${product.id}`,
-          product_id: product.id,
-          product_code: product.product_code,
-          sku: product.sku,
-          barcode: product.barcode,
-          mpn: product.mpn,
-          keywords: product.keywords,
-          name: product.name,
-          category: syntheticCategory,
-          subcategory: product.subcategory,
-          unit: product.unit || "unit",
-          price: product.price,
-          mrp: product.mrp ?? product.compare_at_price,
-          image: product.image_url || "",
-          description: product.description,
-          quote_price_range: product.quote_price_range,
-          brand: product.brand,
-          compare_at_price: product.mrp ?? product.compare_at_price,
-          discount_percent: product.discount_percent,
-          gst_percent: product.gst_percent,
-          is_tax_inclusive: product.is_tax_inclusive,
-          is_featured_deal: product.is_featured_deal === true,
-          images: product.images,
-          specifications: product.specifications,
-          bulk_pricing: product.bulk_pricing,
-          quantity: product.quantity,
-          stock_status: product.stock_status,
-          has_variants: product.has_variants === true,
-          supplier_id: product.supplier_id,
-          available_cities: product.available_cities,
-          created_at: product.created_at,
-          fromSupplier: true,
-        };
-        const matchingOffers = offers.filter((offer) => offerMatches(offer, item, syntheticCategory));
-        const offer = matchingOffers[0];
-        return applyOffer(item, offer);
-      });
+  const listingEnabled = Boolean(
+    searchTerm
+    || selectedSubNav
+    || (selectedParentNav && selectedParentNav !== "all")
+    || activeCategory !== "all"
+    || hasAttributeFilters,
+  );
 
-    return [...fromCategories, ...extraProducts];
-  }, [categories, products, offers]);
+  const catalogueFilters = useMemo(() => {
+    const params = {
+      sort: sortBy,
+      q: searchTerm || undefined,
+      brand: selectedBrands,
+      type: selectedTypes,
+      thickness: selectedThicknesses,
+      size: selectedSizes,
+      color: selectedColors,
+      material: selectedMaterials,
+      grade: selectedGrades,
+      pack_size: selectedPackSizes,
+      priceRange: selectedPriceRanges,
+    };
+
+    if (selectedSubcategories.length > 0) {
+      params.parent = selectedParentNav || undefined;
+      params.children = selectedSubcategories;
+    } else if (selectedSubNav) {
+      const found = findCategoryByLabel(selectedSubNav, categories);
+      if (found) {
+        params.category = found.name;
+      } else {
+        params.parent = selectedParentNav || undefined;
+        params.subcategory = selectedSubNav;
+      }
+    } else if (selectedParentNav && selectedParentNav !== "all") {
+      const children = getSubcategoriesForParent(selectedParentNav, categories, [])
+        .map((entry) => entry.name)
+        .filter(Boolean);
+      params.parent = selectedParentNav;
+      if (children.length) params.children = children;
+    } else if (activeCategory !== "all") {
+      const cat = categories.find((entry) => String(entry.id) === String(activeCategory));
+      if (cat?.name) params.category = cat.name;
+    }
+
+    return params;
+  }, [
+    activeCategory,
+    categories,
+    searchTerm,
+    selectedBrands,
+    selectedColors,
+    selectedGrades,
+    selectedMaterials,
+    selectedPackSizes,
+    selectedParentNav,
+    selectedPriceRanges,
+    selectedSizes,
+    selectedSubNav,
+    selectedSubcategories,
+    selectedThicknesses,
+    selectedTypes,
+    sortBy,
+  ]);
+
+  const {
+    products: pagedProducts,
+    pagination,
+    facets,
+    loading: productsLoading,
+    loadingMore,
+    isRefreshing: productsRefreshing,
+    error: productsError,
+    loadMore,
+    reload: reloadProducts,
+  } = useShopCatalogue({
+    categories,
+    // Mobile owns its own catalogue fetches — avoid duplicate desktop+mobile requests.
+    enabled: listingEnabled && isMobileViewport === false,
+    pageSize: PRODUCTS_PER_BATCH,
+    filters: catalogueFilters,
+  });
+
+  const homepageMode = !listingEnabled;
+  const { deals, arrivals } = useShopSections(
+    categories,
+    homepageMode && !loading && isMobileViewport === false,
+  );
+
+  // Server-paginated catalogue — no full client-side rebuild of every product.
+  const catalog = pagedProducts;
+  const visible = catalog;
+  const renderedProducts = catalog;
+  const remainingProducts = Math.max(0, (pagination.total || 0) - renderedProducts.length);
+  const loadMoreProducts = useCallback(() => {
+    loadMore();
+  }, [loadMore]);
+
+  useEffect(() => {
+    const node = loadMoreRef.current;
+    if (!node || remainingProducts <= 0) return undefined;
+    if (typeof IntersectionObserver === 'undefined') return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMoreProducts();
+      },
+      { rootMargin: "240px 0px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [loadMoreProducts, remainingProducts, renderedProducts.length]);
+
+  // Preserve scroll + filter URL when leaving for product detail, restore on return.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    try {
+      if ('scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'manual';
+      }
+      const raw = sessionStorage.getItem('MTBOSS-shop-scroll');
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (saved?.path === window.location.pathname + window.location.search && Number.isFinite(saved.y)) {
+          requestAnimationFrame(() => window.scrollTo(0, saved.y));
+        }
+        sessionStorage.removeItem('MTBOSS-shop-scroll');
+      }
+    } catch { /* ignore */ }
+
+    const persistScroll = () => {
+      try {
+        sessionStorage.setItem('MTBOSS-shop-scroll', JSON.stringify({
+          path: window.location.pathname + window.location.search,
+          y: window.scrollY || 0,
+        }));
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('pagehide', persistScroll);
+    return () => window.removeEventListener('pagehide', persistScroll);
+  }, []);
 
   const dedupeProducts = (list) => {
     const seen = new Set();
@@ -990,8 +1094,6 @@ export default function Storefront({ categories, products, offers = [], content,
       return true;
     });
   };
-
-  const searchTerm = search.trim().toLowerCase();
 
   const goToAllCategories = ({ noScroll = false } = {}) => {
     setSelectedParentNav(null);
@@ -1063,250 +1165,105 @@ export default function Storefront({ categories, products, offers = [], content,
     }
   };
 
-  const availableAttributes = useMemo(() => {
-    return collectUniqueAttributes(
-      catalog.filter((p) => {
-        if (selectedSubNav) return productMatchesCategoryAndSub(p, selectedParentNav, selectedSubNavMembers || selectedSubNav);
-        if (selectedParentNav && selectedParentNav !== 'all') return productMatchesCategoryAndSub(p, selectedParentNav, null);
-        if (activeCategory !== 'all') {
-          const catId = p.category?.id != null ? String(p.category.id) : '';
-          const catName = (typeof p.category === 'object' ? p.category?.name : (p.category || '')).toLowerCase().trim();
-          const activeCatObj = categories.find((c) => String(c.id) === String(activeCategory));
-          const activeCatName = activeCatObj ? activeCatObj.name.toLowerCase().trim() : String(activeCategory).toLowerCase().trim();
-          return catId === String(activeCategory) || (activeCatObj && catId === String(activeCatObj.id)) || catName === activeCatName;
-        }
-        return true;
-      }),
-      selectedParentNav || (typeof activeCategory === 'string' ? activeCategory : ''),
-      selectedSubNav
-    );
-  }, [catalog, selectedSubNav, selectedSubNavMembers, selectedParentNav, activeCategory, categories]);
-
-  const hasActiveAttributeFilters = selectedSubcategories.length > 0 || selectedBrands.length > 0 || selectedThicknesses.length > 0 || selectedSizes.length > 0 || selectedTypes.length > 0 || selectedColors.length > 0 || selectedMaterials.length > 0 || selectedGrades.length > 0 || selectedPackSizes.length > 0 || selectedPriceRanges.length > 0;
-
-  const visible = dedupeProducts(
-    catalog.filter((product) => {
-      // 1. Hierarchy Match
-      if (selectedSubNav) {
-        if (!productMatchesCategoryAndSub(product, selectedParentNav, selectedSubNavMembers || selectedSubNav)) {
-          return false;
-        }
-      } else if (selectedParentNav && selectedParentNav !== 'all') {
-        if (!productMatchesCategoryAndSub(product, selectedParentNav, null)) {
-          return false;
-        }
-      } else if (activeCategory !== 'all') {
-        const catId = product.category?.id != null ? String(product.category.id) : '';
-        const catName = (typeof product.category === 'object' ? product.category?.name : (product.category || '')).toLowerCase().trim();
-        const activeCatObj = categories.find((c) => String(c.id) === String(activeCategory));
-        const activeCatName = activeCatObj ? activeCatObj.name.toLowerCase().trim() : String(activeCategory).toLowerCase().trim();
-        const matchesCategory = catId === String(activeCategory)
-          || (activeCatObj && catId === String(activeCatObj.id))
-          || catName === activeCatName;
-        if (!matchesCategory) return false;
-      }
-
-      // 1b. Multi-Subcategory Match from Category Popover
-      if (selectedSubcategories.length > 0) {
-        const matchesAnySub = selectedSubcategories.some((sub) =>
-          productMatchesCategoryAndSub(product, selectedParentNav, sub)
-        );
-        if (!matchesAnySub) return false;
-      }
-
-      // 2. Brand Match
-      if (selectedBrands.length > 0 && !selectedBrands.includes(product.brand)) return false;
-
-      // 3. Dynamic Attribute Matches (HomeRun Style)
-      if (selectedThicknesses.length > 0 && !selectedThicknesses.some((th) => matchesAttribute(product, 'thickness', th))) return false;
-      if (selectedSizes.length > 0 && !selectedSizes.some((sz) => matchesAttribute(product, 'size', sz))) return false;
-      if (selectedTypes.length > 0 && !selectedTypes.some((tp) => matchesAttribute(product, 'type', tp))) return false;
-      if (selectedColors.length > 0 && !selectedColors.some((c) => matchesAttribute(product, 'color', c))) return false;
-      if (selectedMaterials.length > 0 && !selectedMaterials.some((m) => matchesAttribute(product, 'material', m))) return false;
-      if (selectedGrades.length > 0 && !selectedGrades.some((gr) => matchesAttribute(product, 'grade', gr))) return false;
-      if (selectedPackSizes.length > 0 && !selectedPackSizes.some((ps) => matchesAttribute(product, 'pack_size', ps))) return false;
-
-      // 4. Price Range Match
-      if (selectedPriceRanges.length > 0) {
-        const pPrice = Number(product.price) || 0;
-        const matchesPrice = selectedPriceRanges.some((range) => {
-          if (range === 'under-500') return pPrice < 500;
-          if (range === '500-1000') return pPrice >= 500 && pPrice <= 1000;
-          if (range === '1000-5000') return pPrice > 1000 && pPrice <= 5000;
-          if (range === 'above-5000') return pPrice > 5000;
-          return true;
-        });
-        if (!matchesPrice) return false;
-      }
-
-      // 3. Search Term Match
-      if (searchTerm) {
-        const catName = (typeof product.category === 'object' ? product.category?.name : (product.category || '')).toLowerCase().trim();
-        const subName = (product.subcategory || '').toLowerCase();
-        const prodName = (product.name || '').toLowerCase();
-        const brandName = (product.brand || '').toLowerCase();
-        const pCode = (product.product_code || '').toLowerCase();
-        const pSku = (product.sku || '').toLowerCase();
-        const pBarcode = (product.barcode || '').toLowerCase();
-        const pMpn = (product.mpn || '').toLowerCase();
-        const pKeywords = (product.keywords || '').toLowerCase();
-        const attrs = extractProductAttributes(product);
-        const attrText = `${attrs.thickness} ${attrs.size} ${attrs.type} ${attrs.color} ${attrs.material} ${attrs.grade || ''} ${attrs.pack_size || ''}`.toLowerCase();
-        const searchableText = `${prodName} ${pCode} ${pSku} ${pBarcode} ${pMpn} ${pKeywords} ${catName} ${subName} ${brandName} ${attrText}`;
-
-        if (searchableText.includes(searchTerm)) return true;
-
-        const searchWords = searchTerm.split(/[\s,&/]+/).filter((w) => w.length > 2);
-        if (searchWords.length > 0 && searchWords.some((word) => subName.includes(word) || prodName.includes(word) || pSku.includes(word) || pCode.includes(word) || pBarcode.includes(word) || attrText.includes(word))) {
-          return true;
-        }
-        if (subName && searchTerm.includes(subName)) return true;
-        return false;
-      }
-
-      return true;
-    })
-  ).sort((a, b) =>
-    sortBy === 'price-asc'
-      ? (Number(a.price) || Infinity) - (Number(b.price) || Infinity)
-      : sortBy === 'price-desc'
-      ? (Number(b.price) || 0) - (Number(a.price) || 0)
-      : sortBy === 'name'
-      ? a.name.localeCompare(b.name)
-      : 0
+  const availableAttributes = useMemo(
+    () => collectUniqueAttributes(catalog),
+    [catalog],
   );
 
-  const catalogueFilterKey = [
-    searchTerm, activeCategory, selectedParentNav, selectedSubNav, sortBy,
-    selectedSubcategories.join('|'), selectedBrands.join('|'), selectedThicknesses.join('|'),
-    selectedSizes.join('|'), selectedTypes.join('|'), selectedColors.join('|'),
-    selectedMaterials.join('|'), selectedGrades.join('|'), selectedPackSizes.join('|'),
-    selectedPriceRanges.join('|'), visible.length,
-  ].join('::');
+  const hasActiveAttributeFilters = hasAttributeFilters;
+  const baseHierarchyProducts = catalog;
 
-  // Rendering hundreds of rich cards and images at once blocks the main
-  // thread. Products remain fully available, but only the first batch is
-  // mounted initially; visitors can reveal the rest without a new API call.
-  // A new filter/search gets a fresh first batch without scheduling an extra
-  // render from an effect.
-  const renderLimit = renderState.key === catalogueFilterKey
-    ? renderState.limit
-    : PRODUCTS_PER_BATCH;
-  const renderedProducts = visible.slice(0, renderLimit);
-  const remainingProducts = Math.max(0, visible.length - renderedProducts.length);
-  const loadMoreProducts = () => {
-    setRenderState({ key: catalogueFilterKey, limit: renderLimit + PRODUCTS_PER_BATCH });
+  const facetOptions = (serverList, selected, fallbackValues, countFromLoaded) => {
+    if (Array.isArray(serverList) && serverList.length) {
+      return mergeSelectedFacetOptions(serverList, selected);
+    }
+    const fallback = (fallbackValues || []).map((value) => ({
+      label: value,
+      value,
+      count: countFromLoaded ? countFromLoaded(value) : undefined,
+    }));
+    return mergeSelectedFacetOptions(fallback, selected);
   };
-
-  const brands = [...new Set(visible.map((product) => product.brand).filter(Boolean))].sort();
-  const featured = dedupeProducts(categories.map((category) => catalog.find((product) => product.category?.id === category.id)).filter(Boolean)).slice(0, 8);
-  const deals = dedupeProducts(catalog.filter((product) => product.is_featured_deal === true).sort((a, b) => discountPercent(b) - discountPercent(a))).slice(0, 6);
-  const arrivals = dedupeProducts(
-    catalog
-      .filter((product) => product.fromSupplier || product.product_id || product.id)
-      .sort((a, b) => {
-        const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
-        if (timeB !== timeA) return timeB - timeA;
-        return (Number(b.product_id || b.id) || 0) - (Number(a.product_id || a.id) || 0);
-      })
-  ).slice(0, 12);
-  
-  // Options calculation for HomeRun popovers
-  const baseHierarchyProducts = useMemo(() => {
-    return catalog.filter((p) => {
-      if (selectedSubNav) return productMatchesCategoryAndSub(p, selectedParentNav, selectedSubNavMembers || selectedSubNav);
-      if (selectedParentNav && selectedParentNav !== 'all') return productMatchesCategoryAndSub(p, selectedParentNav, null);
-      if (activeCategory !== 'all') {
-        const catId = p.category?.id != null ? String(p.category.id) : '';
-        const catName = (typeof p.category === 'object' ? p.category?.name : (p.category || '')).toLowerCase().trim();
-        const activeCatObj = categories.find((c) => String(c.id) === String(activeCategory));
-        const activeCatName = activeCatObj ? activeCatObj.name.toLowerCase().trim() : String(activeCategory).toLowerCase().trim();
-        return catId === String(activeCategory) || (activeCatObj && catId === String(activeCatObj.id)) || catName === activeCatName;
-      }
-      return true;
-    });
-  }, [catalog, selectedSubNav, selectedSubNavMembers, selectedParentNav, activeCategory, categories]);
 
   const popoverCategoryOptions = useMemo(() => {
     if (parentSubcategories.length > 0) {
-      return parentSubcategories.map((sub) => ({
-        label: sub.name,
-        value: sub.name,
-        count: catalog.filter((p) => productMatchesCategoryAndSub(p, currentParentCategory?.label, sub.memberSubcategories || sub.name)).length
-      })).filter((opt) => opt.count > 0);
+      return mergeSelectedFacetOptions(
+        parentSubcategories.map((sub) => ({
+          label: sub.name,
+          value: sub.name,
+          count: sub.count || undefined,
+        })),
+        selectedSubcategories,
+      );
     }
-    return mainCategories.map((cat) => ({
-      label: cat.label,
-      value: cat.label,
-      count: catalog.filter((p) => productMatchesCategoryAndSub(p, cat.label, null)).length
-    })).filter((opt) => opt.count > 0);
-  }, [parentSubcategories, mainCategories, catalog, currentParentCategory]);
+    if (facets?.categories?.length) {
+      return mergeSelectedFacetOptions(facets.categories, selectedSubcategories);
+    }
+    return mergeSelectedFacetOptions(
+      mainCategories.map((cat) => ({ label: cat.label, value: cat.label })),
+      selectedSubcategories,
+    );
+  }, [parentSubcategories, mainCategories, facets, selectedSubcategories]);
 
-  const popoverBrandOptions = useMemo(() => {
-    const uniqueBrands = [...new Set(baseHierarchyProducts.map((p) => p.brand).filter(Boolean))].sort();
-    return uniqueBrands.map((b) => ({
-      label: b,
-      value: b,
-      count: baseHierarchyProducts.filter((p) => p.brand === b).length
-    })).filter((opt) => opt.count > 0);
-  }, [baseHierarchyProducts]);
+  const popoverBrandOptions = useMemo(
+    () => facetOptions(
+      facets?.brands,
+      selectedBrands,
+      [...new Set(baseHierarchyProducts.map((p) => p.brand).filter(Boolean))].sort(),
+      (b) => baseHierarchyProducts.filter((p) => p.brand === b).length,
+    ),
+    [baseHierarchyProducts, facets, selectedBrands],
+  );
 
-  const popoverTypeOptions = useMemo(() => {
-    return availableAttributes.types.map((t) => ({
-      label: t,
-      value: t,
-      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'type', t)).length
-    })).filter((opt) => opt.count > 0);
-  }, [availableAttributes.types, baseHierarchyProducts]);
+  const popoverTypeOptions = useMemo(
+    () => facetOptions(facets?.types, selectedTypes, availableAttributes.types, (t) => baseHierarchyProducts.filter((p) => matchesAttribute(p, 'type', t)).length),
+    [availableAttributes.types, baseHierarchyProducts, facets, selectedTypes],
+  );
 
-  const popoverGradeOptions = useMemo(() => {
-    return availableAttributes.grades.map((g) => ({
-      label: g,
-      value: g,
-      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'grade', g)).length
-    })).filter((opt) => opt.count > 0);
-  }, [availableAttributes.grades, baseHierarchyProducts]);
+  const popoverGradeOptions = useMemo(
+    () => facetOptions(facets?.grades, selectedGrades, availableAttributes.grades, (g) => baseHierarchyProducts.filter((p) => matchesAttribute(p, 'grade', g)).length),
+    [availableAttributes.grades, baseHierarchyProducts, facets, selectedGrades],
+  );
 
-  const popoverPackSizeOptions = useMemo(() => {
-    return availableAttributes.packSizes.map((ps) => ({
-      label: ps,
-      value: ps,
-      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'pack_size', ps)).length
-    })).filter((opt) => opt.count > 0);
-  }, [availableAttributes.packSizes, baseHierarchyProducts]);
+  const popoverPackSizeOptions = useMemo(
+    () => facetOptions(facets?.packSizes, selectedPackSizes, availableAttributes.packSizes, (ps) => baseHierarchyProducts.filter((p) => matchesAttribute(p, 'pack_size', ps)).length),
+    [availableAttributes.packSizes, baseHierarchyProducts, facets, selectedPackSizes],
+  );
 
-  const popoverThicknessOptions = useMemo(() => {
-    return availableAttributes.thicknesses.map((th) => ({
-      label: th,
-      value: th,
-      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'thickness', th)).length
-    })).filter((opt) => opt.count > 0);
-  }, [availableAttributes.thicknesses, baseHierarchyProducts]);
+  const popoverThicknessOptions = useMemo(
+    () => facetOptions(facets?.thicknesses, selectedThicknesses, availableAttributes.thicknesses, (th) => baseHierarchyProducts.filter((p) => matchesAttribute(p, 'thickness', th)).length),
+    [availableAttributes.thicknesses, baseHierarchyProducts, facets, selectedThicknesses],
+  );
 
-  const popoverSizeOptions = useMemo(() => {
-    return availableAttributes.sizes.map((sz) => ({
-      label: sz,
-      value: sz,
-      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'size', sz)).length
-    })).filter((opt) => opt.count > 0);
-  }, [availableAttributes.sizes, baseHierarchyProducts]);
+  const popoverSizeOptions = useMemo(
+    () => facetOptions(facets?.sizes, selectedSizes, availableAttributes.sizes, (sz) => baseHierarchyProducts.filter((p) => matchesAttribute(p, 'size', sz)).length),
+    [availableAttributes.sizes, baseHierarchyProducts, facets, selectedSizes],
+  );
 
-  const popoverColorOptions = useMemo(() => {
-    return availableAttributes.colors.map((c) => ({
-      label: c,
-      value: c,
-      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'color', c)).length
-    })).filter((opt) => opt.count > 0);
-  }, [availableAttributes.colors, baseHierarchyProducts]);
+  const popoverColorOptions = useMemo(
+    () => facetOptions(facets?.colors, selectedColors, availableAttributes.colors, (c) => baseHierarchyProducts.filter((p) => matchesAttribute(p, 'color', c)).length),
+    [availableAttributes.colors, baseHierarchyProducts, facets, selectedColors],
+  );
 
-  const popoverMaterialOptions = useMemo(() => {
-    return availableAttributes.materials.map((m) => ({
-      label: m,
-      value: m,
-      count: baseHierarchyProducts.filter((p) => matchesAttribute(p, 'material', m)).length
-    })).filter((opt) => opt.count > 0);
-  }, [availableAttributes.materials, baseHierarchyProducts]);
+  const popoverMaterialOptions = useMemo(
+    () => facetOptions(facets?.materials, selectedMaterials, availableAttributes.materials, (m) => baseHierarchyProducts.filter((p) => matchesAttribute(p, 'material', m)).length),
+    [availableAttributes.materials, baseHierarchyProducts, facets, selectedMaterials],
+  );
+
+  const popoverPriceOptions = useMemo(
+    () => mergeSelectedFacetOptions(
+      facets?.priceRanges?.length
+        ? facets.priceRanges
+        : [
+          { label: 'Under ₹500', value: 'under-500' },
+          { label: '₹500 - ₹1,000', value: '500-1000' },
+          { label: '₹1,000 - ₹5,000', value: '1000-5000' },
+          { label: 'Above ₹5,000', value: 'above-5000' },
+        ],
+      selectedPriceRanges,
+    ),
+    [facets, selectedPriceRanges],
+  );
 
   const cartCount = useMemo(() => {
     if (!Array.isArray(cart) || cart.length === 0) return 0;
@@ -1389,14 +1346,21 @@ export default function Storefront({ categories, products, offers = [], content,
   return (
     <div className={`shop-page${cartOpen ? ' store-cart-is-open' : ''}`}>
       {/* Mobile Quick-Commerce View (viewport <= 768px) */}
-      {isMobileViewport && <div className="storefront-mobile">
+      {isMobileViewport === true && <div className="storefront-mobile">
         <MobileStorefront
           categories={categories}
           mainCategories={mainCategories}
-          products={products}
-          catalog={catalog}
+          products={homepageMode ? [...deals, ...arrivals] : catalog}
+          catalog={homepageMode ? [...deals, ...arrivals] : catalog}
           content={content}
-          loading={loading}
+          loading={loading || (listingEnabled && productsLoading)}
+          productsLoading={productsLoading}
+          loadingMore={loadingMore}
+          productsError={productsError}
+          onRetryProducts={reloadProducts}
+          productTotal={pagination.total}
+          onLoadMoreProducts={loadMoreProducts}
+          hasMoreProducts={remainingProducts > 0}
           cities={cities}
           selectedCity={selectedCity}
           setSelectedCity={setSelectedCity}
@@ -1420,7 +1384,7 @@ export default function Storefront({ categories, products, offers = [], content,
       </div>}
 
       {/* Desktop Storefront View (viewport > 768px) */}
-      {!isMobileViewport && <div className="storefront-desktop">
+      {isMobileViewport === false && <div className="storefront-desktop">
         <header className="store-header" ref={storeHeaderRef}>
           <div className="store-header-inner">
             <Link href="/" className="store-brand" aria-label="MTBOSS home"><picture className="store-brand-picture"><Image src="/logo.png" alt="MTBOSS" width={46} height={46} sizes="(max-width: 560px) 34px, (max-width: 800px) 39px, 46px" /></picture><small>SHOP</small></Link>
@@ -1460,7 +1424,7 @@ export default function Storefront({ categories, products, offers = [], content,
 
         <ShopCategoryNav
           categories={categories}
-          products={products}
+          products={homepageMode ? arrivals : catalog}
           activeCategory={activeCategory}
           activeSearch={search}
           activeParentCategory={selectedParentNav}
@@ -1529,7 +1493,11 @@ export default function Storefront({ categories, products, offers = [], content,
               </button>
             </div>
             <div className="store-hero-photo" role="img" aria-label="Construction materials" style={{ position: 'relative' }}>
-              <HeroBannerGallery images={content?.hero_images || defaultHeroImages} alt="Construction materials" delay={3500} />
+              <HeroBannerGallery
+                images={content?.hero_images || defaultHeroImages}
+                alt="Construction materials"
+                delay={3500}
+              />
               <span className="store-hero-photo-label"><CheckCircle2 size={17} /> {content.hero_badge}</span>
             </div>
           </section>
@@ -1780,6 +1748,7 @@ export default function Storefront({ categories, products, offers = [], content,
                     {/* Price Popover */}
                     <PriceSortPopover
                       selectedPriceRanges={selectedPriceRanges}
+                      priceOptions={popoverPriceOptions}
                       onTogglePriceRange={(val) => toggleFilter(setSelectedPriceRanges, val)}
                       onResetPrice={() => setSelectedPriceRanges([])}
                       isOpen={openFilterMenu === 'lvl2_price'}
@@ -1862,7 +1831,7 @@ export default function Storefront({ categories, products, offers = [], content,
 
                   <div className="homerun-filter-bar-right">
                     <span className="homerun-filter-product-count">
-                      {visible.length} {visible.length === 1 ? 'product' : 'products'}
+                      {pagination.total || visible.length} {(pagination.total || visible.length) === 1 ? 'product' : 'products'}
                     </span>
                     <div className="homerun-filter-sort-wrap">
                       <span>Sort by:</span>
@@ -1881,6 +1850,7 @@ export default function Storefront({ categories, products, offers = [], content,
                         }}
                       >
                         <option value="featured">Relevance</option>
+                        <option value="newest">Newest</option>
                         <option value="price-asc">Price: Low to High</option>
                         <option value="price-desc">Price: High to Low</option>
                         <option value="name">Name: A to Z</option>
@@ -1890,12 +1860,39 @@ export default function Storefront({ categories, products, offers = [], content,
                 </div>
               </div>
 
-              {loading ? (
-                <div className="store-loading">Loading materials...</div>
-              ) : visible.length ? (
+              {hasActiveAttributeFilters && (
+                <div className="store-active-filters" aria-label="Active filters">
+                  {[
+                    ...selectedSubcategories.map((value) => ({ key: `sub-${value}`, label: value, clear: () => toggleFilter(setSelectedSubcategories, value) })),
+                    ...selectedBrands.map((value) => ({ key: `brand-${value}`, label: value, clear: () => toggleFilter(setSelectedBrands, value) })),
+                    ...selectedPriceRanges.map((value) => ({ key: `price-${value}`, label: value, clear: () => toggleFilter(setSelectedPriceRanges, value) })),
+                  ].map((chip) => (
+                    <button key={chip.key} type="button" className="store-filter-chip" onClick={chip.clear}>
+                      {chip.label} <X size={12} />
+                    </button>
+                  ))}
+                  <button type="button" className="store-filter-chip-clear" onClick={resetAttributeFilters}>Clear all</button>
+                </div>
+              )}
+
+              <div className="store-listing-status" aria-live="polite">
+                {productsRefreshing ? 'Updating results…' : loadingMore ? 'Loading more products…' : ''}
+              </div>
+              {productsLoading && !renderedProducts.length ? (
+                <div className="store-product-grid" aria-busy="true" aria-label="Loading products">
+                  {Array.from({ length: 8 }).map((_, index) => (
+                    <div key={`skel-${index}`} className="store-product-skeleton" aria-hidden="true" />
+                  ))}
+                </div>
+              ) : productsError && !renderedProducts.length ? (
+                <div className="store-empty" role="alert">
+                  <p>{productsError}</p>
+                  <button type="button" className="store-load-more-btn" onClick={reloadProducts}>Retry</button>
+                </div>
+              ) : renderedProducts.length ? (
                 <>
-                <div className="store-product-grid">
-                  {renderedProducts.map((product) => (
+                <div className={`store-product-grid${productsRefreshing ? ' is-refreshing' : ''}`} aria-busy={productsRefreshing || loadingMore}>
+                  {renderedProducts.map((product, index) => (
                     <ProductCard
                       key={product.id}
                       product={product}
@@ -1908,24 +1905,35 @@ export default function Storefront({ categories, products, offers = [], content,
                       selectedCity={selectedCity}
                       promotions={promotions}
                       shippingSettings={shippingSettings}
+                      priority={index < 4}
                     />
                   ))}
                 </div>
                 {remainingProducts > 0 && (
-                  <div className="store-load-more-wrap">
+                  <div className="store-load-more-wrap" ref={loadMoreRef}>
                     <button
                       type="button"
                       className="store-load-more-btn"
                       onClick={loadMoreProducts}
+                      disabled={loadingMore}
+                      aria-busy={loadingMore}
                     >
-                      Load {Math.min(PRODUCTS_PER_BATCH, remainingProducts)} more products
+                      {loadingMore ? 'Loading…' : `Load ${Math.min(PRODUCTS_PER_BATCH, remainingProducts)} more products`}
                     </button>
-                    <span>{renderedProducts.length} of {visible.length} products shown</span>
+                    <span>{renderedProducts.length} of {pagination.total || renderedProducts.length} products shown</span>
                   </div>
                 )}
                 </>
               ) : (
-                <div className="store-empty">No materials found in this category.</div>
+                <div className="store-empty">
+                  <p>No materials found in this category.</p>
+                  <p style={{ marginTop: 6, fontSize: 13 }}>Try clearing filters or searching a different material name.</p>
+                  {hasActiveAttributeFilters && (
+                    <button type="button" className="store-load-more-btn" onClick={resetAttributeFilters} style={{ marginTop: 12 }}>
+                      Clear filters
+                    </button>
+                  )}
+                </div>
               )}
             </section>
           ) : (
@@ -2018,6 +2026,7 @@ export default function Storefront({ categories, products, offers = [], content,
                     {/* Price Popover */}
                     <PriceSortPopover
                       selectedPriceRanges={selectedPriceRanges}
+                      priceOptions={popoverPriceOptions}
                       onTogglePriceRange={(val) => toggleFilter(setSelectedPriceRanges, val)}
                       onResetPrice={() => setSelectedPriceRanges([])}
                       isOpen={openFilterMenu === 'price'}
@@ -2100,7 +2109,7 @@ export default function Storefront({ categories, products, offers = [], content,
 
                   <div className="homerun-filter-bar-right">
                     <span className="homerun-filter-product-count">
-                      {visible.length} {visible.length === 1 ? 'product' : 'products'}
+                      {pagination.total || visible.length} {(pagination.total || visible.length) === 1 ? 'product' : 'products'}
                     </span>
                     <div className="homerun-filter-sort-wrap">
                       <span>Sort by:</span>
@@ -2119,6 +2128,7 @@ export default function Storefront({ categories, products, offers = [], content,
                         }}
                       >
                         <option value="featured">Relevance</option>
+                        <option value="newest">Newest</option>
                         <option value="price-asc">Price: Low to High</option>
                         <option value="price-desc">Price: High to Low</option>
                         <option value="name">Name: A to Z</option>
@@ -2128,12 +2138,24 @@ export default function Storefront({ categories, products, offers = [], content,
                 </div>
               </div>
 
-              {loading ? (
-                <div className="store-loading">Loading materials...</div>
-              ) : visible.length ? (
+              <div className="store-listing-status" aria-live="polite">
+                {productsRefreshing ? 'Updating results…' : loadingMore ? 'Loading more products…' : ''}
+              </div>
+              {productsLoading && !renderedProducts.length ? (
+                <div className="store-product-grid" aria-busy="true" aria-label="Loading products">
+                  {Array.from({ length: 8 }).map((_, index) => (
+                    <div key={`skel-sub-${index}`} className="store-product-skeleton" aria-hidden="true" />
+                  ))}
+                </div>
+              ) : productsError && !renderedProducts.length ? (
+                <div className="store-empty" role="alert">
+                  <p>{productsError}</p>
+                  <button type="button" className="store-load-more-btn" onClick={reloadProducts}>Retry</button>
+                </div>
+              ) : renderedProducts.length ? (
                 <>
-                <div className="store-product-grid">
-                  {renderedProducts.map((product) => (
+                <div className={`store-product-grid${productsRefreshing ? ' is-refreshing' : ''}`} aria-busy={productsRefreshing || loadingMore}>
+                  {renderedProducts.map((product, index) => (
                     <ProductCard
                       key={product.id}
                       product={product}
@@ -2146,24 +2168,43 @@ export default function Storefront({ categories, products, offers = [], content,
                       selectedCity={selectedCity}
                       promotions={promotions}
                       shippingSettings={shippingSettings}
+                      priority={index < 4}
                     />
                   ))}
                 </div>
                 {remainingProducts > 0 && (
-                  <div className="store-load-more-wrap">
+                  <div className="store-load-more-wrap" ref={loadMoreRef}>
                     <button
                       type="button"
                       className="store-load-more-btn"
                       onClick={loadMoreProducts}
+                      disabled={loadingMore}
+                      aria-busy={loadingMore}
                     >
-                      Load {Math.min(PRODUCTS_PER_BATCH, remainingProducts)} more products
+                      {loadingMore ? 'Loading…' : `Load ${Math.min(PRODUCTS_PER_BATCH, remainingProducts)} more products`}
                     </button>
-                    <span>{renderedProducts.length} of {visible.length} products shown</span>
+                    <span>{renderedProducts.length} of {pagination.total || renderedProducts.length} products shown</span>
                   </div>
                 )}
                 </>
               ) : (
-                <div className="store-empty">No materials found in this subcategory. Try another filter or search.</div>
+                <div className="store-empty">
+                  <p>No materials found for this search or filter.</p>
+                  <p style={{ marginTop: 6, fontSize: 13 }}>Try a broader keyword, another subcategory, or clear filters.</p>
+                  {(hasActiveAttributeFilters || searchTerm) && (
+                    <button
+                      type="button"
+                      className="store-load-more-btn"
+                      style={{ marginTop: 12 }}
+                      onClick={() => {
+                        resetAttributeFilters();
+                        setSearch('');
+                      }}
+                    >
+                      Clear search & filters
+                    </button>
+                  )}
+                </div>
               )}
             </section>
           )}

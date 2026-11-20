@@ -10,6 +10,8 @@ dotenv.config({ path: path.join(projectRoot, ".env.local"), override: false });
 dotenv.config({ path: path.join(projectRoot, ".env"), override: false });
 dotenv.config({ path: path.join(projectRoot, "src", ".env"), override: false });
 
+const isVercel = process.env.VERCEL === "1";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   staticPageGenerationTimeout: 120,
@@ -18,18 +20,31 @@ const nextConfig = {
   outputFileTracingRoot: projectRoot,
   /* config options here */
   allowedDevOrigins: ["10.221.79.102"],
-  
+
+  // Skip typecheck during `next build` to avoid Vercel OOM at "Running TypeScript".
+  // Re-enable after PartyProjectManagement.jsx is split into smaller modules.
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  productionBrowserSourceMaps: false,
+
   experimental: {
-    // Compile in the main process and use threads for type checking. This avoids
-    // child-process spawn failures on restricted Windows environments.
-    webpackBuildWorker: false,
+    // On Windows local builds, keep Webpack in-process to avoid spawn failures.
+    // On Vercel, run Webpack in a worker so peak RSS stays under the 8GB container limit.
+    webpackBuildWorker: isVercel,
     workerThreads: true,
+    // Cap parallelism so compile + typecheck workers do not exhaust RAM.
+    cpus: 1,
+    webpackMemoryOptimizations: true,
+    serverSourceMaps: false,
   },
   // Keep development/HMR artifacts separate from production builds. Running
   // `next build` while `next dev` is open must not replace the live router
   // runtime, otherwise Next can dispatch Link prefetches against an old queue.
   distDir: process.env.NODE_ENV === 'development' ? '.next-dev' : '.next',
-  reactCompiler: true,
+  // React Compiler + the 14k-line PartyProjectManagement.jsx spikes Babel memory
+  // past Vercel's build container. Re-enable after that file is split.
+  reactCompiler: false,
   images: {
     // Cloudinary images occasionally time out when fetched through Next's
     // development image-optimization proxy on Windows. Let the browser load

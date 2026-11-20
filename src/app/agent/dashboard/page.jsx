@@ -2,8 +2,8 @@
 import RequiredAsterisk from '../../components/RequiredAsterisk';
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter, useSearchParams } from 'next/navigation';
-import PartyProjectManagement from '@/app/components/PartyProjectManagement';
 import AgentTasksView from '@/app/components/AgentTasksView';
 import AgentTeamTasksView from '@/app/components/AgentTeamTasksView';
 import PanelLayout from '@/app/components/PanelLayout';
@@ -20,6 +20,16 @@ import {
   Plus,
   ArrowLeft,
 } from '@/app/components/ui/icons';
+
+const PartyProjectManagement = dynamic(
+  () => import('@/app/components/PartyProjectManagement'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="p-8 text-center text-sm opacity-60">Loading project management…</div>
+    ),
+  }
+);
 
 const leadStatuses = ['New', 'Contacted', 'Follow-up', 'Converted', 'Lost'];
 const leadStages = ['New', 'Meeting Done', 'Estimate Sent', 'Negotiation', 'Final', 'Lost'];

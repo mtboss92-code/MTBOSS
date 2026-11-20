@@ -103,15 +103,33 @@ function validate(body) {
   };
 }
 
+const promotionsCache = (globalThis.__shopPromotionsCache = globalThis.__shopPromotionsCache || { expiresAt: 0, data: null });
+const PROMOTIONS_CACHE_TTL_MS = 2 * 60 * 1000;
+
 export async function GET(req) {
   try {
     await ensurePromotions();
     const isAdmin = Boolean(requireRole(req, 'admin'));
+    if (!isAdmin && promotionsCache.data && promotionsCache.expiresAt > Date.now()) {
+      return NextResponse.json(
+        { success: true, data: promotionsCache.data },
+        { headers: { 'Cache-Control': 'public, max-age=60, s-maxage=120, stale-while-revalidate=300' } },
+      );
+    }
     const result = await pool.query(
       `SELECT * FROM shop_promotions ${isAdmin ? '' : 'WHERE is_active=TRUE'} ORDER BY min_cart_value ASC, id DESC`
     );
     const data = result.rows.map(serialize).filter((promo) => isAdmin || promotionIsCurrentlyActive(promo));
-    return NextResponse.json({ success: true, data });
+    if (!isAdmin) {
+      promotionsCache.data = data;
+      promotionsCache.expiresAt = Date.now() + PROMOTIONS_CACHE_TTL_MS;
+    }
+    return NextResponse.json(
+      { success: true, data },
+      isAdmin
+        ? undefined
+        : { headers: { 'Cache-Control': 'public, max-age=60, s-maxage=120, stale-while-revalidate=300' } },
+    );
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message || 'Could not load promotions' }, { status: 500 });
   }
@@ -131,6 +149,8 @@ export async function POST(req) {
        RETURNING *`,
       [p.name, p.promoType, p.discountValue, p.cap, p.minCart, JSON.stringify(p.categories), p.freeShippingSameCityOnly, p.badgeText, p.description, p.isActive, p.start, p.end]
     );
+    promotionsCache.expiresAt = 0;
+    promotionsCache.data = null;
     return NextResponse.json({ success: true, data: serialize(result.rows[0]) }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 400 });
@@ -155,6 +175,8 @@ export async function PUT(req) {
       [p.name, p.promoType, p.discountValue, p.cap, p.minCart, JSON.stringify(p.categories), p.freeShippingSameCityOnly, p.badgeText, p.description, p.isActive, p.start, p.end, id]
     );
     if (!result.rows[0]) throw new Error('Promotion not found');
+    promotionsCache.expiresAt = 0;
+    promotionsCache.data = null;
     return NextResponse.json({ success: true, data: serialize(result.rows[0]) });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 400 });
@@ -170,6 +192,8 @@ export async function DELETE(req) {
     const id = Number(new URL(req.url).searchParams.get('id'));
     if (!Number.isInteger(id) || id <= 0) throw new Error('Invalid promotion ID');
     await pool.query('DELETE FROM shop_promotions WHERE id=$1', [id]);
+    promotionsCache.expiresAt = 0;
+    promotionsCache.data = null;
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 400 });
