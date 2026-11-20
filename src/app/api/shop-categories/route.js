@@ -166,7 +166,10 @@ const NAVBAR_PRESET_CATEGORIES = [
   },
 ];
 
-async function syncNavbarCategories() {
+// Kept only as a record of the one-time legacy migration.  It must never run
+// for the Admin "Sync" button because it writes the old hard-coded defaults
+// back into every saved category.
+async function legacySyncNavbarCategories() {
   try {
     await pool.query(`
       UPDATE supplier_materials
@@ -288,6 +291,13 @@ async function syncNavbarCategories() {
   invalidatePublicCategoriesCache();
 }
 
+// "Sync" now means publish/invalidate only.  Admin-managed subcategories and
+// display groups are the source of truth; fixed parent navbar labels are not
+// modified and no product/category record is remapped.
+async function syncNavbarCategories() {
+  invalidatePublicCategoriesCache();
+}
+
 // ── GET ──────────────────────────────────────────────────────────────────────
 export async function GET(req) {
   try {
@@ -298,7 +308,7 @@ export async function GET(req) {
     if (searchParams.get('action') === 'sync-navbar') {
       if (!requireRole(req, 'admin')) return unauthorized();
       await syncNavbarCategories();
-      return NextResponse.json({ success: true, message: 'Shop categories synced to Navbar structure successfully!' });
+      return NextResponse.json({ success: true, message: 'Saved admin subcategories and display groups published to Shop Now.' });
     }
 
     // Auto-migrate check: if any obsolete flat category remains on main/production DB, auto-sync seamlessly
@@ -375,7 +385,7 @@ export async function POST(req) {
     if (searchParams.get('action') === 'sync-navbar' || body.action === 'sync-navbar') {
       if (!requireRole(req, 'admin')) return unauthorized();
       await syncNavbarCategories();
-      return NextResponse.json({ success: true, message: 'Shop categories synced to Navbar structure successfully!' });
+      return NextResponse.json({ success: true, message: 'Saved admin subcategories and display groups published to Shop Now.' });
     }
 
     if (!requireRole(req, 'admin')) return unauthorized();

@@ -209,7 +209,10 @@ export const DIRECT_NAV_BUTTONS = ['Chemicals', 'Paints'];
 export function resolveCategoryNav(tree = CATEGORY_NAV_TREE, categories = [], products = []) {
   return tree.map((parent) => {
     const parentCategory = findCategoryByLabel(parent.label, categories);
-    let childrenLabels = [...parent.children];
+    // Parent labels are fixed by CATEGORY_NAV_TREE, but once that parent is
+    // managed in Admin, its dropdown must come exclusively from Admin data.
+    // Otherwise the old preset children get appended again after a sync.
+    let childrenLabels = parentCategory ? [] : [...parent.children];
     let configuredGroups = [];
     if (parentCategory) {
       let rawSubs = parentCategory.subcategories;
@@ -472,8 +475,11 @@ export function getSubcategoriesForParent(parentDefOrLabel, categories = [], pro
   const parentTree = CATEGORY_NAV_TREE.find((t) => t.id === parent.id || namesMatch(t.label, parent.label));
   const parentDb = findCategoryByLabel(parent.label, categories);
 
-  let labels = parentTree ? [...parentTree.children] : (parent.children ? [...parent.children] : []);
   let groupMembers = new Map();
+  // Same source-of-truth rule for the Shop by category cards.
+  let labels = parentDb
+    ? []
+    : (parentTree ? [...parentTree.children] : (parent.children ? [...parent.children] : []));
   if (parentDb) {
     let rawSubs = parentDb.subcategories;
     if (typeof rawSubs === 'string') {
