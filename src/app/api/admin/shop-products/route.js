@@ -243,9 +243,10 @@ async function validProduct(body, { allowUnassigned = false } = {}) {
   }
 
   const lowStockThreshold = Number.isInteger(Number(body.low_stock_threshold)) ? Math.max(0, Number(body.low_stock_threshold)) : 5;
-  const stockStatus = body.stock_status && ['in_stock', 'low_stock', 'out_of_stock'].includes(body.stock_status)
-    ? body.stock_status
-    : computeStockStatus(quantity, lowStockThreshold);
+  // Quantity is the source of truth.  The edit form can contain the status
+  // that was loaded before a stock change; accepting that stale value lets a
+  // zero-quantity product remain marked "in stock".
+  const stockStatus = computeStockStatus(quantity, lowStockThreshold);
 
   const productUrlSlug = String(body.product_url_slug || '')
     .trim()

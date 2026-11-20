@@ -238,7 +238,11 @@ async function handleProductDetail(searchParams) {
     currency: row.currency || 'INR',
     unit: row.unit || '',
     quantity: row.quantity,
-    stock_status: row.stock_status || (Number(row.quantity) > 0 ? 'in_stock' : 'out_of_stock'),
+    // Inventory is authoritative. This also keeps old rows that contain a
+    // stale saved status consistent until they are edited again.
+    stock_status: Number(row.quantity) <= 0
+      ? 'out_of_stock'
+      : (Number(row.quantity) <= Number(row.low_stock_threshold ?? 5) ? 'low_stock' : 'in_stock'),
     low_stock_threshold: row.low_stock_threshold || 10,
     weight: row.weight,
     weight_unit: row.weight_unit || 'kg',

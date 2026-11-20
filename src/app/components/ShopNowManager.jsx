@@ -2586,7 +2586,11 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                     const originalPrice = Number(product.mrp || product.compare_at_price);
                     const discountPercent = originalPrice > price && price > 0 ? Math.round(((originalPrice - price) / originalPrice) * 100) : null;
                     const stockQty = Number(product.quantity || 0);
-                    const stockStatus = product.stock_status || (stockQty <= 0 ? 'out_of_stock' : stockQty <= 5 ? 'low_stock' : 'in_stock');
+                    // Defend against legacy rows that saved a stale status:
+                    // zero inventory must always be shown as out of stock.
+                    const stockStatus = stockQty <= 0
+                      ? 'out_of_stock'
+                      : (stockQty <= Number(product.low_stock_threshold ?? 5) ? 'low_stock' : 'in_stock');
 
                     return (
                       <tr key={product.id}>
