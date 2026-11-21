@@ -6,9 +6,9 @@ import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import Link from 'next/link';
 import { strFromU8, unzipSync } from 'fflate';
-import { UploadCloud, Plus, X, Star, Sparkles, Image as ImageIcon, ArrowLeft, HelpCircle, ShieldCheck, CheckCircle2, RotateCcw, FileText, ListChecks, Barcode, Copy, History, Download, RefreshCw, Layers, Tag, DollarSign, Box, ShieldAlert, Check } from 'lucide-react';
+import { UploadCloud, Plus, X, Star, Sparkles, Image as ImageIcon, ArrowLeft, HelpCircle, ShieldCheck, CheckCircle2, RotateCcw, FileText, ListChecks, Barcode, Copy, History, Download, RefreshCw, Layers, Tag, DollarSign, Box, ShieldAlert, Check, ChevronUp, ChevronDown, Trash2 } from 'lucide-react';
 import VendorCommissionSummary from './VendorCommissionSummary';
-import { defaultShopStorefront } from '@/lib/shop-storefront-defaults';
+import { defaultShopStorefront, defaultShopHeroBanners } from '@/lib/shop-storefront-defaults';
 import { QUALITY_TIER_OPTIONS, qualityTierLabel } from '@/lib/quality-tier';
 import { getCategoryAttributeConfig, extractProductAttributes } from '@/lib/product-attributes';
 import './ShopNowManager.css';
@@ -89,6 +89,15 @@ const desktopBannerFields = [
   ['categories_heading', 'Categories heading'], ['featured_heading', 'Featured heading'],
   ['deals_heading', 'Deals heading'], ['arrivals_heading', 'New arrivals heading'],
   ['catalog_heading', 'Catalogue heading'], ['footer_tagline', 'Footer tagline'],
+];
+
+const storefrontHeadingFields = [
+  ['categories_heading', 'Categories heading'],
+  ['featured_heading', 'Featured heading'],
+  ['deals_heading', 'Deals heading'],
+  ['arrivals_heading', 'New arrivals heading'],
+  ['catalog_heading', 'Catalogue heading'],
+  ['footer_tagline', 'Footer tagline'],
 ];
 
 const ATTRIBUTE_FIELD_DEFS = {
@@ -2728,12 +2737,105 @@ function AppearanceManager() {
       .catch((error) => setNotice(error.message)).finally(() => setLoading(false));
   }, []);
 
+  const [uploadingBannerIdx, setUploadingBannerIdx] = useState(null);
+
+  const banners = Array.isArray(content.hero_banners) && content.hero_banners.length > 0
+    ? content.hero_banners
+    : defaultShopHeroBanners;
+
+  const updateBanner = (index, field, value) => {
+    setContent((curr) => {
+      const list = Array.isArray(curr.hero_banners) && curr.hero_banners.length > 0
+        ? [...curr.hero_banners]
+        : defaultShopHeroBanners.map((b) => ({ ...b }));
+      if (!list[index]) return curr;
+      list[index] = { ...list[index], [field]: value };
+      return { ...curr, hero_banners: list };
+    });
+  };
+
+  const addBanner = () => {
+    setContent((curr) => {
+      const list = Array.isArray(curr.hero_banners) && curr.hero_banners.length > 0
+        ? [...curr.hero_banners]
+        : defaultShopHeroBanners.map((b) => ({ ...b }));
+      const newBanner = {
+        id: `banner-${Date.now()}`,
+        kicker: 'MTBOSS MATERIAL MARKETPLACE',
+        title: 'Special Promotion',
+        highlight: 'Best Deals Today',
+        description: 'Explore construction essentials from verified suppliers. Add to cart, buy now, or request a quote in a few taps.',
+        button_text: 'Explore materials',
+        button_link: '',
+        badge_text: 'Verified Suppliers',
+        image_url: '/images/banners/materials.jpg',
+        is_active: true,
+      };
+      return { ...curr, hero_banners: [...list, newBanner] };
+    });
+  };
+
+  const removeBanner = (index) => {
+    setContent((curr) => {
+      const list = Array.isArray(curr.hero_banners) ? [...curr.hero_banners] : [];
+      if (list.length <= 1) {
+        alert('You must have at least one hero banner.');
+        return curr;
+      }
+      list.splice(index, 1);
+      return { ...curr, hero_banners: list };
+    });
+  };
+
+  const moveBanner = (index, direction) => {
+    setContent((curr) => {
+      const list = Array.isArray(curr.hero_banners) ? [...curr.hero_banners] : [];
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= list.length) return curr;
+      const temp = list[index];
+      list[index] = list[targetIndex];
+      list[targetIndex] = temp;
+      return { ...curr, hero_banners: list };
+    });
+  };
+
+  const handleBannerUpload = async (index, event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setUploadingBannerIdx(index);
+    try {
+      const imageUrl = await uploadImage(file);
+      updateBanner(index, 'image_url', imageUrl);
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setUploadingBannerIdx(null);
+      event.target.value = '';
+    }
+  };
+
   const save = async (event) => {
     event.preventDefault();
     setSaving(true);
     setNotice('');
     try {
-      const response = await fetch('/api/shop-storefront', { method: 'PUT', headers: shopHeaders(), body: JSON.stringify(content) });
+      const currentBanners = Array.isArray(content.hero_banners) && content.hero_banners.length > 0
+        ? content.hero_banners
+        : defaultShopHeroBanners;
+      const firstActive = currentBanners.find((b) => b && b.is_active !== false) || currentBanners[0] || {};
+      const payload = {
+        ...content,
+        hero_banners: currentBanners,
+        hero_kicker: firstActive.kicker || content.hero_kicker,
+        hero_title: firstActive.title || content.hero_title,
+        hero_highlight: firstActive.highlight || content.hero_highlight,
+        hero_description: firstActive.description || content.hero_description,
+        hero_button: firstActive.button_text || content.hero_button,
+        hero_badge: firstActive.badge_text || content.hero_badge,
+        hero_image: firstActive.image_url || content.hero_image,
+        hero_images: currentBanners.map((b) => b.image_url).filter(Boolean),
+      };
+      const response = await fetch('/api/shop-storefront', { method: 'PUT', headers: shopHeaders(), body: JSON.stringify(payload) });
       const data = await readApiJson(response);
       if (!response.ok) throw new Error(data.error || 'Could not save storefront');
       setContent(data.data);
@@ -2741,57 +2843,12 @@ function AppearanceManager() {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('MTBOSSShopProductsUpdated'));
       }
-      setNotice('Storefront content saved successfully.');
+      setNotice('Storefront content and hero banners saved successfully.');
     } catch (error) { setNotice(error.message); }
     finally { setSaving(false); }
   };
 
-  const [newHeroUrl, setNewHeroUrl] = useState('');
-
   const updatePromo = (index, field, value) => setContent((current) => ({ ...current, promos: current.promos.map((promo, i) => i === index ? { ...promo, [field]: value } : promo) }));
-
-  const handleUpload = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const imageUrl = await uploadImage(file);
-      setContent((current) => {
-        const existing = Array.isArray(current.hero_images) ? current.hero_images : [current.hero_image].filter(Boolean);
-        return {
-          ...current,
-          hero_image: imageUrl,
-          hero_images: [...existing, imageUrl],
-        };
-      });
-    }
-    catch (error) { setNotice(error.message); }
-    finally { setUploading(false); event.target.value = ''; }
-  };
-
-  const addHeroImageUrl = () => {
-    if (!newHeroUrl.trim()) return;
-    setContent((current) => {
-      const existing = Array.isArray(current.hero_images) ? current.hero_images : [current.hero_image].filter(Boolean);
-      return {
-        ...current,
-        hero_images: [...existing, newHeroUrl.trim()],
-      };
-    });
-    setNewHeroUrl('');
-  };
-
-  const removeHeroImage = (idx) => {
-    setContent((current) => {
-      const existing = Array.isArray(current.hero_images) ? current.hero_images : [];
-      const updated = existing.filter((_, i) => i !== idx);
-      return {
-        ...current,
-        hero_images: updated,
-        hero_image: updated[0] || '',
-      };
-    });
-  };
 
   return <div className="shop-admin-panel">
     <div className="shop-admin-heading">
@@ -2856,11 +2913,280 @@ function AppearanceManager() {
           </div>
         </div>
 
-        {/* 3. Desktop Storefront Banner & Headings */}
+        {/* 3. Desktop Storefront Hero Banners (Single or Multi-Slide Auto-Scroll) */}
         <div className="shop-admin-card">
-          <h3>🖥️ Desktop Banner & Page Text</h3>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <h3 style={{ margin: 0 }}>🖥️ Desktop Hero Banners ({banners.length})</h3>
+              <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--shop-admin-muted, #64748b)' }}>
+                {banners.filter((b) => b.is_active !== false).length > 1
+                  ? 'Multiple active banners: Auto-slides smoothly on Shop Now (pauses on hover, resume on mouse leave).'
+                  : 'Single active banner: Displays statically on Shop Now without slider.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={addBanner}
+              className="shop-admin-button"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', fontWeight: 700 }}
+            >
+              <Plus size={16} /> Add New Banner
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginTop: 16 }}>
+            {banners.map((banner, index) => {
+              const isActive = banner.is_active !== false;
+              return (
+                <div
+                  key={banner.id || index}
+                  style={{
+                    border: isActive ? '1px solid var(--shop-admin-border, #cbd5e1)' : '1px dashed #ef4444',
+                    borderRadius: 12,
+                    padding: 16,
+                    background: isActive ? 'var(--shop-admin-card-bg, #ffffff)' : 'var(--shop-admin-subtle, #f8fafc)',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                    opacity: isActive ? 1 : 0.75,
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  {/* Banner Card Header */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span
+                        style={{
+                          background: isActive ? 'var(--brand-blue, #2563eb)' : '#64748b',
+                          color: '#fff',
+                          fontSize: 12,
+                          fontWeight: 800,
+                          padding: '3px 10px',
+                          borderRadius: 6,
+                        }}
+                      >
+                        Slide #{index + 1}
+                      </span>
+                      <strong style={{ fontSize: 14, color: 'var(--shop-admin-text, #0f172a)' }}>
+                        {banner.title || 'Untitled Banner'} {banner.highlight ? `(${banner.highlight})` : ''}
+                      </strong>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {/* Active toggle */}
+                      <label
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          marginRight: 8,
+                          color: isActive ? '#16a34a' : '#ef4444',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isActive}
+                          onChange={(e) => updateBanner(index, 'is_active', e.target.checked)}
+                        />
+                        {isActive ? 'Active' : 'Hidden'}
+                      </label>
+
+                      {/* Move Up */}
+                      <button
+                        type="button"
+                        onClick={() => moveBanner(index, -1)}
+                        disabled={index === 0}
+                        title="Move Up"
+                        style={{
+                          padding: '5px 8px',
+                          borderRadius: 6,
+                          border: '1px solid var(--shop-admin-border, #cbd5e1)',
+                          background: 'transparent',
+                          cursor: index === 0 ? 'not-allowed' : 'pointer',
+                          opacity: index === 0 ? 0.4 : 1,
+                        }}
+                      >
+                        <ChevronUp size={15} />
+                      </button>
+
+                      {/* Move Down */}
+                      <button
+                        type="button"
+                        onClick={() => moveBanner(index, 1)}
+                        disabled={index === banners.length - 1}
+                        title="Move Down"
+                        style={{
+                          padding: '5px 8px',
+                          borderRadius: 6,
+                          border: '1px solid var(--shop-admin-border, #cbd5e1)',
+                          background: 'transparent',
+                          cursor: index === banners.length - 1 ? 'not-allowed' : 'pointer',
+                          opacity: index === banners.length - 1 ? 0.4 : 1,
+                        }}
+                      >
+                        <ChevronDown size={15} />
+                      </button>
+
+                      {/* Delete */}
+                      <button
+                        type="button"
+                        onClick={() => removeBanner(index)}
+                        disabled={banners.length <= 1}
+                        title="Delete Banner"
+                        style={{
+                          padding: '5px 8px',
+                          borderRadius: 6,
+                          border: '1px solid #fca5a5',
+                          background: '#fef2f2',
+                          color: '#dc2626',
+                          cursor: banners.length <= 1 ? 'not-allowed' : 'pointer',
+                          opacity: banners.length <= 1 ? 0.4 : 1,
+                        }}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Banner Fields Grid */}
+                  <div className="shop-admin-fields" style={{ marginBottom: 12 }}>
+                    <label>
+                      Eyebrow / Kicker
+                      <input
+                        value={banner.kicker ?? ''}
+                        onChange={(e) => updateBanner(index, 'kicker', e.target.value)}
+                        placeholder="MTBOSS MATERIAL MARKETPLACE"
+                      />
+                    </label>
+
+                    <label>
+                      Title
+                      <input
+                        value={banner.title ?? ''}
+                        onChange={(e) => updateBanner(index, 'title', e.target.value)}
+                        placeholder="Everything you need to"
+                      />
+                    </label>
+
+                    <label>
+                      Highlighted Title (Accent text)
+                      <input
+                        value={banner.highlight ?? ''}
+                        onChange={(e) => updateBanner(index, 'highlight', e.target.value)}
+                        placeholder="build better."
+                      />
+                    </label>
+
+                    <label>
+                      CTA Button Text
+                      <input
+                        value={banner.button_text ?? ''}
+                        onChange={(e) => updateBanner(index, 'button_text', e.target.value)}
+                        placeholder="Explore materials"
+                      />
+                    </label>
+
+                    <label>
+                      CTA Button Link (optional URL)
+                      <input
+                        value={banner.button_link ?? ''}
+                        onChange={(e) => updateBanner(index, 'button_link', e.target.value)}
+                        placeholder="e.g. /ShopNow?category=cement (leave empty for all categories)"
+                      />
+                    </label>
+
+                    <label>
+                      Image Badge Text
+                      <input
+                        value={banner.badge_text ?? ''}
+                        onChange={(e) => updateBanner(index, 'badge_text', e.target.value)}
+                        placeholder="Built for every project"
+                      />
+                    </label>
+
+                    <label className="shop-admin-wide">
+                      Description
+                      <textarea
+                        rows={2}
+                        value={banner.description ?? ''}
+                        onChange={(e) => updateBanner(index, 'description', e.target.value)}
+                        placeholder="Explore construction essentials from verified suppliers..."
+                      />
+                    </label>
+                  </div>
+
+                  {/* Banner Image Preview & Upload */}
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: 12,
+                      borderRadius: 8,
+                      background: 'var(--shop-admin-subtle, #f8fafc)',
+                      border: '1px solid var(--shop-admin-border-subtle, #e2e8f0)',
+                      display: 'flex',
+                      gap: 16,
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 140,
+                        height: 80,
+                        borderRadius: 8,
+                        overflow: 'hidden',
+                        position: 'relative',
+                        background: '#e2e8f0',
+                        flexShrink: 0,
+                        border: '1px solid #cbd5e1',
+                      }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={banner.image_url || '/images/banners/materials.jpg'}
+                        alt="Banner Preview"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    </div>
+
+                    <div style={{ flex: '1 1 240px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, margin: 0 }}>
+                        Banner Image (Cloudinary or Image URL)
+                      </label>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <input
+                          type="url"
+                          placeholder="Paste image URL..."
+                          value={banner.image_url ?? ''}
+                          onChange={(e) => updateBanner(index, 'image_url', e.target.value)}
+                          style={{ flex: '1 1 200px' }}
+                        />
+                        <label className="shop-admin-upload" style={{ margin: 0, padding: '7px 14px', fontSize: 12 }}>
+                          {uploadingBannerIdx === index ? 'Uploading...' : 'Upload Image'}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleBannerUpload(index, e)}
+                            disabled={uploadingBannerIdx === index}
+                            hidden
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 4. Desktop Storefront Headings & Section Labels */}
+        <div className="shop-admin-card">
+          <h3>📄 Storefront Headings & Section Labels</h3>
+          <p style={{ marginBottom: 16 }}>Configure headings and labels shown for sections across the Shop Now page.</p>
           <div className="shop-admin-fields">
-            {desktopBannerFields.map(([key, label]) => (
+            {storefrontHeadingFields.map(([key, label]) => (
               <label key={key}>
                 {label}
                 <input
@@ -2869,108 +3195,6 @@ function AppearanceManager() {
                 />
               </label>
             ))}
-            <label className="shop-admin-wide">
-              Banner primary image URL
-              <input
-                value={content.hero_image ?? ''}
-                onChange={(e) => setContent({ ...content, hero_image: e.target.value })}
-              />
-            </label>
-          </div>
-
-          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #e2e8f0' }}>
-            <strong style={{ display: 'block', marginBottom: 10, fontSize: 13, color: '#1e293b' }}>
-              🔄 Auto-Scroll Banner Images ({Array.isArray(content.hero_images) ? content.hero_images.length : 0})
-            </strong>
-            <p style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
-              These images automatically scroll in the banner on the Shop Now page.
-            </p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
-              {(Array.isArray(content.hero_images) ? content.hero_images : []).map((imgUrl, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    position: 'relative',
-                    width: 100,
-                    height: 70,
-                    borderRadius: 8,
-                    overflow: 'hidden',
-                    border: '2px solid #cbd5e1',
-                    background: '#f1f5f9',
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-                  }}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={imgUrl}
-                    alt={`Banner ${idx + 1}`}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeHeroImage(idx)}
-                    title="Remove image"
-                    style={{
-                      position: 'absolute',
-                      top: 4,
-                      right: 4,
-                      background: 'rgba(239, 68, 68, 0.9)',
-                      color: '#fff',
-                      border: 'none',
-                      borderRadius: '50%',
-                      width: 20,
-                      height: 20,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 11,
-                      fontWeight: 'bold',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                    }}
-                  >
-                    ✕
-                  </button>
-                  <span
-                    style={{
-                      position: 'absolute',
-                      bottom: 3,
-                      left: 4,
-                      background: 'rgba(15, 23, 42, 0.75)',
-                      color: '#fff',
-                      fontSize: 9,
-                      fontWeight: 700,
-                      padding: '1px 5px',
-                      borderRadius: 4,
-                    }}
-                  >
-                    #{idx + 1}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <input
-                type="url"
-                placeholder="Paste Cloudinary / image URL to add..."
-                value={newHeroUrl}
-                onChange={(e) => setNewHeroUrl(e.target.value)}
-                style={{ flex: '1 1 280px', minWidth: 200 }}
-              />
-              <button
-                type="button"
-                onClick={addHeroImageUrl}
-                className="shop-admin-button"
-                style={{ padding: '8px 16px', fontWeight: 700 }}
-              >
-                + Add Image URL
-              </button>
-              <label className="shop-admin-upload" style={{ margin: 0 }}>
-                {uploading ? 'Uploading...' : 'Upload Image'}
-                <input type="file" accept="image/*" onChange={handleUpload} disabled={uploading} hidden />
-              </label>
-            </div>
           </div>
         </div>
 

@@ -4,6 +4,21 @@ export const defaultHeroImages = [
   '/images/banners/materials.jpg',
 ];
 
+export const defaultShopHeroBanners = [
+  {
+    id: 'default-banner-1',
+    kicker: 'MTBOSS MATERIAL MARKETPLACE',
+    title: 'Everything you need to',
+    highlight: 'build better.',
+    description: 'Explore construction essentials from verified suppliers. Add to cart, buy now, or request a quote in a few taps.',
+    button_text: 'Explore materials',
+    button_link: '',
+    badge_text: 'Built for every project',
+    image_url: defaultHeroImages[0],
+    is_active: true,
+  },
+];
+
 export const defaultShopStorefront = {
   hero_kicker: 'MTBOSS MATERIAL MARKETPLACE',
   hero_title: 'Everything you need to',
@@ -11,6 +26,7 @@ export const defaultShopStorefront = {
   hero_description: 'Explore construction essentials from verified suppliers. Add to cart, buy now, or request a quote in a few taps.',
   hero_image: defaultHeroImages[0],
   hero_images: defaultHeroImages,
+  hero_banners: defaultShopHeroBanners,
   hero_badge: 'Built for every project',
   hero_button: 'Explore materials',
   search_placeholder: 'Search "cement", "steel" and more',
@@ -71,6 +87,38 @@ export function normalizeShopStorefront(value = {}) {
   result.hero_images = cleaned.length > 0 ? cleaned : defaultHeroImages;
   if (!result.hero_image || result.hero_image === '/images/banners/materials.jpg') {
     result.hero_image = result.hero_images[0] || defaultHeroImages[0];
+  }
+
+  // Normalize multi-banner hero slides
+  if (Array.isArray(value?.hero_banners) && value.hero_banners.length > 0) {
+    result.hero_banners = value.hero_banners.map((b, idx) => ({
+      id: String(b?.id || `banner-${idx + 1}`),
+      kicker: String(b?.kicker ?? defaultShopHeroBanners[0].kicker).trim().slice(0, 200),
+      title: String(b?.title ?? defaultShopHeroBanners[0].title).trim().slice(0, 200),
+      highlight: String(b?.highlight ?? defaultShopHeroBanners[0].highlight).trim().slice(0, 200),
+      description: String(b?.description ?? defaultShopHeroBanners[0].description).trim().slice(0, 500),
+      button_text: String(b?.button_text ?? defaultShopHeroBanners[0].button_text).trim().slice(0, 100),
+      button_link: String(b?.button_link ?? '').trim().slice(0, 500),
+      badge_text: String(b?.badge_text ?? defaultShopHeroBanners[0].badge_text).trim().slice(0, 100),
+      image_url: String(b?.image_url ?? defaultHeroImages[0]).trim().slice(0, 1000),
+      is_active: b?.is_active !== false,
+    }));
+  } else {
+    // Backward compatibility: build hero_banners from existing single-hero settings
+    result.hero_banners = [
+      {
+        id: 'banner-1',
+        kicker: result.hero_kicker || defaultShopHeroBanners[0].kicker,
+        title: result.hero_title || defaultShopHeroBanners[0].title,
+        highlight: result.hero_highlight || defaultShopHeroBanners[0].highlight,
+        description: result.hero_description || defaultShopHeroBanners[0].description,
+        button_text: result.hero_button || defaultShopHeroBanners[0].button_text,
+        button_link: '',
+        badge_text: result.hero_badge || defaultShopHeroBanners[0].badge_text,
+        image_url: result.hero_images?.[0] || result.hero_image || defaultHeroImages[0],
+        is_active: true,
+      },
+    ];
   }
 
   result.promos = defaultShopStorefront.promos.map((fallback, index) => ({

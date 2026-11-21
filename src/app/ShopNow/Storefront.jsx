@@ -22,6 +22,7 @@ import {
 import MobileStorefront from "./MobileStorefront";
 import AutoSwipeGallery from "./AutoSwipeGallery";
 import HeroBannerGallery from "./HeroBannerGallery";
+import ShopHeroSlider from "./ShopHeroSlider";
 import { defaultHeroImages } from "@/lib/shop-storefront-defaults";
 import {
   matchesAttribute,
@@ -1714,25 +1715,12 @@ export default function Storefront({ categories, products, offers = [], content,
             )}
           </div>
 
-          {/* Hero Banner (Always shown on all pages/categories) */}
-          <section className="store-hero">
-            <div className="store-hero-copy">
-              <span className="store-eyebrow">{content.hero_kicker}</span>
-              <h1>{content.hero_title} <em>{content.hero_highlight}</em></h1>
-              <p>{content.hero_description}</p>
-              <button type="button" className="store-hero-button" onClick={goToAllCategories}>
-                {content.hero_button} <ArrowRight size={18} />
-              </button>
-            </div>
-            <div className="store-hero-photo" role="img" aria-label="Construction materials" style={{ position: 'relative' }}>
-              <HeroBannerGallery
-                images={content?.hero_images || defaultHeroImages}
-                alt="Construction materials"
-                delay={3500}
-              />
-              <span className="store-hero-photo-label"><CheckCircle2 size={17} /> {content.hero_badge}</span>
-            </div>
-          </section>
+          {/* Hero Banner (Always shown on all pages/categories - Managed from Admin) */}
+          <ShopHeroSlider
+            banners={content?.hero_banners}
+            content={content}
+            goToAllCategories={goToAllCategories}
+          />
 
           {/* 4 Value Proposition Badges */}
           <div className="store-hero-value-props" aria-label="Store highlights">
