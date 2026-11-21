@@ -202,7 +202,7 @@ export default function ShopCategoryNav({
             onSelectCategory?.("all");
           }}
         >
-          All
+          Home
         </button>
         {parents.map((parent) => {
           const isOpen = openId === parent.id;
@@ -217,6 +217,7 @@ export default function ShopCategoryNav({
             <div
               key={parent.id}
               className={`store-category-parent${isOpen ? " is-open" : ""}${isParentActive ? " has-active" : ""}`}
+              style={parent.id === 'tools' ? { order: 100 } : undefined}
               onMouseEnter={() => {
                 if (!isMobile) openMenu(parent.id);
               }}
@@ -369,6 +370,7 @@ export default function ShopCategoryNav({
               key={item.label}
               type="button"
               className={`store-category-all-btn${isActive ? " is-active" : ""}${item.disabled ? " is-disabled" : ""}`}
+              style={item.label === 'Paints' ? { order: 99 } : undefined}
               disabled={item.disabled}
               aria-disabled={item.disabled}
               title={item.disabled ? "Coming soon" : undefined}

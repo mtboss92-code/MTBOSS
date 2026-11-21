@@ -64,6 +64,12 @@ export const CATEGORY_NAV_TREE = [
       'Door Locks & Hardware',
     ],
   },
+  {
+    id: 'tools',
+    label: 'Tools',
+    // The child list is loaded from the admin-managed Chemicals/Tools record.
+    children: [],
+  },
 ];
 
 /** Map nav leaf labels → alternate live shop_categories.name values. */
@@ -94,6 +100,7 @@ export const CATEGORY_NAV_ALIASES = {
   pop: ['p.o.p', 'plaster of paris'],
   waterproofing: ['water proofing', 'waterproof'],
   chemicals: ['chemical', 'construction chemicals'],
+  tools: ['tools', 'tool', 'chemicals', 'chemical', 'construction chemicals'],
   plywood: ['ply', 'ply wood'],
   hpl: ['high pressure laminate', 'laminate'],
   sockets: ['socket', 'switches & sockets', 'switch & socket'],
@@ -167,8 +174,10 @@ export function productMatchesLeaf(product, leafLabel, parentLabel) {
   }
 
   // Product filed under parent category (e.g. category "Furniture & Architectural Hardware", subcategory "Hinges")
+  const parentAliases = CATEGORY_NAV_ALIASES[parent] || [];
   const underParent = namesMatch(productCategory, parentLabel)
-    || (parent && normalizeName(productCategory).includes(parent));
+    || (parent && normalizeName(productCategory).includes(parent))
+    || parentAliases.some((alias) => namesMatch(productCategory, alias));
   if (!underParent) return false;
 
   return namesMatch(productName, leafLabel)
@@ -198,8 +207,8 @@ export function resolveDirectNavItem(label, categories = [], products = []) {
   return { label, categoryId: 'all', search: label, disabled: false };
 }
 
-/** Top-level nav buttons without a dropdown (shown after parent menus; Paints last). */
-export const DIRECT_NAV_BUTTONS = ['Chemicals', 'Paints'];
+/** Top-level nav buttons without a dropdown. Tools is an admin-managed dropdown. */
+export const DIRECT_NAV_BUTTONS = ['Paints'];
 
 /**
  * Resolve the static tree against live shop categories and products.
@@ -396,13 +405,12 @@ export const MAIN_NAV_DEFINITIONS = [
     tone: 'green',
   },
   {
-    id: 'chemicals',
-    name: 'Chemicals',
-    label: 'Chemicals',
-    description: 'Construction chemicals, adhesives, sealants & admixtures',
+    id: 'tools',
+    name: 'Tools',
+    label: 'Tools',
+    description: 'Construction tools, adhesives, sealants & accessories',
     coverImage: 'https://images.unsplash.com/photo-1584467735871-8e85353a8413?w=800&q=80',
     tone: 'mint',
-    isDirect: true,
   },
   {
     id: 'paints',
@@ -546,6 +554,8 @@ export function productMatchesParent(product, parentLabel, allParents = MAIN_NAV
   if (!product || !parentLabel) return false;
   const prodCat = typeof product.category === 'object' ? product.category?.name || '' : (product.category || '');
   if (namesMatch(prodCat, parentLabel)) return true;
+  const parentAliases = CATEGORY_NAV_ALIASES[normalizeName(parentLabel)] || [];
+  if (parentAliases.some((alias) => namesMatch(prodCat, alias))) return true;
 
   const parent = allParents.find((p) => namesMatch(p.label, parentLabel) || p.id === parentLabel)
     || CATEGORY_NAV_TREE.find((t) => namesMatch(t.label, parentLabel) || t.id === parentLabel);
