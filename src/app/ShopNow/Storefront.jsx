@@ -473,28 +473,24 @@ const ProductCarousel = memo(function ProductCarousel({
 }) {
   const sectionRef = useRef(null);
   const railRef = useRef(null);
-  const frameRef = useRef(0);
-  const lastTimeRef = useRef(0);
-  const visibleRef = useRef(false);
   const hoverRef = useRef(false);
   const interactingRef = useRef(false);
-  const documentVisibleRef = useRef(typeof document === 'undefined' ? true : !document.hidden);
-  const animationScrollRef = useRef(false);
   const resumeTimerRef = useRef(null);
+  const scrollTimerRef = useRef(null);
+  const hoverInitialTimeoutRef = useRef(null);
   const dragRef = useRef({ active: false, startX: 0, startScroll: 0 });
+  const [canScroll, setCanScroll] = useState(false);
 
-  // Always duplicate products to enable seamless infinite looping.
-  // Duplicate enough copies so the rail is always wider than the viewport —
-  // at least 2 copies for large sets, more copies for very small sets.
-  const duplicatedProducts = useMemo(() => {
-    if (products.length === 0) return [];
-    // For seamless looping the rail must contain at least 2 copies so
-    // scrollLeft can jump back by exactly one copy width without a gap.
-    // For very small product counts, repeat more times so the rail is
-    // always wider than the visible viewport (prevents empty space).
-    const repeatCount = products.length <= 3 ? 6 : products.length <= 5 ? 4 : 2;
-    return Array.from({ length: repeatCount }, () => products).flat();
-  }, [products]);
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+    const checkOverflow = () => {
+      setCanScroll(rail.scrollWidth > rail.clientWidth + 10);
+    };
+    checkOverflow();
+    window.addEventListener('resize', checkOverflow);
+    return () => window.removeEventListener('resize', checkOverflow);
+  }, [products.length]);
 
   const clearResumeTimer = useCallback(() => {
     if (resumeTimerRef.current) {
@@ -503,7 +499,7 @@ const ProductCarousel = memo(function ProductCarousel({
     }
   }, []);
 
-  const pauseAfterInteraction = useCallback((delay = 1800) => {
+  const pauseAfterInteraction = useCallback((delay = 2000) => {
     interactingRef.current = true;
     clearResumeTimer();
     resumeTimerRef.current = window.setTimeout(() => {
@@ -512,57 +508,111 @@ const ProductCarousel = memo(function ProductCarousel({
     }, delay);
   }, [clearResumeTimer]);
 
-  useEffect(() => {
-    const section = sectionRef.current;
-    if (!section || typeof IntersectionObserver === 'undefined') return undefined;
-    const observer = new IntersectionObserver(
-      ([entry]) => { visibleRef.current = entry.isIntersecting && entry.intersectionRatio >= 0.15; },
-      { threshold: [0, 0.15, 0.5] },
-    );
-    observer.observe(section);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const onVisibilityChange = () => { documentVisibleRef.current = !document.hidden; };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, []);
-
-  useEffect(() => {
+  const getCardStep = useCallback(() => {
     const rail = railRef.current;
-    if (!rail || products.length < 1) return undefined;
+    if (!rail) return 260;
+    const firstItem = rail.querySelector('.store-product-carousel-item');
+    if (firstItem) {
+      const parent = firstItem.parentElement;
+      const gap = parent ? (parseFloat(window.getComputedStyle(parent).gap) || 14) : 14;
+      return firstItem.offsetWidth + gap;
+    }
+    return 260;
+  }, []);
+
+  const scrollNextProduct = useCallback(() => {
+    const rail = railRef.current;
+    if (!rail || !products.length) return;
+    if (interactingRef.current || dragRef.current.active) return;
+
+    const maxScroll = rail.scrollWidth - rail.clientWidth;
+    if (maxScroll <= 5) return;
+
+    const step = getCardStep();
+    if (rail.scrollLeft >= maxScroll - 10) {
+      rail.scrollTo({ left: 0, behavior: 'smooth' });
+    } else {
+      rail.scrollBy({ left: step, behavior: 'smooth' });
+    }
+  }, [getCardStep, products.length]);
+
+  const startHoverScroll = useCallback(() => {
+    const rail = railRef.current;
+    if (!rail || rail.scrollWidth <= rail.clientWidth + 10) return;
+
+    hoverRef.current = true;
+    if (hoverInitialTimeoutRef.current) {
+      clearTimeout(hoverInitialTimeoutRef.current);
+      hoverInitialTimeoutRef.current = null;
+    }
+    if (scrollTimerRef.current) {
+      clearInterval(scrollTimerRef.current);
+      scrollTimerRef.current = null;
+    }
     let reducedMotion = false;
     try { reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { /* ignore */ }
-    if (reducedMotion) return undefined;
+    if (reducedMotion) return;
 
-    const tick = (time) => {
-      const elapsed = Math.min(48, time - (lastTimeRef.current || time));
-      lastTimeRef.current = time;
-      if (visibleRef.current && documentVisibleRef.current && !hoverRef.current && !interactingRef.current && !dragRef.current.active) {
-        // Pixels per second. A slow rail leaves cards readable and avoids jank.
-        animationScrollRef.current = true;
-        rail.scrollLeft += elapsed * 0.028;
-        // Seamless loop: once we've scrolled past the first copy, jump back
-        // by exactly one copy so the user never sees a gap or repeated jump.
-        const loopPoint = rail.scrollWidth / duplicatedProducts.length * products.length;
-        if (loopPoint > 0 && rail.scrollLeft >= loopPoint) rail.scrollLeft -= loopPoint;
-        animationScrollRef.current = false;
-      }
-      frameRef.current = window.requestAnimationFrame(tick);
+    // Initial scroll after a brief delay when mouse enters
+    hoverInitialTimeoutRef.current = window.setTimeout(() => {
+      if (!hoverRef.current) return;
+      scrollNextProduct();
+      // Then advance one product periodically every 2.2 seconds while hovering
+      scrollTimerRef.current = window.setInterval(() => {
+        if (!hoverRef.current) {
+          if (scrollTimerRef.current) {
+            clearInterval(scrollTimerRef.current);
+            scrollTimerRef.current = null;
+          }
+          return;
+        }
+        scrollNextProduct();
+      }, 2200);
+    }, 600);
+  }, [scrollNextProduct]);
+
+  const stopHoverScroll = useCallback(() => {
+    hoverRef.current = false;
+    if (hoverInitialTimeoutRef.current) {
+      clearTimeout(hoverInitialTimeoutRef.current);
+      hoverInitialTimeoutRef.current = null;
+    }
+    if (scrollTimerRef.current) {
+      clearInterval(scrollTimerRef.current);
+      scrollTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopHoverScroll();
+      clearResumeTimer();
     };
-    frameRef.current = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(frameRef.current);
-  }, [products.length, duplicatedProducts.length]);
-
-  useEffect(() => () => clearResumeTimer(), [clearResumeTimer]);
+  }, [stopHoverScroll, clearResumeTimer]);
 
   const scrollByCard = useCallback((direction) => {
     const rail = railRef.current;
     if (!rail) return;
     pauseAfterInteraction();
-    rail.scrollBy({ left: direction * Math.max(rail.clientWidth * 0.82, 260), behavior: 'smooth' });
-  }, [pauseAfterInteraction]);
+
+    const maxScroll = rail.scrollWidth - rail.clientWidth;
+    if (maxScroll <= 5) return;
+
+    const step = getCardStep();
+    if (direction > 0) {
+      if (rail.scrollLeft >= maxScroll - 10) {
+        rail.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        rail.scrollBy({ left: step, behavior: 'smooth' });
+      }
+    } else {
+      if (rail.scrollLeft <= 10) {
+        rail.scrollTo({ left: maxScroll, behavior: 'smooth' });
+      } else {
+        rail.scrollBy({ left: -step, behavior: 'smooth' });
+      }
+    }
+  }, [getCardStep, pauseAfterInteraction]);
 
   const handlePointerDown = useCallback((event) => {
     const rail = railRef.current;
@@ -588,48 +638,48 @@ const ProductCarousel = memo(function ProductCarousel({
     <div
       ref={sectionRef}
       className="store-product-carousel"
-      onMouseEnter={() => { hoverRef.current = true; }}
-      onMouseLeave={() => { hoverRef.current = false; }}
+      onMouseEnter={startHoverScroll}
+      onMouseLeave={stopHoverScroll}
     >
-      <button type="button" className="store-carousel-arrow store-carousel-arrow-left" aria-label="Scroll products left" onClick={() => scrollByCard(-1)}>
-        <ChevronLeft size={20} />
-      </button>
+      {canScroll && (
+        <button type="button" className="store-carousel-arrow store-carousel-arrow-left" aria-label="Scroll products left" onClick={() => scrollByCard(-1)}>
+          <ChevronLeft size={20} />
+        </button>
+      )}
       <div
         ref={railRef}
         className="store-product-carousel-viewport"
         onWheel={() => pauseAfterInteraction()}
-        onScroll={() => { if (!animationScrollRef.current) pauseAfterInteraction(); }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
         <div className="store-product-carousel-track">
-          {duplicatedProducts.map((product, index) => {
-            const duplicate = index >= products.length;
-            return (
-              <div className="store-product-carousel-item" key={`${sectionId}-${product.id}-${index}`} aria-hidden={duplicate || undefined}>
-                <ProductCard
-                  product={product}
-                  quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0}
-                  canAdd={canAdd}
-                  onAdd={onAdd}
-                  onChangeQty={onChangeQty}
-                  onQuote={onQuote}
-                  onBuy={onBuy}
-                  selectedCity={selectedCity}
-                  promotions={promotions}
-                  shippingSettings={shippingSettings}
-                  priority={index < 2}
-                />
-              </div>
-            );
-          })}
+          {products.map((product, index) => (
+            <div className="store-product-carousel-item" key={`${sectionId}-${product.id}-${index}`}>
+              <ProductCard
+                product={product}
+                quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0}
+                canAdd={canAdd}
+                onAdd={onAdd}
+                onChangeQty={onChangeQty}
+                onQuote={onQuote}
+                onBuy={onBuy}
+                selectedCity={selectedCity}
+                promotions={promotions}
+                shippingSettings={shippingSettings}
+                priority={index < 2}
+              />
+            </div>
+          ))}
         </div>
       </div>
-      <button type="button" className="store-carousel-arrow store-carousel-arrow-right" aria-label="Scroll products right" onClick={() => scrollByCard(1)}>
-        <ChevronRight size={20} />
-      </button>
+      {canScroll && (
+        <button type="button" className="store-carousel-arrow store-carousel-arrow-right" aria-label="Scroll products right" onClick={() => scrollByCard(1)}>
+          <ChevronRight size={20} />
+        </button>
+      )}
     </div>
   );
 });
