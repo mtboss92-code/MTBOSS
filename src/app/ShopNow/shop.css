@@ -3593,6 +3593,17 @@
     display: none !important;
   }
 
+  /* A scroll container clips its absolutely positioned children vertically in
+     browsers, even when overflow-y is declared visible.  On tablet, release
+     the horizontal scroll container while a menu is open so the dropdown can
+     paint below the sticky category bar. */
+  .storefront-desktop .store-category-nav.is-open,
+  .shop-page .store-category-nav.is-open,
+  .store-category-nav.is-open {
+    overflow: visible !important;
+    z-index: 9250 !important;
+  }
+
   .storefront-desktop .store-category-nav-inner,
   .shop-page .store-category-nav-inner,
   .store-category-nav-inner {
