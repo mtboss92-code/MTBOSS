@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
-  ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ClipboardList, Clock, CreditCard, Grid3X3,
+  ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Clock, CreditCard, Grid3X3,
   Hammer, MapPin, Minus, Mountain, Package, PaintBucket, Percent, Plus,
   Search, ShieldCheck, ShoppingCart, Truck, Wallet, Wrench, X, Sparkles,
 } from "lucide-react";
@@ -121,7 +121,7 @@ export function ShopImage({ src, alt = '', className = '', ...props }) {
       fetchPriority={fetchPriority || (priority ? 'high' : 'auto')}
       decoding={priority ? 'sync' : 'async'}
       style={{
-        ...(fill ? { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' } : {}),
+        ...(fill ? { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' } : {}),
         ...style,
       }}
     />;
@@ -173,6 +173,7 @@ function ProductVisual({ image, category, name, compact = false, priority = fals
           sizes={compact ? '68px' : '(max-width: 560px) 50vw, (max-width: 900px) 33vw, 25vw'}
           quality={70}
           priority={priority}
+          style={{ objectFit: 'contain' }}
         />
       ) : (
         <><span className="store-visual-ring" /><Icon size={compact ? 27 : 54} strokeWidth={1.4} aria-hidden="true" /></>
@@ -449,6 +450,187 @@ const ProductCard = memo(function ProductCard({ product, quantity, canAdd, onAdd
         </div>
       </div>
     </article>
+  );
+});
+
+/**
+ * A single-row product rail for the Shop Now home page. It deliberately wraps
+ * the existing ProductCard so pricing, cart, Buy Now and product links stay
+ * exactly the same as the catalogue cards.
+ */
+const ProductCarousel = memo(function ProductCarousel({
+  products,
+  sectionId,
+  cart,
+  canAdd,
+  onAdd,
+  onChangeQty,
+  onQuote,
+  onBuy,
+  selectedCity,
+  promotions,
+  shippingSettings,
+}) {
+  const sectionRef = useRef(null);
+  const railRef = useRef(null);
+  const frameRef = useRef(0);
+  const lastTimeRef = useRef(0);
+  const visibleRef = useRef(false);
+  const hoverRef = useRef(false);
+  const interactingRef = useRef(false);
+  const documentVisibleRef = useRef(typeof document === 'undefined' ? true : !document.hidden);
+  const animationScrollRef = useRef(false);
+  const resumeTimerRef = useRef(null);
+  const dragRef = useRef({ active: false, startX: 0, startScroll: 0 });
+
+  // Always duplicate products to enable seamless infinite looping.
+  // Duplicate enough copies so the rail is always wider than the viewport —
+  // at least 2 copies for large sets, more copies for very small sets.
+  const duplicatedProducts = useMemo(() => {
+    if (products.length === 0) return [];
+    // For seamless looping the rail must contain at least 2 copies so
+    // scrollLeft can jump back by exactly one copy width without a gap.
+    // For very small product counts, repeat more times so the rail is
+    // always wider than the visible viewport (prevents empty space).
+    const repeatCount = products.length <= 3 ? 6 : products.length <= 5 ? 4 : 2;
+    return Array.from({ length: repeatCount }, () => products).flat();
+  }, [products]);
+
+  const clearResumeTimer = useCallback(() => {
+    if (resumeTimerRef.current) {
+      window.clearTimeout(resumeTimerRef.current);
+      resumeTimerRef.current = null;
+    }
+  }, []);
+
+  const pauseAfterInteraction = useCallback((delay = 1800) => {
+    interactingRef.current = true;
+    clearResumeTimer();
+    resumeTimerRef.current = window.setTimeout(() => {
+      interactingRef.current = false;
+      resumeTimerRef.current = null;
+    }, delay);
+  }, [clearResumeTimer]);
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section || typeof IntersectionObserver === 'undefined') return undefined;
+    const observer = new IntersectionObserver(
+      ([entry]) => { visibleRef.current = entry.isIntersecting && entry.intersectionRatio >= 0.15; },
+      { threshold: [0, 0.15, 0.5] },
+    );
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const onVisibilityChange = () => { documentVisibleRef.current = !document.hidden; };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
+
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail || products.length < 1) return undefined;
+    let reducedMotion = false;
+    try { reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { /* ignore */ }
+    if (reducedMotion) return undefined;
+
+    const tick = (time) => {
+      const elapsed = Math.min(48, time - (lastTimeRef.current || time));
+      lastTimeRef.current = time;
+      if (visibleRef.current && documentVisibleRef.current && !hoverRef.current && !interactingRef.current && !dragRef.current.active) {
+        // Pixels per second. A slow rail leaves cards readable and avoids jank.
+        animationScrollRef.current = true;
+        rail.scrollLeft += elapsed * 0.028;
+        // Seamless loop: once we've scrolled past the first copy, jump back
+        // by exactly one copy so the user never sees a gap or repeated jump.
+        const loopPoint = rail.scrollWidth / duplicatedProducts.length * products.length;
+        if (loopPoint > 0 && rail.scrollLeft >= loopPoint) rail.scrollLeft -= loopPoint;
+        animationScrollRef.current = false;
+      }
+      frameRef.current = window.requestAnimationFrame(tick);
+    };
+    frameRef.current = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameRef.current);
+  }, [products.length, duplicatedProducts.length]);
+
+  useEffect(() => () => clearResumeTimer(), [clearResumeTimer]);
+
+  const scrollByCard = useCallback((direction) => {
+    const rail = railRef.current;
+    if (!rail) return;
+    pauseAfterInteraction();
+    rail.scrollBy({ left: direction * Math.max(rail.clientWidth * 0.82, 260), behavior: 'smooth' });
+  }, [pauseAfterInteraction]);
+
+  const handlePointerDown = useCallback((event) => {
+    const rail = railRef.current;
+    if (!rail || event.pointerType === 'touch') return;
+    dragRef.current = { active: true, startX: event.clientX, startScroll: rail.scrollLeft };
+    rail.setPointerCapture?.(event.pointerId);
+    pauseAfterInteraction(2200);
+  }, [pauseAfterInteraction]);
+
+  const handlePointerMove = useCallback((event) => {
+    const rail = railRef.current;
+    if (!rail || !dragRef.current.active) return;
+    rail.scrollLeft = dragRef.current.startScroll - (event.clientX - dragRef.current.startX);
+  }, []);
+
+  const endDrag = useCallback((event) => {
+    dragRef.current.active = false;
+    railRef.current?.releasePointerCapture?.(event.pointerId);
+  }, []);
+
+  if (!products.length) return null;
+  return (
+    <div
+      ref={sectionRef}
+      className="store-product-carousel"
+      onMouseEnter={() => { hoverRef.current = true; }}
+      onMouseLeave={() => { hoverRef.current = false; }}
+    >
+      <button type="button" className="store-carousel-arrow store-carousel-arrow-left" aria-label="Scroll products left" onClick={() => scrollByCard(-1)}>
+        <ChevronLeft size={20} />
+      </button>
+      <div
+        ref={railRef}
+        className="store-product-carousel-viewport"
+        onWheel={() => pauseAfterInteraction()}
+        onScroll={() => { if (!animationScrollRef.current) pauseAfterInteraction(); }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+      >
+        <div className="store-product-carousel-track">
+          {duplicatedProducts.map((product, index) => {
+            const duplicate = index >= products.length;
+            return (
+              <div className="store-product-carousel-item" key={`${sectionId}-${product.id}-${index}`} aria-hidden={duplicate || undefined}>
+                <ProductCard
+                  product={product}
+                  quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0}
+                  canAdd={canAdd}
+                  onAdd={onAdd}
+                  onChangeQty={onChangeQty}
+                  onQuote={onQuote}
+                  onBuy={onBuy}
+                  selectedCity={selectedCity}
+                  promotions={promotions}
+                  shippingSettings={shippingSettings}
+                  priority={index < 2}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <button type="button" className="store-carousel-arrow store-carousel-arrow-right" aria-label="Scroll products right" onClick={() => scrollByCard(1)}>
+        <ChevronRight size={20} />
+      </button>
+    </div>
   );
 });
 
@@ -1575,23 +1757,19 @@ export default function Storefront({ categories, products, offers = [], content,
                     </div>
                     <span className="store-section-note">Request today&apos;s best supplier quote</span>
                   </div>
-                  <div className="store-product-grid">
-                    {deals.map((product) => (
-                      <ProductCard
-                        key={product.id}
-                        product={product}
-                        quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0}
-                        canAdd={cart.length < 20}
-                        onAdd={onAdd}
-                        onChangeQty={onChangeQty}
-                        onQuote={onQuote}
-                        onBuy={onBuy}
-                        selectedCity={selectedCity}
-                        promotions={promotions}
-                        shippingSettings={shippingSettings}
-                      />
-                    ))}
-                  </div>
+                  <ProductCarousel
+                    products={deals}
+                    sectionId="deals"
+                    cart={cart}
+                    canAdd={cart.length < 20}
+                    onAdd={onAdd}
+                    onChangeQty={onChangeQty}
+                    onQuote={onQuote}
+                    onBuy={onBuy}
+                    selectedCity={selectedCity}
+                    promotions={promotions}
+                    shippingSettings={shippingSettings}
+                  />
                 </section>
               )}
 
@@ -1604,23 +1782,19 @@ export default function Storefront({ categories, products, offers = [], content,
                     </div>
                     <span className="store-section-note">Recently added products</span>
                   </div>
-                  <div className="store-product-grid">
-                    {arrivals.map((product) => (
-                      <ProductCard
-                        key={product.id}
-                        product={product}
-                        quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0}
-                        canAdd={cart.length < 20}
-                        onAdd={onAdd}
-                        onChangeQty={onChangeQty}
-                        onQuote={onQuote}
-                        onBuy={onBuy}
-                        selectedCity={selectedCity}
-                        promotions={promotions}
-                        shippingSettings={shippingSettings}
-                      />
-                    ))}
-                  </div>
+                  <ProductCarousel
+                    products={arrivals}
+                    sectionId="arrivals"
+                    cart={cart}
+                    canAdd={cart.length < 20}
+                    onAdd={onAdd}
+                    onChangeQty={onChangeQty}
+                    onQuote={onQuote}
+                    onBuy={onBuy}
+                    selectedCity={selectedCity}
+                    promotions={promotions}
+                    shippingSettings={shippingSettings}
+                  />
                 </section>
               )}
 
