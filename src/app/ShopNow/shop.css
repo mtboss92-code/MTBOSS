@@ -3604,6 +3604,20 @@
     z-index: 9250 !important;
   }
 
+  /* Some tablet browsers delay or suppress React's mouse-enter event while
+     the nav is horizontally scrollable. Keep CSS hover as a direct fallback:
+     a cursor over a parent category must always reveal its submenu. */
+  .storefront-desktop .store-category-nav:has(.store-category-parent:hover),
+  .shop-page .store-category-nav:has(.store-category-parent:hover),
+  .store-category-nav:has(.store-category-parent:hover) {
+    overflow: visible !important;
+    z-index: 9250 !important;
+  }
+
+  .store-category-parent:hover > .store-category-dropdown[hidden] {
+    display: block !important;
+  }
+
   .storefront-desktop .store-category-nav-inner,
   .shop-page .store-category-nav-inner,
   .store-category-nav-inner {
@@ -4001,14 +4015,14 @@
    This prevents the "stuck blue card" bug on desktop when mouse is over a card
    as the page scrolls (via wheel, trackpad, or keyboard).
    ───────────────────────────────────────────────────────────────────────────── */
-.shop-page.shop-is-scrolling .store-category,
-.shop-page.shop-is-scrolling .store-product-card {
+.shop-page.shop-is-scrolling .store-category {
   pointer-events: none !important;
 }
 
-/* Restore pointer-events immediately after scroll ends (JS removes the class) */
-.shop-page:not(.shop-is-scrolling) .store-category,
-.shop-page:not(.shop-is-scrolling) .store-product-card {
+/* Product cards stay clickable while a carousel is scrolling. The carousel's
+   own horizontal scroll emits a scroll event, so disabling cards here blocks
+   their image/title detail links just as a shopper tries to open a product. */
+.shop-page:not(.shop-is-scrolling) .store-category {
   pointer-events: auto;
 }
 

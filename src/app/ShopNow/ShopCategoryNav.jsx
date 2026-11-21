@@ -12,8 +12,6 @@ import {
   resolveDirectNavItem,
 } from "./categoryNavTree";
 
-const MOBILE_MQ = "(max-width: 767px)";
-
 export default function ShopCategoryNav({
   categories = [],
   products = [],
@@ -52,21 +50,8 @@ export default function ShopCategoryNav({
   }, [products]);
 
   const [openId, setOpenId] = useState(null);
-  const [isMobile, setIsMobile] = useState(false);
   const navRef = useRef(null);
   const closeTimer = useRef(null);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return undefined;
-    const media = window.matchMedia(MOBILE_MQ);
-    const sync = () => {
-      setIsMobile(media.matches);
-      setOpenId(null);
-    };
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
-  }, []);
 
   const clearCloseTimer = useCallback(() => {
     if (closeTimer.current) {
@@ -219,15 +204,13 @@ export default function ShopCategoryNav({
               className={`store-category-parent${isOpen ? " is-open" : ""}${isParentActive ? " has-active" : ""}`}
               style={parent.id === 'tools' ? { order: 100 } : undefined}
               onMouseEnter={() => {
-                if (!isMobile) openMenu(parent.id);
+                openMenu(parent.id);
               }}
               onMouseLeave={() => {
-                if (!isMobile) {
-                  clearCloseTimer();
-                  closeTimer.current = setTimeout(() => {
-                    setOpenId((current) => (current === parent.id ? null : current));
-                  }, 120);
-                }
+                clearCloseTimer();
+                closeTimer.current = setTimeout(() => {
+                  setOpenId((current) => (current === parent.id ? null : current));
+                }, 120);
               }}
             >
               <button
@@ -237,7 +220,10 @@ export default function ShopCategoryNav({
                 aria-haspopup="true"
                 aria-expanded={isOpen}
                 aria-controls={`store-category-panel-${parent.id}`}
-                onClick={() => toggleMenu(parent.id)}
+                // The desktop/tablet storefront is hover-first. Keeping an
+                // already-open menu open on click prevents the touch/mouse
+                // event sequence from immediately closing (blinking) it.
+                onClick={() => openMenu(parent.id)}
                 onKeyDown={(event) => handleParentKeyDown(event, parent, parent.children.length)}
               >
                 <span>{parent.label}</span>
