@@ -1726,7 +1726,11 @@ export default function Storefront({ categories, products, offers = [], content,
                   <div className="store-category-grid">
                     {mainCategories.map((mainCat) => {
                       const { tone, Icon } = categoryStyle(mainCat.label || mainCat.name);
-                      const catImgs = mainCat.images && mainCat.images.length > 0 ? mainCat.images : (mainCat.image ? [mainCat.image] : []);
+                      // Use the same admin-managed cover image as the mobile
+                      // storefront. Older records may fall back to images[0].
+                      const catImgs = mainCat.image
+                        ? [mainCat.image]
+                        : (mainCat.images && mainCat.images.length > 0 ? [mainCat.images[0]] : []);
                       return (
                         <button
                           type="button"

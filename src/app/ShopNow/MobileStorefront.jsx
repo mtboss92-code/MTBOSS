@@ -971,10 +971,13 @@ export default function MobileStorefront({
                             >
                               <div className="mobile-category-square">
                                 {(() => {
-                                  const catImgs = Array.from(new Set([
-                                    cat.image,
-                                    ...(Array.isArray(cat.images) ? cat.images : [])
-                                  ].filter(Boolean)));
+                                  // The admin-selected cover image is the one
+                                  // shown for this category on every device.
+                                  // Extra gallery images are only a fallback
+                                  // for older category records without a cover.
+                                  const catImgs = cat.image
+                                    ? [cat.image]
+                                    : Array.from(new Set((Array.isArray(cat.images) ? cat.images : []).filter(Boolean)));
                                   if (catImgs.length > 0) {
                                     return (
                                       <AutoSwipeGallery

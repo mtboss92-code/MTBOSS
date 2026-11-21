@@ -196,7 +196,9 @@ export default function ShopCategoryNav({
             (activeParentCategory && (namesMatch(activeParentCategory, parent.label) || activeParentCategory === parent.id))
             || hasActiveChild
           );
-          const isNewLaunches = parent.id === "new-launches";
+          // New Launches is a normal admin-managed category. Product recency
+          // belongs only to the storefront's New Arrivals section, not here.
+          const isNewLaunches = false;
 
           return (
             <div
