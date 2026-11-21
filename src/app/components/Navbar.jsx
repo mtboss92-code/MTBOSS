@@ -189,6 +189,7 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
   const dropdownTxt = isDarkMode
     ? "text-zinc-400 hover:text-[var(--brand-blue)] hover:bg-zinc-800"
     : "text-zinc-600 hover:text-zinc-900 hover:bg-gray-50";
+  const isShopNowPage = pathname === "/ShopNow" || pathname.startsWith("/ShopNow/");
 
   return (
     <nav
@@ -406,6 +407,20 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
 
           {/* Mobile Hamburger */}
           <div className="xl:hidden min-w-0 flex items-center gap-1 sm:gap-3">
+            <Link
+              href={isShopNowPage ? "/" : "/ShopNow"}
+              aria-label={isShopNowPage ? "Home" : "Shop Now"}
+              className="inline-flex min-h-8 sm:min-h-9 flex-shrink-0 items-center gap-1 whitespace-nowrap rounded bg-[var(--brand-blue)] px-2 py-1.5 text-[9px] font-bold text-black transition-colors hover:bg-[var(--brand-blue-dark)] sm:px-3 sm:text-[11px]"
+            >
+              {isShopNowPage ? (
+                <svg className="h-[13px] w-[13px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m3 11 9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V11Z" />
+                </svg>
+              ) : (
+                <ShoppingCart size={13} strokeWidth={2} aria-hidden="true" />
+              )}
+              <span>{isShopNowPage ? "Home" : "Shop Now"}</span>
+            </Link>
             {!loading && !user && (
               <div className="flex min-w-0 items-center gap-1 mr-0.5">
                 <Link
