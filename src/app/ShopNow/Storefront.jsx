@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Clock, CreditCard, Grid3X3,
   Hammer, MapPin, Minus, Mountain, Package, PaintBucket, Percent, Plus,
@@ -300,6 +301,7 @@ function applyOffer(product, offer) {
 }
 
 const ProductCard = memo(function ProductCard({ product, quantity, canAdd, onAdd, onChangeQty, onQuote, onBuy, selectedCity, promotions = [], shippingSettings, priority = false }) {
+  const router = useRouter();
   const productImage = getProductImage(product, product.category);
   const price = Number(product.price);
   const hasFixedPrice = Number.isFinite(price) && price > 0;
@@ -321,7 +323,16 @@ const ProductCard = memo(function ProductCard({ product, quantity, canAdd, onAdd
   const activePromos = getProductPromotions(product, promotions);
 
   return (
-    <article className="store-product-card" data-product-id={detailId}>
+    <article
+      className="store-product-card"
+      data-product-id={detailId}
+      onClick={(event) => {
+        // Links and purchase controls keep their own behavior. Clicking any
+        // other part of a carousel card reliably opens its product detail.
+        if (event.defaultPrevented || event.target.closest('a, button, input, select, textarea, label')) return;
+        router.push(detailHref);
+      }}
+    >
       {(product.offer?.display_badge || discount > 0) && (
         <span className="store-discount-badge">{product.offer?.display_badge || `${discount}% OFF`}</span>
       )}
@@ -474,12 +485,9 @@ const ProductCarousel = memo(function ProductCarousel({
 }) {
   const sectionRef = useRef(null);
   const railRef = useRef(null);
-  const hoverRef = useRef(false);
   const interactingRef = useRef(false);
   const resumeTimerRef = useRef(null);
   const scrollTimerRef = useRef(null);
-  const hoverInitialTimeoutRef = useRef(null);
-  const dragRef = useRef({ active: false, startX: 0, startScroll: 0 });
   const [canScroll, setCanScroll] = useState(false);
 
   useEffect(() => {
@@ -524,7 +532,7 @@ const ProductCarousel = memo(function ProductCarousel({
   const scrollNextProduct = useCallback(() => {
     const rail = railRef.current;
     if (!rail || !products.length) return;
-    if (interactingRef.current || dragRef.current.active) return;
+    if (interactingRef.current) return;
 
     const maxScroll = rail.scrollWidth - rail.clientWidth;
     if (maxScroll <= 5) return;
@@ -537,59 +545,37 @@ const ProductCarousel = memo(function ProductCarousel({
     }
   }, [getCardStep, products.length]);
 
-  const startHoverScroll = useCallback(() => {
-    const rail = railRef.current;
-    if (!rail || rail.scrollWidth <= rail.clientWidth + 10) return;
-
-    hoverRef.current = true;
-    if (hoverInitialTimeoutRef.current) {
-      clearTimeout(hoverInitialTimeoutRef.current);
-      hoverInitialTimeoutRef.current = null;
-    }
-    if (scrollTimerRef.current) {
-      clearInterval(scrollTimerRef.current);
-      scrollTimerRef.current = null;
-    }
-    let reducedMotion = false;
-    try { reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { /* ignore */ }
-    if (reducedMotion) return;
-
-    // Initial scroll after a brief delay when mouse enters
-    hoverInitialTimeoutRef.current = window.setTimeout(() => {
-      if (!hoverRef.current) return;
-      scrollNextProduct();
-      // Then advance one product periodically every 2.2 seconds while hovering
-      scrollTimerRef.current = window.setInterval(() => {
-        if (!hoverRef.current) {
-          if (scrollTimerRef.current) {
-            clearInterval(scrollTimerRef.current);
-            scrollTimerRef.current = null;
-          }
-          return;
-        }
-        scrollNextProduct();
-      }, 2200);
-    }, 600);
-  }, [scrollNextProduct]);
-
-  const stopHoverScroll = useCallback(() => {
-    hoverRef.current = false;
-    if (hoverInitialTimeoutRef.current) {
-      clearTimeout(hoverInitialTimeoutRef.current);
-      hoverInitialTimeoutRef.current = null;
-    }
+  const stopAutoScroll = useCallback(() => {
     if (scrollTimerRef.current) {
       clearInterval(scrollTimerRef.current);
       scrollTimerRef.current = null;
     }
   }, []);
 
+  const startAutoScroll = useCallback(() => {
+    const rail = railRef.current;
+    if (!rail || rail.scrollWidth <= rail.clientWidth + 10 || scrollTimerRef.current) return;
+    let reducedMotion = false;
+    try { reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { /* ignore */ }
+    if (reducedMotion) return;
+
+    // Start as soon as the shop opens, then keep moving one complete card at a time.
+    scrollTimerRef.current = window.setInterval(() => {
+      scrollNextProduct();
+    }, 2400);
+  }, [scrollNextProduct]);
+
+  useEffect(() => {
+    const startTimer = window.setTimeout(startAutoScroll, 900);
+    return () => window.clearTimeout(startTimer);
+  }, [startAutoScroll]);
+
   useEffect(() => {
     return () => {
-      stopHoverScroll();
+      stopAutoScroll();
       clearResumeTimer();
     };
-  }, [stopHoverScroll, clearResumeTimer]);
+  }, [stopAutoScroll, clearResumeTimer]);
 
   const scrollByCard = useCallback((direction) => {
     const rail = railRef.current;
@@ -615,32 +601,11 @@ const ProductCarousel = memo(function ProductCarousel({
     }
   }, [getCardStep, pauseAfterInteraction]);
 
-  const handlePointerDown = useCallback((event) => {
-    const rail = railRef.current;
-    if (!rail || event.pointerType === 'touch') return;
-    dragRef.current = { active: true, startX: event.clientX, startScroll: rail.scrollLeft };
-    rail.setPointerCapture?.(event.pointerId);
-    pauseAfterInteraction(2200);
-  }, [pauseAfterInteraction]);
-
-  const handlePointerMove = useCallback((event) => {
-    const rail = railRef.current;
-    if (!rail || !dragRef.current.active) return;
-    rail.scrollLeft = dragRef.current.startScroll - (event.clientX - dragRef.current.startX);
-  }, []);
-
-  const endDrag = useCallback((event) => {
-    dragRef.current.active = false;
-    railRef.current?.releasePointerCapture?.(event.pointerId);
-  }, []);
-
   if (!products.length) return null;
   return (
     <div
       ref={sectionRef}
       className="store-product-carousel"
-      onMouseEnter={startHoverScroll}
-      onMouseLeave={stopHoverScroll}
     >
       {canScroll && (
         <button type="button" className="store-carousel-arrow store-carousel-arrow-left" aria-label="Scroll products left" onClick={() => scrollByCard(-1)}>
@@ -651,14 +616,15 @@ const ProductCarousel = memo(function ProductCarousel({
         ref={railRef}
         className="store-product-carousel-viewport"
         onWheel={() => pauseAfterInteraction()}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
       >
         <div className="store-product-carousel-track">
           {products.map((product, index) => (
-            <div className="store-product-carousel-item" key={`${sectionId}-${product.id}-${index}`}>
+            <div
+              className="store-product-carousel-item"
+              key={`${sectionId}-${product.id}-${index}`}
+              onMouseEnter={stopAutoScroll}
+              onMouseLeave={startAutoScroll}
+            >
               <ProductCard
                 product={product}
                 quantity={cart.find((item) => item.product.id === product.id)?.quantity || 0}
