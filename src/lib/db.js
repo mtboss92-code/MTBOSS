@@ -14,23 +14,28 @@ dotenv.config({ path: path.resolve(process.cwd(), 'src', '.env'), override: fals
 const databaseUrl = process.env.DATABASE_URL?.trim();
 const databasePassword = process.env.DB_PASSWORD;
 let databaseUrlHasPassword = false;
+let invalidDatabaseUrlError = null;
 
 if (databaseUrl) {
   try {
     databaseUrlHasPassword = new URL(databaseUrl).password.length > 0;
   } catch {
-    throw new Error('Database is not configured: DATABASE_URL must be a valid PostgreSQL connection URL.');
+    invalidDatabaseUrlError = new Error(
+      'Database is not configured: DATABASE_URL must be a valid PostgreSQL connection URL.'
+    );
   }
 }
 
-if (
-  (!databaseUrl || !databaseUrlHasPassword)
-  && (typeof databasePassword !== 'string' || !databasePassword.trim())
-) {
-  throw new Error(
-    'Database is not configured: set a password in DATABASE_URL or set DB_PASSWORD alongside the DB connection settings.'
+const databaseConfigurationError =
+  invalidDatabaseUrlError ||
+  (
+    (!databaseUrl || !databaseUrlHasPassword)
+    && (typeof databasePassword !== 'string' || !databasePassword.trim())
+      ? new Error(
+          'Database is not configured: set a password in DATABASE_URL or set DB_PASSWORD alongside the DB connection settings.'
+        )
+      : null
   );
-}
 
 const cleanDatabaseUrl = normalizePostgresUrl(databaseUrl);
 const isNeonHost = /neon\.tech/i.test(cleanDatabaseUrl || process.env.DB_HOST || '');
@@ -95,10 +100,20 @@ function createPoolSingleton() {
     // Idle client errors must not crash the Next.js process.
     console.error('[db] idle client error:', err?.code || '', err?.message || err);
   });
+  const nativeQuery = next.query.bind(next);
+  const nativeConnect = next.connect.bind(next);
+  next.query = (...args) => {
+    if (databaseConfigurationError) return Promise.reject(databaseConfigurationError);
+    return nativeQuery(...args);
+  };
+  next.connect = (...args) => {
+    if (databaseConfigurationError) return Promise.reject(databaseConfigurationError);
+    return nativeConnect(...args);
+  };
   return {
     pool: next,
-    nativeQuery: next.query.bind(next),
-    nativeConnect: next.connect.bind(next),
+    nativeQuery,
+    nativeConnect,
     config: {
       max: poolMax,
       connectionTimeoutMillis,
@@ -175,6 +190,7 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * Callers MUST release the client in finally.
  */
 export async function connectWithRetry(options = {}) {
+  if (databaseConfigurationError) throw databaseConfigurationError;
   const maxAttempts = Math.max(1, Number(options.maxAttempts) || (isProductionBuild ? 1 : 3));
   const started = Date.now();
   let lastError;
@@ -212,6 +228,7 @@ export async function connectWithRetry(options = {}) {
  * Automatic query retry is unsafe: PostgreSQL may have already applied writes.
  */
 export function queryRaw(text, values) {
+  if (databaseConfigurationError) return Promise.reject(databaseConfigurationError);
   const started = Date.now();
   logPool('query:start');
   const pending = nativeQuery(text, values);

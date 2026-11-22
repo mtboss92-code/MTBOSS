@@ -4,6 +4,8 @@ import { requireAdmin, ensureAgentSchema } from '@/lib/agent-auth';
 import { ensureAgentTasksSchema, calculateDueDate, TASK_PRIORITIES, TASK_STATUSES } from '@/lib/agent-tasks';
 import { ensureAgentNotificationsSchema } from '@/lib/agent-notifications';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req) {
   try {
     await ensureAgentSchema();
