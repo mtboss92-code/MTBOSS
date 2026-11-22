@@ -1,6 +1,6 @@
 // app/(moradabad_keywords)/home-renovation-contractor-moradabad/page.jsx
 import Banner from './Banner';
-import Content from './Content';
+import Content from './content';
 import QuickServices from '../../components/QuickServices';
 import CalculatorCTA from '../../components/CalculatorCTA';
 import Services from '../../components/Services';
