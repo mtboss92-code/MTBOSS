@@ -1616,12 +1616,36 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
               <div className="shop-tab-pane shop-admin-wide" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
                 <label>
                   <span>Product ID (Unique Permanent Identifier)</span>
-                  <input
-                    readOnly
-                    disabled
-                    value={form.product_code || (editingId ? `MTB-PROD-${String(editingId).padStart(6, '0')}` : 'Auto-generated on creation (e.g. MTB-PROD-000101)')}
-                    style={{ background: 'var(--shop-admin-subtle)', fontWeight: 700, cursor: 'not-allowed' }}
-                  />
+                  <div className="shop-inline-input-action">
+                    <input
+                      readOnly
+                      disabled
+                      value={form.product_code || (editingId ? `MTB-PROD-${String(editingId).padStart(6, '0')}` : 'Auto-generated on creation (e.g. MTB-PROD-000101)')}
+                      style={{
+                        background: 'var(--shop-admin-subtle)',
+                        fontWeight: 700,
+                        cursor: 'not-allowed',
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+                      }}
+                    />
+                    {(form.product_code || editingId) && (
+                      <button
+                        type="button"
+                        className="shop-action-btn-sm"
+                        onClick={() => {
+                          const code = form.product_code || `MTB-PROD-${String(editingId).padStart(6, '0')}`;
+                          if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                            navigator.clipboard.writeText(code);
+                            setNotice(`Copied Product ID: ${code}`);
+                            setTimeout(() => setNotice(''), 2500);
+                          }
+                        }}
+                        title="Copy Product ID"
+                      >
+                        <Copy size={12} style={{ display: 'inline', marginRight: 2 }} /> Copy
+                      </button>
+                    )}
+                  </div>
                   <small style={{ color: 'var(--shop-admin-muted)' }}>Unique system generated ID. Never reused upon deletion.</small>
                 </label>
 
@@ -2643,8 +2667,8 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                               <span>{name}</span>
                             </div>
                           </td>
-                          <td><code style={{ fontSize: 11 }}>{pId}</code></td>
-                          <td><code style={{ fontSize: 11 }}>{sku}</code></td>
+                          <td><code style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{pId}</code></td>
+                          <td><code style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{sku}</code></td>
                           <td>{cat}</td>
                           <td>{subcat}</td>
                           <td>{brand}</td>
@@ -2722,17 +2746,17 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
             <p>No products yet. Click &quot;Add Product&quot; above to create your first catalog entry.</p>
           ) : (
             <div className="shop-admin-table-wrap">
-              <table>
+              <table className="shop-catalog-table">
                 <thead>
                   <tr>
-                    <th>Product</th>
-                    <th>Category</th>
-                    <th>Subcategory</th>
-                    <th>Price / MRP</th>
-                    <th>Inventory / Stock</th>
-                    {!isSeller && <th>Source</th>}
-                    <th>Status</th>
-                    <th>Actions</th>
+                    <th style={{ minWidth: 260 }}>Product</th>
+                    <th style={{ minWidth: 120 }}>Category</th>
+                    <th style={{ minWidth: 110 }}>Subcategory</th>
+                    <th style={{ minWidth: 110 }}>Price / MRP</th>
+                    <th style={{ minWidth: 130 }}>Inventory / Stock</th>
+                    {!isSeller && <th style={{ minWidth: 85 }}>Source</th>}
+                    <th style={{ minWidth: 110 }}>Status</th>
+                    <th style={{ minWidth: 290 }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2746,29 +2770,58 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                     const stockStatus = stockQty <= 0
                       ? 'out_of_stock'
                       : (stockQty <= Number(product.low_stock_threshold ?? 5) ? 'low_stock' : 'in_stock');
+                    const productCode = product.product_code || `MTB-PROD-${String(product.id).padStart(6, '0')}`;
 
                     return (
                       <tr key={product.id}>
-                        <td>
+                        <td className="shop-product-cell" style={{ minWidth: 260 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                             <div
-                              style={{ width: 44, height: 44, minWidth: 44, borderRadius: 8, overflow: 'hidden', background: 'rgba(255, 255, 255, 0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--shop-admin-border)', flexShrink: 0 }}
+                              style={{ width: 44, height: 44, minWidth: 44, borderRadius: 8, overflow: 'hidden', background: 'rgba(255, 255, 255, 0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--shop-admin-border)', flexShrink: 0, cursor: 'pointer' }}
                               onClick={() => { const img = product.image_url || (Array.isArray(product.images) && product.images[0]); if (img) window.open(img, '_blank'); }}
+                              title="Click to view full image"
                             >
                               {(() => {
                                 const img = product.image_url || (Array.isArray(product.images) && product.images[0]);
-                                return img ? <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : null;
+                                return img ? (
+                                  <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                                ) : (
+                                  <span style={{ fontSize: 18, opacity: 0.6 }}>📦</span>
+                                );
                               })()}
-                              <span style={{ fontSize: 18, opacity: 0.6 }}>📦</span>
                             </div>
-                            <div style={{ minWidth: 0 }}>
-                              <strong>{product.name}</strong>
-                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
-                                <span style={{ fontSize: 11, background: 'var(--shop-admin-subtle)', padding: '1px 6px', borderRadius: 4, fontFamily: 'monospace' }}>
-                                  {product.product_code || `MTB-PROD-${String(product.id).padStart(6, '0')}`}
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <strong style={{ fontSize: 13, lineHeight: 1.35, wordBreak: 'break-word', color: 'var(--shop-admin-text)' }}>
+                                {product.name}
+                              </strong>
+                              <div className="shop-product-badges">
+                                <span
+                                  className="shop-product-code-badge"
+                                  title={`Product ID: ${productCode} (Click to copy)`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                                      navigator.clipboard.writeText(productCode);
+                                      setNotice(`Copied Product ID: ${productCode}`);
+                                      setTimeout(() => setNotice(''), 2500);
+                                    }
+                                  }}
+                                >
+                                  {productCode}
                                 </span>
                                 {product.sku && (
-                                  <span style={{ fontSize: 11, background: 'var(--shop-admin-subtle)', padding: '1px 6px', borderRadius: 4, fontFamily: 'monospace', color: 'var(--shop-admin-muted)' }}>
+                                  <span
+                                    className="shop-product-sku-badge"
+                                    title={`SKU: ${product.sku} (Click to copy)`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                                        navigator.clipboard.writeText(product.sku);
+                                        setNotice(`Copied SKU: ${product.sku}`);
+                                        setTimeout(() => setNotice(''), 2500);
+                                      }
+                                    }}
+                                  >
                                     {product.sku}
                                   </span>
                                 )}

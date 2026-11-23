@@ -467,30 +467,6 @@ export default function ProductDetailPage({ params }) {
                 {product.name}
               </h1>
 
-              {/* Product Identifiers Bar (Product ID, SKU, Brand, Barcode) */}
-              <div className="flex flex-wrap items-center gap-2 text-xs pt-2">
-                {product.product_code && (
-                  <span className="inline-flex items-center gap-1 font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-semibold border border-slate-200 dark:border-zinc-700">
-                    ID: {product.product_code}
-                  </span>
-                )}
-                {(activeVariant?.sku || product.sku) && (
-                  <span className="inline-flex items-center gap-1 font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700">
-                    SKU: {activeVariant?.sku || product.sku}
-                  </span>
-                )}
-                {product.brand && (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-medium">
-                    Brand: {product.brand}
-                  </span>
-                )}
-                {(activeVariant?.barcode || product.barcode) && (
-                  <span className="inline-flex items-center gap-1 font-mono text-[11px] px-2 py-0.5 rounded bg-zinc-50 dark:bg-zinc-800 text-zinc-500">
-                    Barcode: {activeVariant?.barcode || product.barcode}
-                  </span>
-                )}
-              </div>
-
               {/* Stock Status Pill */}
               <div className="pt-2">
                 {!isAvailable ? (
