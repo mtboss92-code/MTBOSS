@@ -31,13 +31,15 @@ const nextConfig = {
   experimental: {
     // On Windows local builds, keep Webpack in-process to avoid spawn failures.
     // On Vercel, run Webpack in a worker so peak RSS stays under the 8GB container limit.
-    webpackBuildWorker: isVercel,
-    workerThreads: true,
+    // webpackBuildWorker: isVercel,
+    webpackBuildWorker: false,
+    workerThreads: false,
     // Cap parallelism so compile + typecheck workers do not exhaust RAM.
     cpus: 1,
     webpackMemoryOptimizations: true,
     serverSourceMaps: false,
   },
+  serverExternalPackages: ['pdfkit', 'pg', 'twilio', 'nodemailer', 'bcryptjs', 'jsonwebtoken'],
   // Keep development/HMR artifacts separate from production builds. Running
   // `next build` while `next dev` is open must not replace the live router
   // runtime, otherwise Next can dispatch Link prefetches against an old queue.
