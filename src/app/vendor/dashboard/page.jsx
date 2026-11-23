@@ -3,14 +3,14 @@
 // service provider DASHBOARD - Notifications, Active Booking, Messages
 // ════════════════════════════════════════════════════════════════════════════════
 'use client';
-import RequiredAsterisk from '../../components/RequiredAsterisk';
+import RequiredAsterisk from '../../components/shared/RequiredAsterisk';
 
 import { Suspense, useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { redirectToPayU } from '@/lib/payu-client';
-import PanelLayout from '@/app/components/PanelLayout';
+import PanelLayout from '@/app/components/layout/PanelLayout';
 import {
   LayoutDashboard,
   ShoppingCart,

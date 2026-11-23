@@ -1,0 +1,615 @@
+// ════════════════════════════════════════════════════════════════════════════════
+// FILE: app/dashboard/components/FreeTimeSlotsManager.jsx
+// ADMIN CONTROLS FOR FREE TIME SLOTS - Create, edit, delete, and manage availability
+// ════════════════════════════════════════════════════════════════════════════════
+
+'use client';
+import RequiredAsterisk from '../shared/RequiredAsterisk';
+
+import { useState, useEffect } from 'react';
+import PaidTimeSlotsManager from './PaidTimeSlotsManager';
+import QuickServiceIcon from '../home/QuickServiceIcon';
+import { Eye, EyeOff, Pencil, Trash2, ActionIconButton } from '@/app/components/ui/icons';
+
+export default function FreeTimeSlotsManager({ isDarkMode, tokenKey = 'token', defaultCity = '', compact = false, permissions = null }) {
+  const lockedCity = tokenKey === 'franchise-token' && Boolean(defaultCity);
+  const canSlot = (key) => !permissions || permissions['slots.manage'] || permissions[key];
+  const [slots, setSlots] = useState([]);
+  const [services, setServices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [filterCity, setFilterCity] = useState('all');
+  const [cityOptions, setCityOptions] = useState(defaultCity ? [defaultCity] : []);
+  const [editingSlot, setEditingSlot] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState('');
+  const [removeImage, setRemoveImage] = useState(false);
+  const [imageError, setImageError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const [formData, setFormData] = useState({
+    quick_service_id: '',
+    quick_service_ids: [],
+    slot_date: '',
+    slot_end_date: '',
+    slot_start: '08:00',
+    slot_end: '10:00',
+    city: defaultCity || '',
+    max_bookings: 1,
+  });
+  const selectedServiceIds = editingSlot
+    ? [String(formData.quick_service_id)]
+    : formData.quick_service_ids.map(String);
+  const selectedServices = services.filter((service) => selectedServiceIds.includes(String(service.id)));
+  const formCityOptions = selectedServices.length === 0 ? [] : selectedServices.reduce((common, service, index) => {
+    const cities = service.cities || [];
+    return index === 0 ? cities : common.filter((city) => cities.some((item) => item.toLowerCase() === city.toLowerCase()));
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [filterCity]);
+
+  useEffect(() => {
+    if (defaultCity) {
+      setFormData((current) => ({ ...current, city: defaultCity }));
+      setCityOptions((current) => [...new Set([...current, defaultCity])].sort((a, b) => a.localeCompare(b)));
+    }
+  }, [defaultCity]);
+
+  async function fetchData() {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem(tokenKey) || localStorage.getItem('admin-token') || localStorage.getItem('token');
+      
+      const requestOptions = { headers: { 'Authorization': `Bearer ${token}` } };
+      const [slotsRes, servicesRes] = await Promise.all([
+        fetch(`/api/free-slots${filterCity !== 'all' ? `?city=${encodeURIComponent(filterCity)}` : ''}`, requestOptions),
+        fetch('/api/quick-services', requestOptions),
+      ]);
+      const [slotsData, servicesData] = await Promise.all([
+        slotsRes.json(), servicesRes.json(),
+      ]);
+      if (slotsData.success) {
+        const nextSlots = slotsData.data || [];
+        setSlots(nextSlots);
+        setCityOptions((current) => [...new Set([
+          ...current,
+          ...(defaultCity ? [defaultCity] : []),
+          ...nextSlots.map((slot) => slot.city).filter(Boolean),
+        ])].sort((a, b) => a.localeCompare(b)));
+      }
+
+      if (servicesData.success) {
+        setServices(servicesData.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleCreateSlot() {
+    if (selectedServiceIds.length === 0 || !formData.slot_date || !formData.city) {
+      alert('Please fill all required fields');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const token = localStorage.getItem(tokenKey) || localStorage.getItem('admin-token') || localStorage.getItem('token');
+      const payload = new FormData();
+      Object.entries(formData).forEach(([key, value]) => {
+        payload.append(key, Array.isArray(value) ? JSON.stringify(value) : String(value));
+      });
+      if (imageFile) payload.append('image', imageFile);
+      if (removeImage) payload.append('remove_image', 'true');
+      const res = await fetch(editingSlot ? `/api/free-slots/${editingSlot.id}` : '/api/free-slots', {
+        method: editingSlot ? 'PATCH' : 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: payload
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        alert(editingSlot ? 'Free slot updated successfully!' : `${data.count || 0} free slot(s) created successfully!`);
+        setShowForm(false);
+        setEditingSlot(null);
+        setImageFile(null);
+        setImagePreview('');
+        setRemoveImage(false);
+        setImageError('');
+        setFormData({
+          quick_service_id: '',
+          quick_service_ids: [],
+          slot_date: '',
+          slot_end_date: '',
+          slot_start: '08:00',
+          slot_end: '10:00',
+          city: defaultCity || '',
+          max_bookings: 1,
+        });
+        fetchData();
+      } else {
+        alert('Error creating slot: ' + data.error);
+      }
+    } catch (error) {
+      console.error('Error creating slot:', error);
+      alert('Error creating slot');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleToggleAvailability(slotId, currentStatus) {
+    try {
+      const token = localStorage.getItem(tokenKey) || localStorage.getItem('admin-token') || localStorage.getItem('token');
+      const res = await fetch(`/api/free-slots/${slotId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          is_available: !currentStatus
+        })
+      });
+
+      if (res.ok) {
+        fetchData();
+      }
+    } catch (error) {
+      console.error('Error updating slot:', error);
+    }
+  }
+
+  async function handleDeleteSlot(slotId) {
+    if (!confirm('Are you sure you want to delete this slot?')) return;
+
+    try {
+      const token = localStorage.getItem(tokenKey) || localStorage.getItem('admin-token') || localStorage.getItem('token');
+      const res = await fetch(`/api/free-slots/${slotId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        fetchData();
+        if (data.closedInstead) alert(data.message);
+      } else {
+        alert(data.error || 'Error deleting slot');
+      }
+    } catch (error) {
+      console.error('Error deleting slot:', error);
+    }
+  }
+
+  function handleEditSlot(slot) {
+    setEditingSlot(slot);
+    setFormData({
+      quick_service_id: String(slot.quick_service_id || ''),
+      quick_service_ids: [String(slot.quick_service_id || '')],
+      slot_date: slot.slot_date ? String(slot.slot_date).split('T')[0] : '',
+      slot_end_date: '',
+      slot_start: String(slot.slot_start || '08:00').slice(0, 5),
+      slot_end: String(slot.slot_end || '10:00').slice(0, 5),
+      city: slot.city || defaultCity || '',
+      max_bookings: slot.max_bookings || 1,
+    });
+    setImageFile(null);
+    setImagePreview(slot.image_url || '');
+    setRemoveImage(false);
+    setImageError('');
+    setShowForm(true);
+  }
+
+  function resetForm() {
+    setEditingSlot(null);
+    setShowForm(false);
+    setImageFile(null);
+    setImagePreview('');
+    setRemoveImage(false);
+    setImageError('');
+    setFormData({
+      quick_service_id: '',
+      quick_service_ids: [],
+      slot_date: '',
+      slot_end_date: '',
+      slot_start: '08:00',
+      slot_end: '10:00',
+      city: defaultCity || '',
+      max_bookings: 1,
+    });
+  }
+
+  const getTodayStr = () => new Date().toISOString().split('T')[0];
+  return (
+    <>
+      <style>{`
+        .section-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 1rem;
+        }
+        .btn-primary {
+          padding: 0.5rem 1rem;
+          background: var(--accent);
+          color: #fff;
+          border: none;
+          border-radius: 6px;
+          font-size: 0.8125rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: opacity .15s;
+        }
+        .btn-primary:hover { opacity: .85; }
+        
+        .form-container {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: ${compact ? '1rem' : '1.25rem'};
+          margin-bottom: 1rem;
+        }
+         .form-grid {
+           display: grid;
+           grid-template-columns: repeat(2, 1fr);
+          gap: 1rem;
+          margin-bottom: 1rem;
+         }
+         @media (max-width: 760px) {
+           .form-grid { grid-template-columns: 1fr; }
+           .section-header { align-items: flex-start; gap: .75rem; flex-direction: column; }
+         }
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: 0.375rem;
+        }
+        .form-label {
+          font-size: 0.6875rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: .06em;
+          color: var(--muted);
+        }
+        .form-input, .form-select {
+          padding: 0.5rem 0.75rem;
+          border: 1px solid var(--border);
+          border-radius: 6px;
+          background: var(--surface);
+          color: var(--text);
+          font-size: 0.8125rem;
+          outline: none;
+          transition: border-color .15s;
+        }
+        .form-input:focus, .form-select:focus {
+          border-color: var(--accent);
+        }
+        
+        .slots-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 0.8125rem;
+        }
+        .slots-table th {
+          background: var(--bg);
+          padding: 0.6rem 0.875rem;
+          text-align: left;
+          font-size: 0.6875rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: .06em;
+          color: var(--muted);
+          border-bottom: 1px solid var(--border);
+        }
+        .slots-table td {
+          padding: 0.6rem 0.875rem;
+          border-bottom: 1px solid var(--border);
+        }
+        
+        .status-badge {
+          display: inline-block;
+          padding: 0.2rem 0.55rem;
+          border-radius: 999px;
+          font-size: 0.65rem;
+          font-weight: 700;
+          text-transform: uppercase;
+        }
+        .status-available { background: #dcfce7; color: #166534; }
+        .status-booked { background: #fee2e2; color: #991b1b; }
+        .status-expired { background: var(--brand-blue-soft); color: #92400e; }
+        
+        .action-buttons {
+          display: flex;
+          gap: 0.5rem;
+        }
+        .btn-small {
+          padding: 0.25rem 0.5rem;
+          border: none;
+          border-radius: 4px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: opacity .15s;
+        }
+        .btn-toggle {
+          background: #dbeafe;
+          color: #1e40af;
+        }
+        .btn-toggle:hover { opacity: .8; }
+        .btn-delete {
+          background: #fee2e2;
+          color: #991b1b;
+        }
+        .btn-delete:hover { opacity: .8; }
+      `}</style>
+
+      <div>
+        <div className="section-header">
+          <h3 style={{ fontSize: '0.875rem', fontWeight: '700' }}>Free Time Slots Management</h3>
+          {canSlot('slots.free.create') && <button onClick={() => showForm ? resetForm() : setShowForm(true)} className="btn-primary">
+            {showForm ? '✕ Cancel' : '+ Create Slot'}
+          </button>}
+        </div>
+
+        {showForm && (
+          <div className="form-container">
+            <h4 style={{ fontSize: '0.8125rem', fontWeight: '700', marginBottom: '1rem' }}>
+              {editingSlot ? 'Edit Free Slot' : 'Create New Free Slot'}
+            </h4>
+            
+            <div className="form-grid">
+              <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                <label className="form-label">Services * ({selectedServiceIds.length} selected)</label>
+                {editingSlot ? (
+                  <div className="form-input">{editingSlot.service_label || `Service #${editingSlot.quick_service_id}`}</div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.5rem', maxHeight: '220px', overflowY: 'auto', padding: '0.75rem', border: '1px solid var(--border)', borderRadius: '6px' }}>
+                    {services.map((service) => {
+                      const checked = selectedServiceIds.includes(String(service.id));
+                      return (
+                        <label key={service.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.8rem' }}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => setFormData((current) => ({
+                              ...current,
+                              quick_service_ids: checked
+                                ? current.quick_service_ids.filter((id) => String(id) !== String(service.id))
+                                : [...current.quick_service_ids, String(service.id)],
+                              city: lockedCity ? defaultCity : '',
+                            }))}
+                          />
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', minWidth: 0 }}>
+                            <QuickServiceIcon value={service.icon} label={service.label} className="inline-flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded" imageClassName="h-full w-full object-contain" />
+                            <span>{service.label}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">City <RequiredAsterisk /></label>
+                <select
+                  className="form-select"
+                  value={formData.city}
+                  onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                  disabled={selectedServiceIds.length === 0 || lockedCity}
+                >
+                  <option value="">Select city</option>
+                  {formCityOptions.map((city) => <option key={city} value={city}>{city}</option>)}
+                </select>
+                <small style={{ color: 'var(--muted)' }}>
+                  {lockedCity ? 'Restricted to your approved franchise city.' : 'Configure cities in City Management and Quick Services.'}
+                </small>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Slot Date <RequiredAsterisk /></label>
+                <input
+                  type="date"
+                  className="form-input"
+                  min={getTodayStr()}
+                  value={formData.slot_date}
+                  onChange={(e) => setFormData({ ...formData, slot_date: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Max Bookings</label>
+                <input
+                  type="number"
+                  className="form-input"
+                  min="1"
+                  value={formData.max_bookings}
+                  onChange={(e) => setFormData({ ...formData, max_bookings: parseInt(e.target.value) || 1 })}
+                />
+              </div>
+
+              {!editingSlot && (
+                <div className="form-group">
+                  <label className="form-label">Repeat Daily Until</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    min={formData.slot_date || getTodayStr()}
+                    value={formData.slot_end_date}
+                    onChange={(e) => setFormData({ ...formData, slot_end_date: e.target.value })}
+                  />
+                  <small style={{ color: 'var(--muted)' }}>Optional. Leave blank to create only one day.</small>
+                </div>
+              )}
+
+              <div className="form-group">
+                <label className="form-label">Free Slot <RequiredAsterisk /></label>
+                <select
+                  className="form-select"
+                  value={`${formData.slot_start}-${formData.slot_end}`}
+                  onChange={(e) => {
+                    const [slot_start, slot_end] = e.target.value.split('-');
+                    setFormData({ ...formData, slot_start, slot_end });
+                  }}
+                >
+                  <option value="08:00-10:00">Morning — 08:00 AM to 10:00 AM</option>
+                  <option value="16:00-18:00">Evening — 04:00 PM to 06:00 PM</option>
+                </select>
+                <small style={{ color: 'var(--muted)' }}>Each service exposes only one morning and one evening free slot.</small>
+              </div>
+
+              <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                <label className="form-label">Slot image (optional)</label>
+                <input
+                  className="form-input"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    setImageError('');
+                    if (!file) return;
+                    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+                      setImageError('Choose a JPG, PNG, or WebP image.');
+                      event.target.value = '';
+                      return;
+                    }
+                    if (file.size > 5 * 1024 * 1024) {
+                      setImageError('Image must be smaller than 5 MB.');
+                      event.target.value = '';
+                      return;
+                    }
+                    setImageFile(file);
+                    setImagePreview(URL.createObjectURL(file));
+                    setRemoveImage(false);
+                  }}
+                />
+                {imagePreview && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
+                    <img src={imagePreview} alt="Free slot preview" style={{ width: 84, height: 64, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
+                    <button type="button" className="btn-small btn-delete" onClick={() => {
+                      setImageFile(null);
+                      setImagePreview('');
+                      setRemoveImage(Boolean(editingSlot?.image_url));
+                    }}>Remove image</button>
+                  </div>
+                )}
+                <small style={{ color: imageError ? '#dc2626' : 'var(--muted)' }}>
+                  {imageError || 'JPG, PNG, or WebP, up to 5 MB. The image appears with this slot in the mobile app.'}
+                </small>
+              </div>
+            </div>
+
+            <button onClick={handleCreateSlot} disabled={saving || Boolean(imageError)} className="btn-primary" style={{ width: '100%', opacity: saving || imageError ? 0.65 : 1 }}>
+              {saving ? 'Saving…' : editingSlot ? 'Save Slot' : 'Create Slot'}
+            </button>
+          </div>
+        )}
+
+        <div className="form-container">
+          <div style={{ marginBottom: '1rem' }}>
+            <label className="form-label" style={{ marginRight: '1rem' }}>Filter by City:</label>
+            <select
+              className="form-select"
+              value={filterCity}
+              onChange={(e) => setFilterCity(e.target.value)}
+              disabled={lockedCity}
+              style={{ width: '200px' }}
+            >
+              <option value="all">{lockedCity ? defaultCity : 'All Cities'}</option>
+              {cityOptions.map((city) => (
+                <option key={city} value={city}>{city}</option>
+              ))}
+            </select>
+          </div>
+
+          {loading ? (
+            <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '2rem' }}>Loading slots...</p>
+          ) : slots.length === 0 ? (
+            <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '2rem' }}>No free slots created yet.</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="slots-table">
+                <thead>
+                  <tr>
+                    <th>Service</th>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>City</th>
+                    <th>Max Bookings</th>
+                    <th>Current Bookings</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {slots.map((slot) => (
+                    <tr key={slot.id}>
+                      <td style={{ fontWeight: '600' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <QuickServiceIcon value={slot.image_url || slot.service_icon} label={slot.service_label} className="inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded" imageClassName="h-full w-full object-contain" />
+                          <span>{slot.service_label || `Service #${slot.quick_service_id}`}</span>
+                        </span>
+                      </td>
+                      <td>{slot.slot_date ? String(slot.slot_date).split('T')[0] : '—'}</td>
+                      <td>{slot.slot_start} - {slot.slot_end}</td>
+                      <td>{slot.city}</td>
+                      <td>{slot.max_bookings}</td>
+                      <td>{slot.current_bookings || 0}</td>
+                      <td>
+                        {(() => {
+                          const slotDay = slot.slot_date ? new Date(String(slot.slot_date).split('T')[0]) : null;
+                          const today = new Date(); today.setHours(0,0,0,0);
+                          const isExpired = slotDay && slotDay < today;
+                          if (isExpired) {
+                            return <span className="status-badge status-expired">⏰ Expired — not shown to users</span>;
+                          }
+                          return (
+                            <span className={`status-badge ${slot.is_available ? 'status-available' : 'status-booked'}`}>
+                              {slot.is_available ? 'Open' : 'Closed'}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      <td>
+                        <div className="action-buttons" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          {canSlot('slots.free.edit') && (
+                            <ActionIconButton
+                              icon={slot.is_available ? EyeOff : Eye}
+                              label={slot.is_available ? 'Close slot' : 'Open slot'}
+                              onClick={() => handleToggleAvailability(slot.id, slot.is_available)}
+                            />
+                          )}
+                          {canSlot('slots.free.edit') && (
+                            <ActionIconButton
+                              icon={Pencil}
+                              label="Edit slot"
+                              onClick={() => handleEditSlot(slot)}
+                            />
+                          )}
+                          {canSlot('slots.free.delete') && (
+                            <ActionIconButton
+                              icon={Trash2}
+                              variant="danger"
+                              label="Delete slot"
+                              onClick={() => handleDeleteSlot(slot.id)}
+                            />
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        <PaidTimeSlotsManager tokenKey={tokenKey} defaultCity={defaultCity} compact={compact} permissions={permissions} />
+      </div>
+    </>
+  );
+}

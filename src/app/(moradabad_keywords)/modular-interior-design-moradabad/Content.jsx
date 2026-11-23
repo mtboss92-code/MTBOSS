@@ -1,4 +1,4 @@
-import LandingEnquiry from "../../components/LandingEnquiry";
+import LandingEnquiry from "../../components/home/LandingEnquiry";
 const Content = () => {
   const modularBenefits = [
     "Faster installation: most components are prepared beforehand, so on-site work is shorter.",

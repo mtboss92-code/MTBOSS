@@ -1,5 +1,5 @@
 "use client";
-import RequiredAsterisk from '../components/RequiredAsterisk';
+import RequiredAsterisk from '../components/shared/RequiredAsterisk';
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -33,7 +33,7 @@ import { displayUnit, getProductImage, ShopImage } from "./Storefront";
 import { getCartStep } from "@/lib/cart-step";
 import { evaluateCartPromotions } from "@/lib/promotion-calculations";
 import { redirectToPayU } from "@/lib/payu-client";
-import CustomerMobileOtpAuth from "@/app/components/CustomerMobileOtpAuth";
+import CustomerMobileOtpAuth from "@/app/components/auth/CustomerMobileOtpAuth";
 import "./shop.css";
 
 function readCustomerLoggedIn() {

@@ -50,11 +50,11 @@ import {
   productMatchesCategoryAndSub,
   namesMatch,
 } from "./categoryNavTree";
-import GlobalSearch from "../components/GlobalSearch";
+import GlobalSearch from "../components/shared/GlobalSearch";
 
 // Below-the-fold / secondary panes — keep them out of the initial mobile parse.
-const QuickServices = lazy(() => import("../components/QuickServices"));
-const MaterialOrdersPanel = lazy(() => import("../components/MaterialOrdersPanel"));
+const QuickServices = lazy(() => import("../components/home/QuickServices"));
+const MaterialOrdersPanel = lazy(() => import("../components/shop/MaterialOrdersPanel"));
 
 function getCategoryIcon(name = "") {
   const val = name.toLowerCase();

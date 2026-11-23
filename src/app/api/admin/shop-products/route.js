@@ -248,6 +248,40 @@ async function validProduct(body, { allowUnassigned = false } = {}) {
   // zero-quantity product remain marked "in stock".
   const stockStatus = computeStockStatus(quantity, lowStockThreshold);
 
+  let productStatus = String(body.status || 'active').trim();
+  let isAvailable = body.is_available !== false;
+  if (body.approval_status) {
+    const appStatus = String(body.approval_status).toLowerCase().trim();
+    if (appStatus === 'approved') {
+      specifications.__approval__ = {
+        ...(specifications.__approval__ || {}),
+        status: 'approved',
+        approved_at: new Date().toISOString(),
+        approved_by: 'Admin',
+      };
+      productStatus = 'active';
+      isAvailable = true;
+    } else if (appStatus === 'rejected') {
+      specifications.__approval__ = {
+        ...(specifications.__approval__ || {}),
+        status: 'rejected',
+        rejected_at: new Date().toISOString(),
+        rejected_by: 'Admin',
+        reason: String(body.rejection_reason || '').trim().slice(0, 1000),
+      };
+      productStatus = 'rejected';
+      isAvailable = false;
+    } else if (appStatus === 'pending') {
+      specifications.__approval__ = {
+        ...(specifications.__approval__ || {}),
+        status: 'pending',
+        updated_at: new Date().toISOString(),
+      };
+      productStatus = 'pending_approval';
+      isAvailable = false;
+    }
+  }
+
   const productUrlSlug = String(body.product_url_slug || '')
     .trim()
     .toLowerCase()
@@ -295,11 +329,11 @@ async function validProduct(body, { allowUnassigned = false } = {}) {
       specifications,
       bulk_pricing: bulkPricing.map((tier) => ({ min_quantity: Number(tier.min_quantity), price: Number(tier.price) })).sort((a, b) => a.min_quantity - b.min_quantity),
       available_cities: [...new Set(availableCities.map((city) => String(city).trim()).filter(Boolean))],
-      is_available: body.is_available !== false,
+      is_available: isAvailable,
       quality_tier: qualityTier,
       has_variants: Boolean(body.has_variants) || variants.length > 0,
       variants,
-      status: String(body.status || 'active').trim(),
+      status: productStatus,
       is_archived: body.is_archived === true,
       faqs,
       returns_policy: returnsPolicy,
@@ -359,6 +393,7 @@ export async function GET(req) {
     const status = String(searchParams.get('status') || '').trim();
     const stockStatus = String(searchParams.get('stock_status') || '').trim();
     const tier = String(searchParams.get('tier') || searchParams.get('quality_tier') || '').trim();
+    const approvalStatus = String(searchParams.get('approval_status') || searchParams.get('approval') || '').trim().toLowerCase();
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '25', 10) || 25));
     const offset = (page - 1) * limit;
@@ -421,6 +456,31 @@ export async function GET(req) {
     } else if (tier && tier !== 'any' && tier !== 'all') {
       params.push(tier);
       where.push(`quality_tier = $${params.length}`);
+    }
+
+    if (approvalStatus && approvalStatus !== 'all') {
+      if (approvalStatus === 'pending') {
+        where.push(`(
+          specifications->'__approval__'->>'status' = 'pending'
+          OR status = 'pending_approval'
+          OR (vendor_id IS NOT NULL AND (specifications->'__approval__'->>'status' IS NULL OR specifications->'__approval__'->>'status' = 'pending'))
+        )`);
+      } else if (approvalStatus === 'rejected') {
+        where.push(`(
+          specifications->'__approval__'->>'status' = 'rejected'
+          OR status = 'rejected'
+        )`);
+      } else if (approvalStatus === 'approved') {
+        where.push(`(
+          COALESCE(specifications->'__approval__'->>'status', 'approved') = 'approved'
+          AND COALESCE(status, 'active') NOT IN ('rejected', 'pending_approval')
+          AND (vendor_id IS NULL OR specifications->'__approval__'->>'status' = 'approved')
+        )`);
+      } else if (approvalStatus === 'hidden') {
+        where.push(`is_available = FALSE`);
+      } else if (approvalStatus === 'live') {
+        where.push(`is_available = TRUE`);
+      }
     }
 
     const whereSql = `WHERE ${where.join(' AND ')}`;
@@ -622,6 +682,100 @@ export async function PUT(req) {
       if (!toggled.rows.length) return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
       if (globalThis.__shopProductCache) globalThis.__shopProductCache.clear();
       return NextResponse.json({ success: true, data: toggled.rows[0] });
+    }
+
+    // Quick Action: Approve Product
+    if (body.action === 'approve') {
+      await client.query('BEGIN');
+      const approvalData = {
+        status: 'approved',
+        approved_at: new Date().toISOString(),
+        approved_by: adminUser.name || 'Admin',
+        approved_by_id: adminUser.id,
+      };
+
+      const updateRes = await client.query(
+        `UPDATE supplier_materials
+         SET is_available = TRUE,
+             status = 'active',
+             specifications = jsonb_set(
+               COALESCE(specifications, '{}'::jsonb),
+               '{__approval__}',
+               $1::jsonb
+             ),
+             updated_at = NOW()
+         WHERE id = $2 AND is_deleted = FALSE
+         RETURNING *`,
+        [JSON.stringify(approvalData), id]
+      );
+
+      if (!updateRes.rows.length) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
+      }
+
+      await recordProductAuditLog({
+        clientOrPool: client,
+        productId: id,
+        action: 'approve',
+        newValues: { status: 'active', is_available: true, approval: approvalData },
+        userId: adminUser.id,
+        userRole: 'admin',
+        userName: adminUser.name || 'Admin',
+        notes: body.notes || 'Product approved by admin',
+      });
+
+      await client.query('COMMIT');
+      if (globalThis.__shopProductCache) globalThis.__shopProductCache.clear();
+      return NextResponse.json({ success: true, data: updateRes.rows[0], message: 'Product approved successfully' });
+    }
+
+    // Quick Action: Reject Product
+    if (body.action === 'reject') {
+      await client.query('BEGIN');
+      const reason = String(body.reason || 'Rejected by Admin').trim().slice(0, 1000);
+      const approvalData = {
+        status: 'rejected',
+        rejected_at: new Date().toISOString(),
+        rejected_by: adminUser.name || 'Admin',
+        rejected_by_id: adminUser.id,
+        reason,
+      };
+
+      const updateRes = await client.query(
+        `UPDATE supplier_materials
+         SET is_available = FALSE,
+             status = 'rejected',
+             specifications = jsonb_set(
+               COALESCE(specifications, '{}'::jsonb),
+               '{__approval__}',
+               $1::jsonb
+             ),
+             updated_at = NOW()
+         WHERE id = $2 AND is_deleted = FALSE
+         RETURNING *`,
+        [JSON.stringify(approvalData), id]
+      );
+
+      if (!updateRes.rows.length) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
+      }
+
+      await recordProductAuditLog({
+        clientOrPool: client,
+        productId: id,
+        action: 'reject',
+        newValues: { status: 'rejected', is_available: false, approval: approvalData },
+        userId: adminUser.id,
+        userRole: 'admin',
+        userName: adminUser.name || 'Admin',
+        notes: `Product rejected by admin: ${reason}`,
+      });
+
+      await client.query('COMMIT');
+      if (globalThis.__shopProductCache) globalThis.__shopProductCache.clear();
+      return NextResponse.json({ success: true, data: updateRes.rows[0], message: 'Product rejected successfully' });
     }
 
     // Quick Action: Duplicate Product

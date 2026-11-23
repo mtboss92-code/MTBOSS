@@ -1,0 +1,933 @@
+'use client';
+import RequiredAsterisk from '../shared/RequiredAsterisk';
+
+import { useState, useEffect } from 'react';
+import Image from 'next/image';
+import ServiceIcon from '../home/ServiceIcon';
+import ServiceCheckboxCard, { SERVICE_COLOR_TINTS } from '../home/ServiceCheckboxCard';
+import { getQuickServiceTotal } from '@/lib/quick-service-pricing';
+import { Pencil, Trash2, ActionIconButton } from '@/app/components/ui/icons';
+
+const QUICK_SERVICE_DURATION = '15 mins';
+
+function readSubcategoryImages(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch { return {}; }
+  }
+  return {};
+}
+
+async function uploadQuickServiceImage(file, folder, fitMode = 'cover') {
+  const body = new FormData();
+  body.append('file', file);
+  body.append('folder', folder);
+  body.append('fit', fitMode);
+  body.append('image_fit', fitMode);
+  const token = localStorage.getItem('token');
+  const response = await fetch('/api/hero-banners/upload', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body,
+  });
+  const data = await response.json();
+  if (!response.ok || !data.success || !data.url) throw new Error(data.error || 'Image upload failed');
+  return data.url;
+}
+
+export default function QuickServicesManager({ isDarkMode }) {
+  const [services, setServices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [iconUploading, setIconUploading] = useState(false);
+  const [serviceImageError, setServiceImageError] = useState('');
+  const [imageWarning, setImageWarning] = useState('');
+  const [subcategoryImageUploading, setSubcategoryImageUploading] = useState('');
+  const [configuredCities, setConfiguredCities] = useState([]);
+  const [serviceTotal, setServiceTotal] = useState(0);
+
+  // ── Drag & Drop state ──────────────────────────────────────────────────────
+  const [dragIndex, setDragIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
+  const [orderSaving, setOrderSaving] = useState(false);
+
+  const [formData, setFormData] = useState({
+    icon: '',
+    iconType: 'image',
+    iconName: '',
+    iconUrl: '',
+    label: '',
+    desc: '',
+    basePrice: '150',
+    duration: QUICK_SERVICE_DURATION,
+    visiting_price: '150',
+    main_category: '',
+    sub_category: '',
+    sub_category_images: {},
+    cities: [],
+    image_fit: 'cover',
+    color: 'blue',
+  });
+
+  useEffect(() => { fetchServices(); }, []);
+
+  useEffect(() => {
+    if (!showForm) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = event => {
+      if (event.key === 'Escape') {
+        setEditingId(null);
+        setShowForm(false);
+      }
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [showForm]);
+
+  const fetchServices = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const [res, cityRes] = await Promise.all([
+        fetch(`/api/quick-services?admin=1&admin_refresh=${Date.now()}`, {
+          cache: 'no-store',
+          headers: { 'Authorization': `Bearer ${token}` },
+        }),
+        fetch('/api/cities', { cache: 'no-store' }),
+      ]);
+      const [data, cityData] = await Promise.all([res.json(), cityRes.json()]);
+      if (!res.ok || !data.success || !Array.isArray(data.data)) {
+        throw new Error(data.error || 'Unable to load quick services');
+      }
+      setServices(data.data);
+      setServiceTotal(Number.isFinite(Number(data.total)) ? Number(data.total) : data.data.length);
+      if (cityData.success) setConfiguredCities(cityData.cities || []);
+    } catch (fetchError) {
+      setServices([]);
+      setServiceTotal(0);
+      setError(fetchError.message || 'Error fetching services');
+    }
+    finally { setLoading(false); }
+  };
+
+  // ── Save reordered list to backend ─────────────────────────────────────────
+  const saveOrder = async (ordered) => {
+    setOrderSaving(true);
+    setError('');
+    try {
+      const token = localStorage.getItem('token');
+      const items = ordered.map((s, i) => ({ id: s.id, sort_order: i + 1 }));
+      const res = await fetch('/api/quick-services', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ items }),
+      });
+      const data = await res.json();
+      if (data.success) setSuccess('Order saved — frontend updated!');
+      else setError('Failed to save order');
+    } catch { setError('Error saving order'); }
+    finally { setOrderSaving(false); }
+  };
+
+  // ── Drag handlers ──────────────────────────────────────────────────────────
+  const onDragStart = (e, index) => {
+    setDragIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    setTimeout(() => {
+      const el = e.currentTarget;
+      if (el) el.style.opacity = '0.4';
+    }, 0);
+  };
+  const onDragOver = (e, index) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (index !== dragIndex) setDragOverIndex(index);
+  };
+  const onDrop = async (e, dropIndex) => {
+    e.preventDefault();
+    if (dragIndex === null || dragIndex === dropIndex) {
+      setDragIndex(null); setDragOverIndex(null); return;
+    }
+    const arr = [...services];
+    const [dragged] = arr.splice(dragIndex, 1);
+    arr.splice(dropIndex, 0, dragged);
+    setServices(arr);
+    setDragIndex(null);
+    setDragOverIndex(null);
+    await saveOrder(arr);
+  };
+  const onDragEnd = (e) => {
+    if (e.currentTarget) e.currentTarget.style.opacity = '';
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
+
+  // ── CRUD ───────────────────────────────────────────────────────────────────
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(''); setSuccess('');
+
+    if (!formData.iconUrl) {
+      setError('Upload a service image before saving.');
+      return;
+    }
+
+    if (!formData.label || !formData.desc || !formData.duration || formData.cities.length === 0) {
+      setError('All fields are required'); return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      const method = editingId ? 'PUT' : 'POST';
+      const payload = {
+        ...formData,
+        icon: formData.iconUrl,
+        iconType: 'image',
+        iconName: '',
+        image_fit: formData.image_fit || 'cover',
+        color: formData.color || 'blue',
+      };
+      const body = editingId ? { id: editingId, ...payload } : payload;
+      const res = await fetch('/api/quick-services', {
+        method,
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSuccess(editingId ? 'Service updated!' : 'Service added!');
+        resetForm();
+        fetchServices();
+      } else setError(data.error || 'Something went wrong');
+    } catch { setError('Error saving service'); }
+  };
+
+  const processFileUpload = async (file) => {
+    if (!file) return;
+
+    if (file.size > 200 * 1024 * 1024) {
+      setServiceImageError('File size must be under 200MB.');
+      return;
+    }
+
+    setIconUploading(true);
+    setServiceImageError('');
+    setError('');
+    try {
+      const uploadedUrl = await uploadQuickServiceImage(file, 'MTBOSS/quick-services', formData.image_fit === 'contain' ? 'contain' : 'cover');
+      setFormData(current => ({
+        ...current,
+        iconType: 'image',
+        iconUrl: uploadedUrl,
+        iconName: '',
+        icon: uploadedUrl,
+        image_fit: current.image_fit === 'contain' ? 'contain' : 'cover',
+      }));
+      setSuccess('Service image uploaded.');
+    } catch (uploadError) {
+      setServiceImageError(uploadError.message || 'Service image upload failed');
+    } finally {
+      setIconUploading(false);
+    }
+  };
+
+  const handleServiceImageUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    await processFileUpload(file);
+  };
+
+  const handleSubcategoryImageUpload = async (name, event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setSubcategoryImageUploading(name);
+    setError('');
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      body.append('folder', 'MTBOSS/quick-service-subcategories');
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/hero-banners/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body,
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success || !result.url) {
+        throw new Error(result.error || 'Subcategory image upload failed');
+      }
+      setFormData((current) => ({
+        ...current,
+        sub_category_images: { ...current.sub_category_images, [name]: result.url },
+      }));
+      setSuccess(`Image uploaded for ${name}.`);
+    } catch (uploadError) {
+      setError(uploadError.message || 'Subcategory image upload failed');
+    } finally {
+      setSubcategoryImageUploading('');
+    }
+  };
+
+  const handleEdit = (service) => {
+    const resolvedUrl = service.icon_url || service.iconUrl || (/^https?:\/\//i.test(service.icon || '') ? service.icon : '');
+    const isServiceImg = Boolean(resolvedUrl && /^https?:\/\//i.test(resolvedUrl));
+    const defaultFit = isServiceImg
+      ? (service.image_fit === 'contain' || (service.label || '').toLowerCase().includes('dismantling') ? 'contain' : 'cover')
+      : (service.image_fit || 'cover');
+
+    setServiceImageError('');
+    setFormData({
+      icon: resolvedUrl,
+      iconType: 'image',
+      iconName: '',
+      iconUrl: resolvedUrl,
+      label: service.label,
+      desc: service.description,
+      basePrice: String(service.base_price ?? 150),
+      duration: QUICK_SERVICE_DURATION,
+      visiting_price: String(service.visiting_price ?? 150),
+      main_category: service.main_category || '',
+      sub_category: service.sub_category || '',
+      sub_category_images: readSubcategoryImages(service.sub_category_images),
+      cities: Array.isArray(service.cities) ? service.cities : [],
+      image_fit: defaultFit,
+      color: service.color || 'blue',
+    });
+    setEditingId(service.id);
+    setShowForm(true);
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Delete this service?')) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/quick-services?id=${id}`, {
+        method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) { setSuccess('Service deleted!'); fetchServices(); }
+      else setError(data.error || 'Delete failed');
+    } catch { setError('Error deleting service'); }
+  };
+
+  const resetForm = () => {
+    setServiceImageError('');
+    setImageWarning('');
+    setFormData({
+      icon: '',
+      iconType: 'image',
+      iconName: '',
+      iconUrl: '',
+      label: '',
+      desc: '',
+      basePrice: '150',
+      duration: QUICK_SERVICE_DURATION,
+      visiting_price: '150',
+      main_category: '',
+      sub_category: '',
+      sub_category_images: {},
+      cities: [],
+      image_fit: 'cover',
+      color: 'blue',
+    });
+    setEditingId(null);
+    setShowForm(false);
+  };
+
+  if (loading) return <div style={{ color: 'var(--qs-muted)', fontSize: '0.8125rem' }}>Loading…</div>;
+
+  return (
+    <>
+      <style>{`
+        .qs-root {
+          --qs-bg:       ${isDarkMode ? '#0f0f11' : '#f5f5f7'};
+          --qs-surface:  ${isDarkMode ? '#18181c' : '#ffffff'};
+          --qs-border:   ${isDarkMode ? '#2a2a30' : '#e2e2e7'};
+          --qs-text:     ${isDarkMode ? '#f0f0f5' : '#111113'};
+          --qs-muted:    ${isDarkMode ? '#7c7c8a' : '#6b6b76'};
+          --qs-accent:   ${isDarkMode ? '#60a5fa' : '#2563eb'};
+          --qs-row-hov:  ${isDarkMode ? '#1e1e24' : '#f8f8fa'};
+          --qs-input-bg: ${isDarkMode ? '#111114' : '#ffffff'};
+          --qs-err-bg:   ${isDarkMode ? '#2a0f0f' : '#fff1f2'};
+          --qs-err-tx:   ${isDarkMode ? '#f87171' : '#9f1239'};
+          --qs-err-br:   ${isDarkMode ? '#7f1d1d' : '#fca5a5'};
+          --qs-ok-bg:    ${isDarkMode ? '#0f2a18' : '#f0fdf4'};
+          --qs-ok-tx:    ${isDarkMode ? '#86efac' : '#14532d'};
+          --qs-ok-br:    ${isDarkMode ? '#166534' : '#86efac'};
+        }
+        .qs-root {
+          color:var(--qs-text); width:100%; max-width:100%; min-width:0;
+          overflow:hidden;
+        }
+
+        .qs-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:0.875rem; }
+        .qs-title  { font-size:0.875rem; font-weight:700; }
+
+        .qs-add-btn {
+          display:inline-flex; align-items:center; gap:0.3rem;
+          padding:0.35rem 0.875rem;
+          font-size:0.8125rem; font-weight:600;
+          background:var(--qs-accent); color:#fff;
+          border:none; border-radius:6px; cursor:pointer; transition:opacity .15s;
+        }
+        .qs-add-btn.cancel { background:none; border:1px solid var(--qs-border); color:var(--qs-muted); }
+        .qs-add-btn:hover { opacity:.85; }
+
+        .qs-alert { padding:0.5rem 0.875rem; border-radius:6px; border:1px solid; font-size:0.8125rem; margin-bottom:0.75rem; }
+        .qs-alert-err { background:var(--qs-err-bg); color:var(--qs-err-tx); border-color:var(--qs-err-br); }
+        .qs-alert-ok  { background:var(--qs-ok-bg);  color:var(--qs-ok-tx);  border-color:var(--qs-ok-br); }
+
+        .qs-form-panel {
+          background:var(--qs-surface); border:1px solid var(--qs-border);
+          border-radius:10px; padding:1.25rem; width:min(760px, calc(100vw - 2rem));
+          max-height:calc(100vh - 3rem); overflow-y:auto; box-shadow:0 24px 70px rgba(0,0,0,.45);
+        }
+        .qs-modal-overlay {
+          position:fixed; inset:0; z-index:1000; padding:1.5rem 1rem;
+          display:flex; align-items:center; justify-content:center;
+          background:rgba(0,0,0,.72); backdrop-filter:blur(3px);
+        }
+        .qs-form-heading { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:0.875rem; }
+        .qs-form-title { font-size:0.95rem; font-weight:700; }
+        .qs-modal-close {
+          width:2rem; height:2rem; display:inline-flex; align-items:center; justify-content:center;
+          border:1px solid var(--qs-border); border-radius:6px; background:var(--qs-bg);
+          color:var(--qs-text); font-size:1.2rem; cursor:pointer;
+        }
+        .qs-modal-close:hover { border-color:var(--qs-accent); color:var(--qs-accent); }
+        .qs-form-grid  { display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; }
+        .qs-form-full  { grid-column:1/-1; }
+        .qs-label {
+          display:block; margin-bottom:0.3rem;
+          font-size:0.65rem; font-weight:700;
+          text-transform:uppercase; letter-spacing:.06em; color:var(--qs-muted);
+        }
+        .qs-input, .qs-textarea {
+          width:100%; padding:0.4rem 0.75rem;
+          background:var(--qs-input-bg); border:1px solid var(--qs-border);
+          border-radius:6px; color:var(--qs-text); font-size:0.8125rem; outline:none;
+          transition:border-color .15s; box-sizing:border-box;
+        }
+        .qs-input::placeholder, .qs-textarea::placeholder { color:var(--qs-muted); }
+        .qs-input:focus, .qs-textarea:focus { border-color:var(--qs-accent); }
+        .qs-icon-input-row { display:flex; align-items:stretch; gap:0.5rem; }
+        .qs-icon-input-row .qs-input { flex:1; min-width:0; }
+        .qs-upload-btn {
+          display:inline-flex; align-items:center; justify-content:center; min-width:10rem;
+          padding:0.4rem 0.75rem; border:1px solid var(--qs-border); border-radius:6px;
+          background:var(--qs-bg); color:var(--qs-text); font-size:0.75rem; font-weight:700;
+          cursor:pointer; white-space:nowrap;
+        }
+        .qs-upload-btn:hover { border-color:var(--qs-accent); color:var(--qs-accent); }
+        .qs-upload-btn.disabled { opacity:.55; cursor:wait; }
+        .qs-upload-btn input { display:none; }
+        .qs-icon-preview { display:flex; align-items:center; gap:0.625rem; margin-top:0.5rem; color:var(--qs-muted); font-size:0.72rem; }
+        .qs-icon-preview-box {
+          display:inline-flex; align-items:center; justify-content:center; width:3rem; height:3rem;
+          padding:0.35rem; border:1px solid var(--qs-border); border-radius:6px;
+          background:var(--qs-input-bg); font-size:1.5rem; overflow:hidden;
+        }
+        @media (max-width: 640px) {
+          .qs-form-grid { grid-template-columns:1fr; }
+          .qs-form-full { grid-column:auto; }
+          .qs-icon-input-row { flex-direction:column; }
+          .qs-upload-btn { min-height:2.5rem; }
+        }
+        .qs-textarea { resize:none; }
+        .qs-form-actions { display:flex; gap:0.5rem; margin-top:0.875rem; }
+        .qs-btn-primary {
+          flex:1; padding:0.45rem 0.75rem; background:var(--qs-accent); color:#fff;
+          border:none; border-radius:6px; font-size:0.8125rem; font-weight:600;
+          cursor:pointer; transition:opacity .15s;
+        }
+        .qs-btn-primary:hover { opacity:.85; }
+        .qs-btn-secondary {
+          flex:1; padding:0.45rem 0.75rem; background:none; border:1px solid var(--qs-border);
+          color:var(--qs-muted); border-radius:6px; font-size:0.8125rem; font-weight:600;
+          cursor:pointer; transition:all .15s;
+        }
+        .qs-btn-secondary:hover { border-color:var(--qs-text); color:var(--qs-text); }
+
+        .qs-panel {
+          background:var(--qs-surface); border:1px solid var(--qs-border);
+          border-radius:8px; overflow:hidden; margin-bottom:0.75rem;
+          width:100%; max-width:100%; min-width:0;
+        }
+        .qs-table-wrap {
+          position:relative; width:100%; max-width:100%; overflow-x:auto; overflow-y:hidden;
+          overscroll-behavior-x:contain; scrollbar-gutter:stable;
+          -webkit-overflow-scrolling:touch;
+        }
+        .qs-root .qs-table {
+          display:table; width:100%; min-width:1120px; table-layout:fixed;
+          border-collapse:separate; border-spacing:0; font-size:0.8rem;
+        }
+        .qs-table th {
+          box-sizing:border-box; padding:0.5rem 0.45rem; text-align:left;
+          font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em;
+          color:var(--qs-muted); background:var(--qs-bg); border-bottom:1px solid var(--qs-border);
+          white-space:normal; line-height:1.25;
+        }
+        .qs-table td {
+          box-sizing:border-box; padding:0.6rem 0.45rem; border-bottom:1px solid var(--qs-border);
+          color:var(--qs-text); vertical-align:middle; overflow:hidden; white-space:normal;
+        }
+        .qs-table th:nth-child(1) { width:2.5%; }
+        .qs-table th:nth-child(2) { width:4.5%; }
+        .qs-table th:nth-child(3) { width:10%; }
+        .qs-table th:nth-child(4) { width:20%; }
+        .qs-table th:nth-child(5) { width:11%; }
+        .qs-table th:nth-child(6) { width:9%; }
+        .qs-table th:nth-child(7) { width:9%; }
+        .qs-table th:nth-child(8) { width:11%; }
+        .qs-table th:nth-child(9) { width:7%; }
+        .qs-table th:nth-child(10) { width:15%; }
+        .qs-table tr:last-child td { border-bottom:none; }
+        .qs-table tbody tr { transition:background .12s; }
+        .qs-table tbody tr:hover td { background:var(--qs-row-hov); }
+
+        .qs-icon-cell  { font-size:1.25rem; line-height:1; }
+        .qs-name-cell  { display:block; font-weight:600; overflow-wrap:anywhere; }
+        .qs-muted-cell {
+          display:block; width:100%; min-width:0; color:var(--qs-muted);
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        }
+        .qs-price-cell { display:flex; flex-direction:column; gap:0.1rem; font-weight:700; white-space:nowrap; }
+        .qs-price-base { color:var(--qs-muted); font-size:0.625rem; font-weight:500; }
+
+        .qs-row-actions { display:flex; gap:0.2rem; white-space:nowrap; }
+        .qs-act {
+          padding:0.2rem 0.38rem; font-size:0.62rem; font-weight:700;
+          border-radius:4px; border:none; cursor:pointer; transition:opacity .15s;
+        }
+        .qs-act:hover { opacity:.75; }
+        .qs-act-edit   { background:var(--qs-bg); color:var(--qs-accent); border:1px solid var(--qs-border); }
+        .qs-act-delete { background:${isDarkMode ? '#2a0f0f' : '#fff1f2'}; color:${isDarkMode ? '#f87171' : '#9f1239'}; }
+        .qs-table th:last-child,
+        .qs-table td:last-child {
+          position:sticky; right:0; z-index:2;
+          background:var(--qs-surface);
+          box-shadow:-8px 0 12px -12px rgba(0,0,0,.75);
+        }
+        .qs-table th:last-child { z-index:3; background:var(--qs-bg); }
+        .qs-table tbody tr:hover td:last-child { background:var(--qs-row-hov); }
+
+        .qs-empty  { text-align:center; padding:2.5rem; font-size:0.8125rem; color:var(--qs-muted); }
+        .qs-footer { font-size:0.75rem; color:var(--qs-muted); }
+        .qs-footer strong { color:var(--qs-text); }
+
+        /* ── Drag & Drop ────────────────────────────────────────────────────── */
+        .qs-order-hint {
+          display:flex; align-items:center; gap:0.375rem;
+          font-size:0.72rem; color:var(--qs-muted);
+          margin-bottom:0.5rem; padding:0.3rem 0.5rem;
+          border:1px dashed var(--qs-border); border-radius:6px;
+          background:var(--qs-bg);
+        }
+        .qs-drag-handle {
+          display:inline-flex; align-items:center; justify-content:center;
+          width:1.5rem; height:100%;
+          cursor:grab; color:var(--qs-muted);
+          font-size:1rem; user-select:none;
+          opacity:0.5; transition:opacity .15s, color .15s;
+        }
+        .qs-table tbody tr:hover .qs-drag-handle { opacity:1; color:var(--qs-accent); }
+        .qs-drag-handle:active { cursor:grabbing; }
+
+        /* Row being dragged */
+        .qs-row-dragging td { background:${isDarkMode ? '#1a1a22' : '#f0f4ff'} !important; }
+
+        /* Drop target indicator — top border highlight */
+        .qs-row-drag-over td { border-top:2px solid var(--qs-accent) !important; }
+
+        @media (max-width: 900px) {
+          .qs-root .qs-table { width:100%; min-width:0; }
+          .qs-table th:nth-child(4), .qs-table td:nth-child(4),
+          .qs-table th:nth-child(6), .qs-table td:nth-child(6),
+          .qs-table th:nth-child(7), .qs-table td:nth-child(7) { display:none; }
+          .qs-table th:nth-child(5) { width:9rem; }
+        }
+        @media (max-width: 640px) {
+          .qs-header { align-items:flex-start; gap:0.75rem; }
+          .qs-root .qs-table { width:100%; min-width:0; }
+          .qs-table th:nth-child(5), .qs-table td:nth-child(5),
+          .qs-table th:nth-child(9), .qs-table td:nth-child(9) { display:none; }
+          .qs-table th:nth-child(3) { width:9rem; }
+          .qs-table th:nth-child(10) { width:26%; }
+        }
+      `}</style>
+
+      <div className="qs-root">
+        {/* Header */}
+        <div className="qs-header">
+          <span className="qs-title">Quick Services Management</span>
+          <button
+            className={`qs-add-btn${showForm ? ' cancel' : ''}`}
+            onClick={() => { resetForm(); setShowForm(!showForm); }}
+          >
+            {showForm ? '✕ Cancel' : '+ Add Service'}
+          </button>
+        </div>
+
+        {error   && <div className="qs-alert qs-alert-err">{error}</div>}
+        {success && <div className="qs-alert qs-alert-ok">{success}</div>}
+
+        {/* Add / Edit form */}
+        {showForm && (
+          <div className="qs-modal-overlay" role="presentation" onMouseDown={e => {
+            if (e.target === e.currentTarget) resetForm();
+          }}>
+          <div
+            className="qs-form-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="quick-service-form-title"
+            onPaste={(e) => {
+              const items = e.clipboardData?.items;
+              if (items) {
+                for (let i = 0; i < items.length; i++) {
+                  if (items[i].type.startsWith('image/') || items[i].type === 'application/pdf') {
+                    const pastedFile = items[i].getAsFile();
+                    if (pastedFile) {
+                      processFileUpload(pastedFile);
+                      break;
+                    }
+                  }
+                }
+              }
+            }}
+          >
+            <div className="qs-form-heading">
+              <div className="qs-form-title" id="quick-service-form-title">{editingId ? 'Edit Service Details' : 'Add New Quick Service'}</div>
+              <button type="button" className="qs-modal-close" onClick={resetForm} aria-label="Close">×</button>
+            </div>
+            {error && <div className="qs-alert qs-alert-err">{error}</div>}
+            <form onSubmit={handleSubmit}>
+              <div className="qs-form-grid">
+                <div className="qs-form-full">
+                  <label className="qs-label">Service Image * (PNG, JPG, WebP, SVG, Screenshot, PDF — up to 200MB)</label>
+                  <input className="qs-input" type="file" accept="image/*,application/pdf"
+                    disabled={iconUploading}
+                    onChange={handleServiceImageUpload} />
+                  <small style={{ display: 'block', color: serviceImageError ? 'var(--qs-err-tx)' : 'var(--qs-muted)', marginTop: 4 }}>
+                    {iconUploading ? 'Uploading & optimizing image…' : serviceImageError || 'Supports any image (PNG, JPG, WebP, SVG, Screenshot) or PDF up to 200MB.'}
+                  </small>
+                </div>
+
+                <div>
+                  <label className="qs-label">Image Fit <RequiredAsterisk /></label>
+                  <select
+                    className="qs-input"
+                    value={formData.image_fit || 'cover'}
+                    onChange={(e) => {
+                      const nextFit = e.target.value;
+                      setFormData((prev) => ({ ...prev, image_fit: nextFit }));
+                    }}
+                  >
+                    <option value="cover">Cover — Photo / Poster (fills whole image area)</option>
+                    <option value="contain">Contain — Logo / Badge (no crop, white background)</option>
+                    <option value="icon">Icon — 3D Emoji / Transparent Icon (with color tint)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="qs-label">Icon Background Tint (for Icon mode)</label>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', marginTop: '6px' }}>
+                    {Object.keys(SERVICE_COLOR_TINTS).map((cKey) => {
+                      const tint = SERVICE_COLOR_TINTS[cKey];
+                      const isSelected = (formData.color || 'blue') === cKey;
+                      return (
+                        <button
+                          key={cKey}
+                          type="button"
+                          onClick={() => setFormData((prev) => ({ ...prev, color: cKey }))}
+                          disabled={formData.image_fit === 'cover' || formData.image_fit === 'contain'}
+                          style={{
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '6px',
+                            background: tint.light,
+                            border: isSelected ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                            boxShadow: isSelected ? '0 0 0 2px rgba(37,99,235,0.3)' : 'none',
+                            cursor: formData.image_fit === 'cover' || formData.image_fit === 'contain' ? 'not-allowed' : 'pointer',
+                            opacity: formData.image_fit === 'cover' || formData.image_fit === 'contain' ? 0.4 : 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            color: tint.text,
+                          }}
+                          title={cKey}
+                        >
+                          {isSelected ? '✓' : ''}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Live Card Preview */}
+                <div className="qs-form-full">
+                  <label className="qs-label">Live Card Preview (150px Fixed Height)</label>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', flexWrap: 'wrap', padding: '14px', background: 'var(--qs-bg)', border: '1px solid var(--qs-border)', borderRadius: '10px' }}>
+                    <div style={{ width: '170px' }}>
+                      <ServiceCheckboxCard
+                        service={{
+                          id: editingId || 999,
+                          label: formData.label || 'Service Preview',
+                          icon: formData.iconUrl || '🔧',
+                          image_fit: formData.image_fit || 'cover',
+                          color: formData.color || 'blue',
+                        }}
+                        checked={true}
+                        isDarkMode={isDarkMode}
+                      />
+                    </div>
+                    <div style={{ flex: 1, minWidth: '220px' }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--qs-text)' }}>
+                        Mode: {formData.image_fit === 'cover' ? '📸 Cover (Full Photo)' : formData.image_fit === 'contain' ? '🏷️ Contain (Company Logo)' : '🎨 Icon (3D Emoji with Tint)'}
+                      </div>
+                      <div style={{ fontSize: '12px', color: 'var(--qs-muted)', marginTop: '4px' }}>
+                        Image card ke upar wale hisse me dikhegi aur naam hamesha neeche 36px solid patti me padha jayega.
+                      </div>
+                      {formData.iconUrl && (
+                        <div style={{ marginTop: '8px' }}>
+                          <Image
+                            src={formData.iconUrl}
+                            alt=""
+                            width={1}
+                            height={1}
+                            unoptimized
+                            style={{ display: 'none', width: 1, height: 1 }}
+                            onLoad={(e) => {
+                              const { naturalWidth, naturalHeight } = e.currentTarget;
+                              const ratio = naturalWidth / (naturalHeight || 1);
+                              if (ratio > 1.8 && formData.image_fit !== 'contain') {
+                                setImageWarning('Wide logo detect hua: "Logo ke liye Contain chuno" taaki image kate nahi.');
+                              } else if (naturalWidth < 128 && formData.image_fit === 'cover') {
+                                setImageWarning('Image chhoti hai (< 128px), cover mode me blur dikhegi. "Icon" mode behtar rahega.');
+                              } else {
+                                setImageWarning('');
+                              }
+                            }}
+                          />
+                          {imageWarning && (
+                            <div style={{ fontSize: '12px', color: '#b45309', background: '#fef3c7', border: '1px solid #fde68a', padding: '6px 10px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>⚠️</span> <span>{imageWarning}</span>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            className="qs-act"
+                            style={{ marginTop: '8px' }}
+                            onClick={() => { setFormData((current) => ({ ...current, icon: '', iconUrl: '' })); setImageWarning(''); }}
+                          >
+                            Remove image
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label className="qs-label">Service Name <RequiredAsterisk /></label>
+                  <input className="qs-input" type="text" placeholder="e.g. Plumbing"
+                    value={formData.label}
+                    onChange={e => setFormData({ ...formData, label: e.target.value })} />
+                </div>
+                <div className="qs-form-full">
+                  <label className="qs-label">Description <RequiredAsterisk /></label>
+                  <textarea className="qs-textarea" rows={2} placeholder="Service description…"
+                    value={formData.desc}
+                    onChange={e => setFormData({ ...formData, desc: e.target.value })} />
+                </div>
+
+                <div>
+                  <label className="qs-label">Duration (Fixed)</label>
+                  <input className="qs-input" type="text" value={QUICK_SERVICE_DURATION} readOnly />
+                </div>
+                <div>
+                  <label className="qs-label">Main Category</label>
+                  <input className="qs-input" type="text" placeholder="e.g. Electrician"
+                    value={formData.main_category}
+                    onChange={e => setFormData({ ...formData, main_category: e.target.value })} />
+                </div>
+                <div>
+                  <label className="qs-label">Sub Category</label>
+                  <input className="qs-input" type="text" placeholder="e.g. Light, Fan"
+                    value={formData.sub_category}
+                    onChange={e => setFormData({ ...formData, sub_category: e.target.value })} />
+                </div>
+                <div className="qs-form-full" style={{ display: 'grid', gap: 10 }}>
+                  <div>
+                    <label className="qs-label">Subcategory Images (optional)</label>
+                    <small style={{ color: 'var(--qs-muted)' }}>Upload a matching image for each subcategory. These images appear in the mobile booking form.</small>
+                  </div>
+                  {formData.sub_category.split(',').map((item) => item.trim()).filter(Boolean).map((name) => (
+                    <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 10, border: '1px solid var(--qs-border)', borderRadius: 8 }}>
+                      {formData.sub_category_images?.[name] ? (
+                        <Image src={formData.sub_category_images[name]} alt={`${name} preview`} width={54} height={54} unoptimized style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: 7, background: 'var(--qs-input-bg)' }} />
+                      ) : (
+                        <div style={{ width: 54, height: 54, display: 'grid', placeItems: 'center', borderRadius: 7, background: 'var(--qs-input-bg)', color: 'var(--qs-muted)', fontSize: 10 }}>No image</div>
+                      )}
+                      <div style={{ display: 'grid', gap: 5, flex: 1, minWidth: 0 }}>
+                        <strong style={{ fontSize: 13, color: 'var(--qs-text)' }}>{name}</strong>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <label className="qs-act qs-act-edit" style={{ cursor: 'pointer' }}>
+                            {subcategoryImageUploading === name ? 'Uploading…' : formData.sub_category_images?.[name] ? 'Replace image' : 'Upload image'}
+                            <input type="file" accept="image/jpeg,image/png,image/webp" disabled={Boolean(subcategoryImageUploading)} onChange={(event) => handleSubcategoryImageUpload(name, event)} style={{ display: 'none' }} />
+                          </label>
+                          {formData.sub_category_images?.[name] ? (
+                            <button type="button" className="qs-act" onClick={() => setFormData((current) => {
+                              const images = { ...current.sub_category_images };
+                              delete images[name];
+                              return { ...current, sub_category_images: images };
+                            })}>Remove image</button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {!formData.sub_category.split(',').some((item) => item.trim()) ? <small style={{ color: 'var(--qs-muted)' }}>Add subcategories above to attach images to them.</small> : null}
+                </div>
+                <div className="qs-form-full">
+                  <label className="qs-label">Available Cities <RequiredAsterisk /></label>
+                  <select className="qs-input" value="" onChange={e => {
+                    const city = e.target.value;
+                    if (city && !formData.cities.includes(city)) {
+                      setFormData({ ...formData, cities: [...formData.cities, city] });
+                    }
+                  }}>
+                    <option value="">Select a city to add</option>
+                    {configuredCities.filter(city => !formData.cities.includes(city)).map(city => (
+                      <option key={city} value={city}>{city}</option>
+                    ))}
+                  </select>
+                  {configuredCities.length === 0 && (
+                    <div style={{ color: 'var(--qs-err-tx)', fontSize: '0.72rem', marginTop: 6 }}>
+                      Add an active city in City Management first.
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.5rem' }}>
+                    {formData.cities.map(city => (
+                      <button key={city} type="button" className="qs-act qs-act-edit"
+                        onClick={() => setFormData({ ...formData, cities: formData.cities.filter(item => item !== city) })}
+                        title={`Remove ${city}`}>
+                        {city} ×
+                      </button>
+                    ))}
+                    {formData.cities.length === 0 && <span style={{ color: 'var(--qs-muted)', fontSize: '0.72rem' }}>No city selected</span>}
+                  </div>
+                </div>
+              </div>
+              <div className="qs-form-actions">
+                <button type="submit" className="qs-btn-primary" disabled={iconUploading || Boolean(subcategoryImageUploading)}>
+                  {iconUploading ? 'Uploading icon...' : subcategoryImageUploading ? 'Uploading subcategory image...' : editingId ? 'Update Service' : 'Add Service'}
+                </button>
+                <button type="button" className="qs-btn-secondary" onClick={resetForm}>Cancel</button>
+              </div>
+            </form>
+          </div>
+          </div>
+        )}
+
+        {/* Drag hint */}
+        {services.length > 1 && !showForm && (
+          <div className="qs-order-hint">
+            <span style={{ fontSize: '1rem' }}>⠿</span>
+            Drag rows to reorder • all columns fit within the table • actions stay pinned
+            {orderSaving && (
+              <span style={{ marginLeft: 'auto', color: 'var(--qs-accent)', fontStyle: 'italic' }}>
+                saving…
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Table */}
+        <div className="qs-panel">
+          <div className="qs-table-wrap" role="region" aria-label="Quick services list" tabIndex={0}>
+            <table className="qs-table">
+              <thead>
+                <tr>
+                  <th style={{ width: '2rem' }} />
+                  {['Image', 'Service', 'Description', 'Cities', 'Main Category', 'Sub Category', 'Customer Price', 'Duration', 'Actions'].map(col => (
+                    <th key={col}>{col}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {services.length > 0 ? services.map((service, index) => (
+                  <tr
+                    key={service.id}
+                    draggable
+                    onDragStart={e => onDragStart(e, index)}
+                    onDragOver={e => onDragOver(e, index)}
+                    onDrop={e => onDrop(e, index)}
+                    onDragEnd={onDragEnd}
+                    className={[
+                      dragIndex === index ? 'qs-row-dragging' : '',
+                      dragOverIndex === index && dragIndex !== index ? 'qs-row-drag-over' : '',
+                    ].filter(Boolean).join(' ')}
+                  >
+                    <td style={{ padding: '0 0.25rem 0 0.5rem', width: '2rem' }}>
+                      <span className="qs-drag-handle" title="Drag to reorder">⠿</span>
+                    </td>
+                    <td>
+                      <ServiceIcon service={service} size={28} className="qs-icon-cell" imageClassName="w-8 h-8 object-contain" />
+                    </td>
+                    <td><span className="qs-name-cell">{service.label}</span></td>
+                    <td><span className="qs-muted-cell">{service.description}</span></td>
+                    <td><span className="qs-muted-cell">{service.cities?.length ? service.cities.join(', ') : 'Vendor-based'}</span></td>
+                    <td><span className="qs-muted-cell">{service.main_category || '—'}</span></td>
+                    <td><span className="qs-muted-cell">{service.sub_category || '—'}</span></td>
+                    <td>
+                      {(() => {
+                        const basePrice = Number(service.admin_base_price ?? service.base_price ?? 150);
+                        return (
+                          <span className="qs-price-cell">
+                            ₹{getQuickServiceTotal(basePrice)}
+                            <span className="qs-price-base">Base ₹{basePrice} + 18% GST</span>
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    <td style={{ color: 'var(--qs-muted)' }}>{service.duration}</td>
+                    <td>
+                      <div className="qs-row-actions" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <ActionIconButton icon={Pencil} label="Edit quick service" onClick={() => handleEdit(service)} />
+                        <ActionIconButton icon={Trash2} variant="danger" label="Delete quick service" onClick={() => handleDelete(service.id)} />
+                      </div>
+                    </td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan={10}>
+                      <div className="qs-empty">No quick services yet. Add one to get started.</div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+          <p className="qs-footer">
+            Total Services: <strong>{serviceTotal}</strong>
+          </p>
+      </div>
+    </>
+  );
+}

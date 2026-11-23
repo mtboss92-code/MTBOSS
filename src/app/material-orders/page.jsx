@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import MaterialOrdersPanel from '@/app/components/MaterialOrdersPanel';
+import MaterialOrdersPanel from '@/app/components/shop/MaterialOrdersPanel';
 
 const ROLE_CONFIG = {
   user: { back: '/userdashboard', label: 'Customer Dashboard' },

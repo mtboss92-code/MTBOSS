@@ -1,10 +1,10 @@
 "use client";
-import RequiredAsterisk from '../../../components/RequiredAsterisk';
+import RequiredAsterisk from '../../../components/shared/RequiredAsterisk';
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import PortfolioProjectCard from "@/app/components/PortfolioProjectCard";
+import PortfolioProjectCard from "@/app/components/projects/PortfolioProjectCard";
 import { fallbackProjects } from "@/lib/public-fallbacks";
 import { COMPANY_CONTACT } from "../../../lib/company";
 import { 

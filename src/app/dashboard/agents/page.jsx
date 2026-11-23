@@ -1,5 +1,5 @@
 'use client';
-import RequiredAsterisk from '../../components/RequiredAsterisk';
+import RequiredAsterisk from '../../components/shared/RequiredAsterisk';
 import { useState, useEffect } from 'react';
 import { useCities } from '@/hooks/useCities';
 import { Eye, X, ActionIconButton } from '@/app/components/ui/icons';

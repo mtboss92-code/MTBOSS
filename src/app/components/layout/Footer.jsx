@@ -1,0 +1,233 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+import { COMPANY_CONTACT } from "../../lib/company";
+import { Star } from "@/app/components/ui/icons";
+
+const ReviewModal = dynamic(() => import("../content/ReviewModal"), { ssr: false });
+
+export default function Footer() {
+  const [isDark, setIsDark] = useState(false);
+  const [isReviewOpen, setIsReviewOpen] = useState(false);
+
+  useEffect(() => {
+    const checkTheme = () => {
+      setIsDark(document.documentElement.classList.contains("dark-mode"));
+    };
+
+    checkTheme();
+    const observer = new MutationObserver(checkTheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  const quickLinks = [
+    { label: "Home", href: "/" },
+    { label: "About Us", href: "/About-us" },
+    { label: "Portfolio", href: "/FeaturedProjects/ProjectGallery" },
+    { label: "Blogs & Guides", href: "/blog" },
+    { label: "Shop Now", href: "/ShopNow" },
+    { label: "Careers", href: "/careers" },
+    { label: "FAQs", href: "/faqs" },
+    { label: "Contact", href: "/contact" },
+    { label: "Review Us", isReviewAction: true },
+    { label: "Privacy Policy", href: "/privacy-policy" },
+    { label: "Terms and Conditions", href: "/terms-and-conditions" },
+  ];
+
+
+  const serviceLinks = [
+    { label: "Commercial Buildings", href: "/Services/all" },
+    { label: "Hotel & Hospitality", href: "/Services/all" },
+    { label: "Residential Projects", href: "/Services/all" },
+    { label: "Industrial & Warehousing", href: "/industrial" },
+    { label: "Infrastructure & Roads", href: "/Services/all" },
+    { label: "Construction Calculator", href: "/calculator" },
+  ];
+
+  const socialLinks = [
+    {
+      label: "Facebook",
+      href: "https://www.facebook.com/share/1ZUCWwWZZu/",
+      icon: <path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z" />,
+    },
+    {
+      label: "Instagram",
+      href: "https://www.instagram.com/mtboss.in_?stkn=NTQxMTczN2JrZGs4",
+      icon: (
+        <>
+          <path d="M7 2h10a5 5 0 015 5v10a5 5 0 01-5 5H7a5 5 0 01-5-5V7a5 5 0 015-5zm0 2a3 3 0 00-3 3v10a3 3 0 003 3h10a3 3 0 003-3V7a3 3 0 00-3-3H7z" />
+          <path d="M12 7a5 5 0 110 10 5 5 0 010-10zm0 2a3 3 0 100 6 3 3 0 000-6z" />
+          <circle cx="17.5" cy="6.5" r="1.3" />
+        </>
+      ),
+    },
+    {
+      label: "LinkedIn",
+      href: "https://in.linkedin.com/company/MTBOSS-construction-company",
+      icon: <path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z" />,
+    },
+    {
+      label: "YouTube",
+      href: "https://youtube.com/@MTBOSSconstruction4906?si=slUfUlTDhtYa7Dve",
+      icon: <path d="M23.498 6.163a3.003 3.003 0 00-2.11-2.11C19.517 3.545 12 3.545 12 3.545s-7.517 0-9.388.508a3.003 3.003 0 00-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 002.11 2.11c1.871.508 9.388.508 9.388.508s7.517 0 9.388-.508a3.003 3.003 0 002.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />,
+    },
+  ];
+
+  const themeYellow = "var(--brand-blue)";
+
+  return (
+    <footer className={`transition-colors duration-500 border-t ${isDark ? "bg-black border-zinc-900" : "bg-white border-zinc-100"}`}>
+      <div className="max-w-7xl mx-auto px-6 sm:px-10 lg:px-16 py-16">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-12">
+
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <span className={`text-xl font-black tracking-wider uppercase ${isDark ? "text-white" : "text-zinc-900"}`}>
+                MTBOSS
+              </span>
+            </div>
+
+            <p className={`text-xs leading-relaxed max-w-sm ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+              Leading the industry in premium commercial, hotel, residential, and industrial construction across India with precision and excellence.
+            </p>
+
+            <div className="flex items-center gap-3 pt-2">
+              {socialLinks.map((s) => (
+                <a
+                  key={s.label}
+                  href={s.href}
+                  aria-label={s.label}
+                  className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-300 hover:scale-110 ${isDark
+                    ? "bg-zinc-900 text-zinc-400 hover:text-black hover:bg-[var(--brand-blue)]"
+                    : "bg-zinc-100 text-zinc-600 hover:text-black hover:bg-[var(--brand-blue)]"
+                    }`}
+                >
+                  <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                    {s.icon}
+                  </svg>
+                </a>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h3 className={`text-xs font-black uppercase tracking-[0.2em] mb-6 ${isDark ? "text-white" : "text-zinc-900"}`}>
+              Navigation
+            </h3>
+            <ul className="space-y-3.5">
+              {quickLinks.map((link) => (
+                <li key={link.label}>
+                  {link.isReviewAction ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsReviewOpen(true)}
+                      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200 border ${isDark
+                        ? "bg-amber-400/10 text-amber-300 border-amber-400/30 hover:bg-amber-400/20 hover:border-amber-400/50"
+                        : "bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100"
+                        }`}
+                    >
+                      <span className="inline-flex items-center gap-1.5"><Star size={14} className="fill-amber-400 text-amber-400" aria-hidden="true" /> Review Us</span>
+                      <span className="text-[10px] bg-amber-400 text-black px-1.5 py-0.5 rounded font-black">RATE</span>
+                    </button>
+                  ) : (
+                    <a
+                      href={link.href}
+                      className={`text-sm font-medium transition-colors duration-200 hover:text-[var(--brand-blue)] ${isDark ? "text-zinc-400" : "text-zinc-600"
+                        }`}
+                    >
+                      {link.label}
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <h3 className={`text-xs font-black uppercase tracking-[0.2em] mb-6 ${isDark ? "text-white" : "text-zinc-900"}`}>
+              Solutions
+            </h3>
+            <ul className="space-y-4">
+              {serviceLinks.map((link) => (
+                <li key={link.label}>
+                  <a
+                    href={link.href}
+                    className={`text-sm font-bold transition-colors duration-200 hover:text-[var(--brand-blue)] ${isDark ? "text-zinc-400" : "text-zinc-600"
+                      }`}
+                  >
+                    {link.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <h3 className={`text-xs font-black uppercase tracking-[0.2em] mb-6 ${isDark ? "text-white" : "text-zinc-900"}`}>
+              Office
+            </h3>
+            <div className="space-y-5">
+              <div className="flex items-start gap-4">
+                <div className="w-1 h-10 rounded-full shrink-0" style={{ backgroundColor: themeYellow }} />
+                <p className={`text-sm font-medium leading-relaxed ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                  Harthala Kanth Road Behind Kr Collection, near Domino&apos;s,
+                  <br />
+                  Uttar Pradesh, India
+                </p>
+              </div>
+              <a
+                href={`mailto:${COMPANY_CONTACT.email}`}
+                className={`block text-sm font-black hover:text-[var(--brand-blue)] transition-colors ${isDark ? "text-white" : "text-zinc-900"}`}
+              >
+                {COMPANY_CONTACT.email}
+              </a>
+              <a
+                href={COMPANY_CONTACT.telHref}
+                className={`block text-sm font-black hover:text-[var(--brand-blue)] transition-colors ${isDark ? "text-white" : "text-zinc-900"}`}
+              >
+                {COMPANY_CONTACT.phone}
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className={`py-6 px-6 border-t ${isDark ? "border-zinc-900 bg-zinc-950" : "border-zinc-100 bg-zinc-50"}`}>
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-center md:text-left">
+          <p className={`text-[10px] font-black uppercase tracking-widest ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+            (c) {new Date().getFullYear()} MTBOSS - built with precision
+          </p>
+          <div className="flex items-center gap-6">
+            <button
+              type="button"
+              onClick={() => setIsReviewOpen(true)}
+              className="text-[10px] font-black uppercase tracking-widest text-[var(--brand-blue)] hover:underline flex items-center gap-1.5"
+            >
+              <Star size={12} className="fill-current" aria-hidden="true" /> Review Us
+            </button>
+            <a href="/privacy-policy" className="text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-[var(--brand-blue)]">
+              Privacy
+            </a>
+            <a href="/terms-and-conditions" className="text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-[var(--brand-blue)]">
+              Terms
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {isReviewOpen && (
+        <ReviewModal
+          isOpen
+          onClose={() => setIsReviewOpen(false)}
+          isDarkMode={isDark}
+        />
+      )}
+    </footer>
+  );
+}
+

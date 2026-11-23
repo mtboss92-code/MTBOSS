@@ -1,5 +1,5 @@
 'use client';
-import RequiredAsterisk from '../../components/RequiredAsterisk';
+import RequiredAsterisk from '../../components/shared/RequiredAsterisk';
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';

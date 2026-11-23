@@ -1,5 +1,5 @@
 "use client";
-import RequiredAsterisk from '../../components/RequiredAsterisk';
+import RequiredAsterisk from '../../components/shared/RequiredAsterisk';
 import { useState, useEffect } from "react";
 import { useServiceCities } from "@/hooks/useServiceCities";
 import { uploadPropertyImages } from "@/lib/property-image-upload";

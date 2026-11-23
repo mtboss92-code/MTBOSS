@@ -1,12 +1,12 @@
 'use client';
-import RequiredAsterisk from '../../components/RequiredAsterisk';
+import RequiredAsterisk from '../../components/shared/RequiredAsterisk';
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter, useSearchParams } from 'next/navigation';
-import AgentTasksView from '@/app/components/AgentTasksView';
-import AgentTeamTasksView from '@/app/components/AgentTeamTasksView';
-import PanelLayout from '@/app/components/PanelLayout';
+import AgentTasksView from '@/app/components/agents/AgentTasksView';
+import AgentTeamTasksView from '@/app/components/agents/AgentTeamTasksView';
+import PanelLayout from '@/app/components/layout/PanelLayout';
 import {
   LayoutDashboard,
   ClipboardList,

@@ -1,4 +1,4 @@
-import LandingEnquiry from '../../components/LandingEnquiry';
+import LandingEnquiry from '../../components/home/LandingEnquiry';
 
 export default function Content() {
   return (

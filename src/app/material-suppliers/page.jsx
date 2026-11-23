@@ -1,5 +1,5 @@
 "use client";
-import RequiredAsterisk from '../components/RequiredAsterisk';
+import RequiredAsterisk from '../components/shared/RequiredAsterisk';
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { COMPANY_CONTACT } from "../lib/company";

@@ -1,14 +1,14 @@
 'use client';
-import RequiredAsterisk from '../components/RequiredAsterisk';
+import RequiredAsterisk from '../components/shared/RequiredAsterisk';
 
 import { Suspense, useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { redirectToPayU } from '@/lib/payu-client';
-import QuickServiceIcon from '../components/QuickServiceIcon';
-import MaterialOrdersPanel from '@/app/components/MaterialOrdersPanel';
-import JobApplicationsPanel from '@/app/components/JobApplicationsPanel';
-import PanelLayout from '@/app/components/PanelLayout';
+import QuickServiceIcon from '../components/home/QuickServiceIcon';
+import MaterialOrdersPanel from '@/app/components/shop/MaterialOrdersPanel';
+import JobApplicationsPanel from '@/app/components/agents/JobApplicationsPanel';
+import PanelLayout from '@/app/components/layout/PanelLayout';
 import {
   LayoutDashboard,
   Zap,

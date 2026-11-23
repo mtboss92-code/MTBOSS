@@ -1,11 +1,11 @@
 'use client';
-import RequiredAsterisk from '../components/RequiredAsterisk';
+import RequiredAsterisk from '../components/shared/RequiredAsterisk';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import QuickServiceIcon, { isQuickServiceIconImage } from '../components/QuickServiceIcon';
-import ServiceIcon from '../components/ServiceIcon';
+import QuickServiceIcon, { isQuickServiceIconImage } from '../components/home/QuickServiceIcon';
+import ServiceIcon from '../components/home/ServiceIcon';
 import { redirectToPayU } from '@/lib/payu-client';
 import { getQuickServiceTax, getQuickServiceTotal } from '@/lib/quick-service-pricing';
 

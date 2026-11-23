@@ -1,6 +1,6 @@
 // app/(bareilly_keywords)/complete-home-makeover-bareilly/Content.jsx
 import React from "react";
-import LandingEnquiry from "../../components/LandingEnquiry";
+import LandingEnquiry from "../../components/home/LandingEnquiry";
 
 const Content = () => {
   return (

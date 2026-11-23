@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { redirectToPayU } from '@/lib/payu-client';
-import PanelLayout from '@/app/components/PanelLayout';
+import PanelLayout from '@/app/components/layout/PanelLayout';
 import {
   ClipboardList,
   ShoppingCart,
@@ -17,15 +17,15 @@ import {
   User,
 } from '@/app/components/ui/icons';
 
-const MaterialOrdersPanel = dynamic(() => import('@/app/components/MaterialOrdersPanel'), {
+const MaterialOrdersPanel = dynamic(() => import('@/app/components/shop/MaterialOrdersPanel'), {
   loading: () => <div className="sd-loading">Loading material orders...</div>,
 });
 const SupplierShopProductsManager = dynamic(
-  () => import('@/app/components/ShopNowManager').then((module) => module.SupplierShopProductsManager),
+  () => import('@/app/components/shop/ShopNowManager').then((module) => module.SupplierShopProductsManager),
   { loading: () => <div className="sd-loading">Loading products...</div> }
 );
 const ShippingSettingsManager = dynamic(
-  () => import('@/app/components/ShippingSettingsManager'),
+  () => import('@/app/components/shop/ShippingSettingsManager'),
   { loading: () => <div className="sd-loading">Loading shipping settings...</div> }
 );
 const SUPPLIER_TABS = ['orders', 'products', 'shipping', 'tracking', 'earnings', 'history', 'packages', 'profile'];

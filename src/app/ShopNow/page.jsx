@@ -1,5 +1,5 @@
 "use client";
-import RequiredAsterisk from '../components/RequiredAsterisk';
+import RequiredAsterisk from '../components/shared/RequiredAsterisk';
 
 import { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";

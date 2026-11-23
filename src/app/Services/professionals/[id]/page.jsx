@@ -1,5 +1,5 @@
 'use client';
-import RequiredAsterisk from '../../../components/RequiredAsterisk';
+import RequiredAsterisk from '../../../components/shared/RequiredAsterisk';
 import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import JobApplicationsPanel from '@/app/components/JobApplicationsPanel';
+import JobApplicationsPanel from '@/app/components/agents/JobApplicationsPanel';
 
 export default function JobApplicationsPage() {
   return (

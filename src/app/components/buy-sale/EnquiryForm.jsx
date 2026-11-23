@@ -1,5 +1,5 @@
 "use client";
-import RequiredAsterisk from '../RequiredAsterisk';
+import RequiredAsterisk from '../shared/RequiredAsterisk';
 import { useState } from "react";
 
 export default function EnquiryForm({ isDarkMode, propertyId, propertyTitle }) {

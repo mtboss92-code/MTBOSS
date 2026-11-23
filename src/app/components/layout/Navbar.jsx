@@ -1,0 +1,746 @@
+"use client";
+import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
+import GlobalSearch from "../shared/GlobalSearch";
+import { ShoppingCart } from "@/app/components/ui/icons";
+import { getDashboardPath, resolveWebAuthUser, syncWebLogout } from "@/lib/client-session";
+
+function DropdownButton({ label, children, text, textHover, dropdownBg, id }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  const handleMouseEnter = () => {
+    if (typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+      setOpen(true);
+    }
+  };
+  const handleMouseLeave = () => {
+    if (typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+      setOpen(false);
+    }
+  };
+
+  const menuId = id || `dropdown-${label.toLowerCase().replace(/\s+/g, "-")}`;
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="true"
+        aria-controls={menuId}
+        onClick={() => setOpen((prev) => !prev)}
+        className={`nav-control min-h-[44px] flex items-center gap-1 px-2 2xl:px-3 py-2 text-xs 2xl:text-sm font-medium ${text} ${textHover} transition-colors rounded-md select-none`}
+      >
+        <span>{label}</span>
+        <svg
+          className={`w-3.5 h-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      <div
+        id={menuId}
+        role="region"
+        aria-label={`${label} menu`}
+        onClick={() => setOpen(false)}
+        className={`absolute top-full left-0 mt-1 rounded-md border shadow-lg transition-all duration-200 z-[110] ${dropdownBg} ${
+          open
+            ? "opacity-100 visible translate-y-0 pointer-events-auto"
+            : "opacity-0 invisible translate-y-1 pointer-events-none"
+        }`}
+      >
+        <div className="py-1">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+export default function Navbar({ isDarkMode, toggleTheme }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [isOpen, setIsOpen] = useState(false);
+  const [propertyOpen, setPropertyOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Detect logged in user - UPDATED TO LISTEN FOR CHANGES
+  useEffect(() => {
+    const checkUser = () => {
+      const resolved = resolveWebAuthUser();
+      if (resolved) {
+        setUser(resolved);
+        if (resolved.role === 'user') {
+          const token = localStorage.getItem('token');
+          if (token) {
+            fetch('/api/auth/session', { headers: { Authorization: `Bearer ${token}` } })
+              .then((res) => {
+                if (res.status === 403) {
+                  syncWebLogout();
+                  setUser(null);
+                  window.location.href = '/login?error=account_suspended';
+                }
+              })
+              .catch(() => {});
+          }
+        }
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+    };
+
+    checkUser();
+
+    window.addEventListener('storage', checkUser);
+    window.addEventListener('userLoggedIn', checkUser);
+
+    return () => {
+      window.removeEventListener('storage', checkUser);
+      window.removeEventListener('userLoggedIn', checkUser);
+    };
+  }, [pathname]); // re-check on every route change too
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      setIsOpen(false);
+      setPropertyOpen(false);
+      setAgentOpen(false);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pathname]);
+
+  useEffect(() => {
+    document.body.style.overflow = isOpen ? 'hidden' : '';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isOpen]);
+
+  const closeMobileMenu = () => {
+    setIsOpen(false);
+    setPropertyOpen(false);
+    setAgentOpen(false);
+  };
+
+  const handleLogout = async () => {
+    const logoutRole = user?.role;
+
+    await syncWebLogout();
+
+    setUser(null);
+    window.dispatchEvent(new Event('userLoggedIn'));
+    router.push(
+      logoutRole === 'agent'
+        ? '/agent/login'
+        : logoutRole === 'supplier'
+          ? '/supplier/login'
+          : logoutRole === 'franchise'
+            ? '/franchise/login'
+            : '/login'
+    );
+  };
+
+  const handleDashboard = () => {
+    closeMobileMenu();
+    router.push(getDashboardPath(user?.role));
+  };
+
+  const propertyDropdown = [
+    { label: "🏠 Buy Property", href: "/property/buy", sub: "Browse verified listings" },
+    { label: "💰 Sell Property", href: "/property/sell", sub: "List your property free" },
+    { label: "🔑 Rent Property", href: "/property/rent", sub: "Find rentals near you" },
+  ];
+
+  const bg = isDarkMode ? "bg-black border-zinc-800" : "bg-white border-gray-100";
+  const text = isDarkMode ? "text-zinc-300" : "text-zinc-600";
+  const textHover = isDarkMode ? "hover:text-[var(--brand-blue)]" : "hover:text-zinc-900";
+  const dropdownBg = isDarkMode ? "bg-zinc-900 border-zinc-800" : "bg-white border-gray-100";
+  const dropdownTxt = isDarkMode
+    ? "text-zinc-400 hover:text-[var(--brand-blue)] hover:bg-zinc-800"
+    : "text-zinc-600 hover:text-zinc-900 hover:bg-gray-50";
+  const isShopNowPage = pathname === "/ShopNow" || pathname.startsWith("/ShopNow/");
+
+  return (
+    <nav
+      className={`site-navbar w-full max-w-full overflow-visible ${bg} border-b shadow-sm transition-all duration-500 sticky top-0 z-[100]`}
+    >
+      <div className="w-full mx-auto px-2 2xl:px-4">
+        <div className="flex items-center justify-between h-16">
+          {/* Logo */}
+          <Link href="/" className="flex items-center flex-shrink-0">
+            <Image
+              src="/logo.png"
+              alt="MTBOSS"
+              width={58}
+              height={58}
+              sizes="(max-width: 639px) 48px, 58px"
+              loading="eager"
+              fetchPriority="high"
+              className="block h-12 sm:h-[58px] w-auto object-contain"
+            />
+          </Link>
+
+          {/* Desktop Nav */}
+          <div className="hidden xl:flex flex-1 min-w-0 items-center justify-center gap-0.5 px-2">
+            <Link
+              href="/"
+              className={`px-2 2xl:px-3 py-2 text-xs 2xl:text-sm font-medium whitespace-nowrap ${text} ${textHover} transition-colors rounded-md`}
+            >
+              Home
+            </Link>
+
+            <Link
+              href="/quick"
+              className={`px-2 2xl:px-3 py-2 text-xs 2xl:text-sm font-medium whitespace-nowrap ${text} ${textHover} transition-colors rounded-md`}
+            >
+              Services
+            </Link>
+
+            <Link
+              href="/Services/professionals"
+              className={`px-2 2xl:px-3 py-2 text-xs 2xl:text-sm font-medium whitespace-nowrap ${text} ${textHover} transition-colors rounded-md`}
+            >
+              Professionals
+            </Link>
+
+            {/* Property */}
+            <DropdownButton label="Property" text={text} textHover={textHover} dropdownBg={dropdownBg}>
+              <div className="w-60">
+                {propertyDropdown.map((item) => (
+                  <Link
+                    key={item.label}
+                    href={item.href}
+                    className={`block px-4 py-3 transition-colors ${dropdownTxt}`}
+                  >
+                    <p className="text-sm font-bold">{item.label}</p>
+                    <p
+                      className={`text-[11px] mt-0.5 ${isDarkMode ? "text-zinc-600" : "text-zinc-400"
+                        }`}
+                    >
+                      {item.sub}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            </DropdownButton>
+
+            <Link
+              href="/Services/all"
+              className={`px-2 2xl:px-3 py-2 text-xs 2xl:text-sm font-medium whitespace-nowrap ${text} ${textHover} transition-colors rounded-md`}
+            >
+              Construction
+            </Link>
+
+            <DropdownButton label="Agent" text={text} textHover={textHover} dropdownBg={dropdownBg}>
+              <div className="w-48">
+                <Link
+                  href="/agent"
+                  className={`block px-4 py-2.5 text-sm transition-colors ${dropdownTxt}`}
+                >
+                  Become an Agent
+                </Link>
+                <Link
+                  href="/agent/login"
+                  className={`block px-4 py-2.5 text-sm transition-colors ${dropdownTxt}`}
+                >
+                  Agent Login
+                </Link>
+              </div>
+            </DropdownButton>
+            <Link
+              href="/franchise"
+              className={`px-2 2xl:px-3 py-2 text-xs 2xl:text-sm font-medium whitespace-nowrap ${text} ${textHover} transition-colors rounded-md`}
+            >
+              Franchise
+            </Link>
+
+            <Link
+              href="/calculator"
+              className={`inline-flex px-2 2xl:px-3 py-2 text-xs 2xl:text-sm font-medium whitespace-nowrap ${text} ${textHover} transition-colors rounded-md`}
+            >
+              Budget Calculator
+            </Link>
+
+            <Link
+              href="/ShopNow"
+              className="inline-flex items-center gap-1.5 px-4 2xl:px-5 py-2 text-xs 2xl:text-sm font-semibold whitespace-nowrap bg-[var(--brand-blue)] text-black rounded-md hover:bg-[var(--brand-blue-dark)] transition-all duration-200"
+            >
+              <ShoppingCart size={16} strokeWidth={1.75} aria-hidden="true" />
+              Shop Now
+            </Link>
+          </div>
+
+          {/* Right Side */}
+          <div className="hidden xl:flex min-w-0 flex-shrink-0 items-center gap-1.5 2xl:gap-3">
+            <div className="block w-[160px] 2xl:w-[220px]">
+              <GlobalSearch user={user} isDarkMode={isDarkMode} />
+            </div>
+
+            {/* Theme Toggle */}
+            <button
+              onClick={toggleTheme}
+              type="button"
+              aria-label={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+              title={isDarkMode ? "Light mode" : "Dark mode"}
+              className={`nav-theme-toggle flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border transition-all ${isDarkMode
+                ? "nav-theme-toggle-dark border-zinc-700 bg-zinc-900 text-zinc-200"
+                : "nav-theme-toggle-light border-gray-300 bg-white text-zinc-700"
+                }`}
+            >
+              {isDarkMode ? (
+                <svg
+                  className="w-4 h-4"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" />
+                </svg>
+              ) : (
+                <svg
+                  className="w-4 h-4"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                </svg>
+              )}
+            </button>
+
+            {/* User Info / Auth Buttons */}
+            {!loading ? (
+              user ? (
+                // Logged In User
+                <div className={`flex min-w-0 items-center gap-1.5 px-2 py-1.5 rounded-lg border transition-all ${isDarkMode
+                  ? 'border-zinc-700 bg-zinc-900/50'
+                  : 'border-gray-200 bg-gray-50'
+                  }`}>
+                  <div
+                    className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${user.role === 'admin' ? 'bg-red-500'
+                      : (user.role === 'vendor' || user.role === 'service provider') ? 'bg-green-500'
+                        : user.role === 'supplier' ? 'bg-sky-500'
+                          : user.role === 'franchise' ? 'bg-[var(--brand-blue-deep)]'
+                            : 'bg-blue-500'
+                      } text-white`}
+                  >
+                    {(user.name || user.shop_name || user.email || 'U')[0].toUpperCase()}
+                  </div>
+                  <div className="hidden 2xl:flex min-w-0 flex-col text-xs">
+                    <span className="font-semibold text-sm truncate max-w-[88px]" title={user.name || user.shop_name || user.email}>
+                      {user.name || user.shop_name || user.email}
+                    </span>
+                    <span className={`text-[10px] capitalize ${isDarkMode ? 'text-zinc-500' : 'text-gray-500'}`}>
+                      {(user.role === 'vendor' || user.role === 'service provider') ? 'Service Provider' : user.role === 'supplier' ? 'Vendor' : user.role}
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleDashboard}
+                    className={`nav-control nav-dashboard px-2 2xl:px-3 py-1 text-[11px] 2xl:text-xs font-semibold rounded-md transition-all whitespace-nowrap 2xl:ml-1 ${isDarkMode
+                      ? 'border border-zinc-500 text-zinc-300 hover:bg-zinc-700'
+                      : 'border border-gray-400 text-gray-700 hover:bg-gray-200'
+                      }`}
+                  >
+                    Dashboard
+                  </button>
+                  <button
+                    onClick={handleLogout}
+                    className={`nav-control nav-logout px-2 2xl:px-3 py-1 text-[11px] 2xl:text-xs font-semibold rounded-md transition-all whitespace-nowrap ${isDarkMode
+                      ? 'bg-red-600 text-white hover:bg-red-700'
+                      : 'bg-red-500 text-white hover:bg-red-600'
+                      }`}
+                  >
+                    Logout
+                  </button>
+                </div>
+              ) : (
+                // Not Logged In
+                <>
+                  <Link
+                    href="/login"
+                    className={`px-5 py-2 text-sm font-semibold rounded-md transition-all duration-200 ${isDarkMode
+                      ? 'text-[var(--brand-blue)] border border-[var(--brand-blue)] hover:bg-[var(--brand-blue)] hover:text-black'
+                      : 'text-[var(--brand-blue-deep)] border border-[var(--brand-blue-deep)] hover:bg-sky-50'
+                      }`}
+                  >
+                    Sign In
+                  </Link>
+                  <Link
+                    href="/signup"
+                    className="px-5 py-2 text-sm font-semibold bg-[var(--brand-blue)] text-black rounded-md hover:bg-[var(--brand-blue-dark)] transition-all duration-200"
+                  >
+                    Sign Up
+                  </Link>
+                </>
+              )
+            ) : null}
+          </div>
+
+          {/* Mobile Hamburger */}
+          <div className="xl:hidden min-w-0 flex items-center gap-1 sm:gap-3">
+            <Link
+              href={isShopNowPage ? "/" : "/ShopNow"}
+              aria-label={isShopNowPage ? "Home" : "Shop Now"}
+              className="inline-flex min-h-8 sm:min-h-9 flex-shrink-0 items-center gap-1 whitespace-nowrap rounded bg-[var(--brand-blue)] px-2 py-1.5 text-[9px] font-bold text-black transition-colors hover:bg-[var(--brand-blue-dark)] sm:px-3 sm:text-[11px]"
+            >
+              {isShopNowPage ? (
+                <svg className="h-[13px] w-[13px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m3 11 9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V11Z" />
+                </svg>
+              ) : (
+                <ShoppingCart size={13} strokeWidth={2} aria-hidden="true" />
+              )}
+              <span>{isShopNowPage ? "Home" : "Shop Now"}</span>
+            </Link>
+            {!loading && !user && (
+              <div className="flex min-w-0 items-center gap-1 mr-0.5">
+                <Link
+                  href="/login"
+                  className={`whitespace-nowrap text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-1.5 border rounded transition-all duration-200 ${isDarkMode
+                    ? 'text-sky-400 border-sky-400 hover:bg-sky-950/40'
+                    : 'text-[#0284c7] border-[#0284c7] hover:bg-sky-50'
+                    }`}
+                >
+                  Sign In
+                </Link>
+                <Link
+                  href="/signup"
+                  className="inline-flex whitespace-nowrap text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-1.5 bg-[#0284c7] text-white rounded hover:bg-[#0369a1] transition-all duration-200"
+                >
+                  Sign Up
+                </Link>
+              </div>
+            )}
+            <button
+              onClick={toggleTheme}
+              type="button"
+              aria-label={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+              title={isDarkMode ? "Light mode" : "Dark mode"}
+              className={`nav-theme-toggle flex h-8 w-8 sm:h-9 sm:w-9 flex-shrink-0 items-center justify-center rounded-full border ${isDarkMode ? 'nav-theme-toggle-dark border-zinc-700 bg-zinc-900 text-zinc-200' : 'nav-theme-toggle-light border-gray-300 bg-white text-zinc-700'
+                }`}
+            >
+              {isDarkMode ? '☀️' : '🌙'}
+            </button>
+            <button
+              onClick={() => setIsOpen(!isOpen)}
+              type="button"
+              aria-label={isOpen ? "Close menu" : "Open menu"}
+              title={isOpen ? "Close menu" : "Open menu"}
+              className={`nav-control p-1.5 sm:p-2 rounded-md ${isDarkMode
+                ? 'text-zinc-300 hover:bg-zinc-800'
+                : 'text-black hover:bg-gray-100'
+                }`}
+            >
+              {isOpen ? (
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              ) : (
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 6h16M4 12h16M4 18h16"
+                  />
+                </svg>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile Menu */}
+      {isOpen && (
+        <div
+          aria-label="Close navigation menu"
+          onClick={closeMobileMenu}
+          className="xl:hidden fixed inset-x-0 top-16 bottom-0 z-[90] bg-black/50"
+        />
+      )}
+      <div
+        className={`xl:hidden fixed inset-x-0 top-16 z-[120] transition-all duration-300 ${isOpen
+          ? 'visible translate-y-0 opacity-100'
+          : 'invisible -translate-y-3 opacity-0 pointer-events-none'
+          }`}
+      >
+        <div
+          className={`${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-gray-100'
+            } border-t px-4 py-4 space-y-1 max-h-[calc(100dvh-4rem)] overflow-y-auto shadow-2xl`}
+        >
+          <div className="pb-3">
+            <GlobalSearch user={user} isDarkMode={isDarkMode} onNavigate={() => setIsOpen(false)} />
+          </div>
+
+          {[
+            { label: 'Home', href: '/' },
+          ].map((link) => (
+            <Link
+              key={link.label}
+              href={link.href}
+              onClick={closeMobileMenu}
+              className={`block px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
+                ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
+                : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
+                }`}
+            >
+              {link.label}
+            </Link>
+          ))}
+
+          <Link
+            href="/quick"
+            onClick={closeMobileMenu}
+            className={`block px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
+              ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
+              : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
+              }`}
+          >
+            Services
+          </Link>
+
+          <Link
+            href="/Services/professionals"
+            onClick={closeMobileMenu}
+            className={`block px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
+              ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
+              : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
+              }`}
+          >
+            Professionals
+          </Link>
+
+          {/* Mobile Property */}
+          <div>
+            <button
+              type="button"
+              aria-expanded={propertyOpen}
+              aria-controls="mobile-submenu-property"
+              onClick={() => setPropertyOpen(!propertyOpen)}
+              className={`w-full min-h-[44px] flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
+                ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
+                : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
+                }`}
+            >
+              <span>Property</span>
+              <svg
+                className={`w-4 h-4 transition-transform duration-200 ${propertyOpen ? 'rotate-180' : ''
+                  }`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </button>
+            {propertyOpen && (
+              <div id="mobile-submenu-property" className="ml-4 mt-1 space-y-1">
+                {propertyDropdown.map((s) => (
+                  <Link
+                    key={s.label}
+                    href={s.href}
+                    onClick={closeMobileMenu}
+                    className={`block min-h-[44px] flex items-center px-3 py-2 text-sm rounded-md transition-colors ${isDarkMode
+                      ? 'text-zinc-400 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
+                      : 'text-zinc-500 hover:text-zinc-900 hover:bg-gray-50'
+                      }`}
+                  >
+                    {s.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {[
+            { label: 'Construction', href: '/Services/all' },
+            { label: 'Budget Calculator', href: '/calculator' },
+            { label: 'Shop Now', href: '/ShopNow', icon: 'cart' },
+            { label: 'Careers', href: '/careers' },
+            { label: 'Contact', href: '/contact' },
+          ].map((link) => (
+            <Link
+              key={link.label}
+              href={link.href}
+              onClick={closeMobileMenu}
+              className={`flex items-center gap-2 min-h-[44px] px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
+                ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
+                : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
+                }`}
+            >
+              {link.icon === 'cart' && (
+                <ShoppingCart size={16} strokeWidth={1.75} aria-hidden="true" />
+              )}
+              {link.label}
+            </Link>
+          ))}
+
+          {/* Mobile Agent */}
+          <div>
+            <button
+              type="button"
+              aria-expanded={agentOpen}
+              aria-controls="mobile-submenu-agent"
+              onClick={() => setAgentOpen(!agentOpen)}
+              className={`w-full min-h-[44px] flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
+                ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
+                : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
+                }`}
+            >
+              <span>Agent</span>
+              <svg
+                className={`w-4 h-4 transition-transform duration-200 ${agentOpen ? 'rotate-180' : ''
+                  }`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </button>
+            {agentOpen && (
+              <div id="mobile-submenu-agent" className="ml-4 mt-1 space-y-1">
+                <Link
+                  href="/agent"
+                  onClick={closeMobileMenu}
+                  className={`block min-h-[44px] flex items-center px-3 py-2 text-sm rounded-md transition-colors ${isDarkMode
+                    ? 'text-zinc-400 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
+                    : 'text-zinc-500 hover:text-zinc-900 hover:bg-gray-50'
+                    }`}
+                >
+                  Become an Agent
+                </Link>
+                <Link
+                  href="/agent/login"
+                  onClick={closeMobileMenu}
+                  className={`block min-h-[44px] flex items-center px-3 py-2 text-sm rounded-md transition-colors ${isDarkMode
+                    ? 'text-zinc-400 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
+                    : 'text-zinc-500 hover:text-zinc-900 hover:bg-gray-50'
+                    }`}
+                >
+                  Agent Login
+                </Link>
+              </div>
+            )}
+          </div>
+
+          <Link
+            href="/franchise"
+            onClick={closeMobileMenu}
+            className={`block min-h-[44px] flex items-center px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
+              ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
+              : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
+              }`}
+          >
+            Franchise
+          </Link>
+
+          {/* Mobile Auth */}
+          <div className="pt-4 space-y-2 border-t" style={{ borderTopColor: isDarkMode ? '#27272a' : '#e5e7eb' }}>
+            {user ? (
+              <>
+                <div className={`px-3 py-2 text-sm text-center font-semibold ${isDarkMode ? 'text-zinc-300' : 'text-gray-600'}`}>
+                  Logged in as {(user.role === 'vendor' || user.role === 'service provider') ? 'SERVICE PROVIDER' : user.role.toUpperCase()}
+                </div>
+                <button
+                  onClick={handleDashboard}
+                  className={`nav-control nav-dashboard w-full text-center px-5 py-2.5 text-sm font-semibold rounded-md transition-all ${isDarkMode
+                    ? 'border border-zinc-600 text-zinc-300 hover:bg-zinc-800'
+                    : 'border border-gray-300 text-gray-600 hover:bg-gray-100'
+                    }`}
+                >
+                  Dashboard
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className={`nav-control nav-logout w-full text-center px-5 py-2.5 text-sm font-semibold rounded-md transition-all ${isDarkMode
+                    ? 'bg-red-600 text-white hover:bg-red-700'
+                    : 'bg-red-500 text-white hover:bg-red-600'
+                    }`}
+                >
+                  Logout
+                </button>
+              </>
+            ) : (
+              <>
+                <Link
+                  href="/login"
+                  onClick={closeMobileMenu}
+                  className={`block text-center px-5 py-2.5 text-sm font-semibold rounded-md transition-all ${isDarkMode
+                    ? 'text-[var(--brand-blue)] border border-[var(--brand-blue)] hover:bg-[var(--brand-blue)] hover:text-black'
+                    : 'text-[var(--brand-blue-deep)] border border-[var(--brand-blue-deep)] hover:bg-sky-50'
+                    }`}
+                >
+                  Sign In
+                </Link>
+                <Link
+                  href="/signup"
+                  onClick={closeMobileMenu}
+                  className="block text-center px-5 py-2.5 text-sm font-semibold bg-[var(--brand-blue)] text-black rounded-md hover:bg-[var(--brand-blue-dark)] transition-all"
+                >
+                  Sign Up
+                </Link>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </nav>
+  );
+}

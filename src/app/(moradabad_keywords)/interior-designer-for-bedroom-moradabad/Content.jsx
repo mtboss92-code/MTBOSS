@@ -1,6 +1,6 @@
 
 import React from "react";
-import LandingEnquiry from "../../components/LandingEnquiry";
+import LandingEnquiry from "../../components/home/LandingEnquiry";
 
 const SectionTitle = ({ children }) => (
   <h3 className="text-xl sm:text-2xl font-semibold text-gray-900 mb-3">

@@ -1,5 +1,5 @@
 import React from "react";
-import LandingEnquiry from "../../components/LandingEnquiry";
+import LandingEnquiry from "../../components/home/LandingEnquiry";
 
 
 const Content = () => {

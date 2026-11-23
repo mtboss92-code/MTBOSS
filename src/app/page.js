@@ -1,10 +1,10 @@
 import React from 'react';
-import Hero from './components/Hero';
-// import AboutSection from './components/About';
-import Services from './components/Services';
-import QuickServices from './components/QuickServices';
-// import TestimonialsSection from './components/Testimonal';\r
-import DeferredHomeSections from './components/DeferredHomeSections';
+import Hero from './components/home/Hero';
+// import AboutSection from './components/home/About';
+import Services from './components/home/Services';
+import QuickServices from './components/home/QuickServices';
+// import TestimonialsSection from './components/home/Testimonal';\r
+import DeferredHomeSections from './components/layout/DeferredHomeSections';
 import { fetchHomeHeroBanners, fetchHomeQuickServices } from '@/lib/homepage-data';
 
 // ---------- METADATA ----------

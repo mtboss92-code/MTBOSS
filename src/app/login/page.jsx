@@ -1,12 +1,12 @@
 'use client';
 
-import RequiredAsterisk from '../components/RequiredAsterisk';
+import RequiredAsterisk from '../components/shared/RequiredAsterisk';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { clearWebSessionExcept } from '@/lib/client-session';
-import CustomerMobileOtpAuth from '@/app/components/CustomerMobileOtpAuth';
+import CustomerMobileOtpAuth from '@/app/components/auth/CustomerMobileOtpAuth';
 import {
   Mail,
   Lock,

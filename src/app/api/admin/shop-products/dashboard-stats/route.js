@@ -12,6 +12,8 @@ export async function GET(req) {
         COUNT(*)::INT AS total_products,
         COUNT(*) FILTER (WHERE is_available = TRUE AND is_deleted = FALSE)::INT AS active_products,
         COUNT(*) FILTER (WHERE (status = 'draft' OR is_available = FALSE) AND is_deleted = FALSE)::INT AS draft_products,
+        COUNT(*) FILTER (WHERE (specifications->'__approval__'->>'status' = 'pending' OR status = 'pending_approval' OR (vendor_id IS NOT NULL AND specifications->'__approval__'->>'status' IS NULL)) AND is_deleted = FALSE)::INT AS pending_products,
+        COUNT(*) FILTER (WHERE (specifications->'__approval__'->>'status' = 'rejected' OR status = 'rejected') AND is_deleted = FALSE)::INT AS rejected_products,
         COUNT(*) FILTER (WHERE (quantity <= 0 OR stock_status = 'out_of_stock') AND is_deleted = FALSE)::INT AS out_of_stock,
         COUNT(*) FILTER (WHERE quantity > 0 AND quantity <= low_stock_threshold AND is_deleted = FALSE)::INT AS low_stock,
         COUNT(DISTINCT category) FILTER (WHERE is_deleted = FALSE)::INT AS total_categories,

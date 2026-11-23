@@ -1,9 +1,9 @@
 // app/(moradabad_keywords)/architect-near-me-in-moradabad/page.jsx
 import Banner from './Banner';
 import Content from './Content';
-import QuickServices from '../../components/QuickServices';
-import CalculatorCTA from '../../components/CalculatorCTA';
-import Services from '../../components/Services';
+import QuickServices from '../../components/home/QuickServices';
+import CalculatorCTA from '../../components/home/CalculatorCTA';
+import Services from '../../components/home/Services';
 
 export const metadata = {
   title: 'Best Architect in Moradabad (2026) – Design & Build – MTBOSS',

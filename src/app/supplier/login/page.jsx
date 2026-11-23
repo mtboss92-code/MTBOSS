@@ -1,11 +1,11 @@
 'use client';
 
-import RequiredAsterisk from '../../components/RequiredAsterisk';
+import RequiredAsterisk from '../../components/shared/RequiredAsterisk';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Mail, Lock, Eye, EyeOff, Smartphone, ArrowRight, Clock, AlertTriangle } from 'lucide-react';
-import PartnerMobileOtpAuth from '@/app/components/PartnerMobileOtpAuth';
+import PartnerMobileOtpAuth from '@/app/components/auth/PartnerMobileOtpAuth';
 
 export default function SupplierLoginPage() {
   const router = useRouter();

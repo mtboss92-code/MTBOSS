@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import PortfolioProjectCard from "../../components/PortfolioProjectCard";
+import PortfolioProjectCard from "../../components/projects/PortfolioProjectCard";
 
 
 

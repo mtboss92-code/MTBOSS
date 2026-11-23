@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import QuickServiceIcon, { isQuickServiceIconImage } from '../../components/QuickServiceIcon';
+import QuickServiceIcon, { isQuickServiceIconImage } from '../../components/home/QuickServiceIcon';
 import { redirectToPayU } from '@/lib/payu-client';
 import { getQuickServiceTax, getQuickServiceTotal } from '@/lib/quick-service-pricing';
 import { useCities } from '@/hooks/useCities';

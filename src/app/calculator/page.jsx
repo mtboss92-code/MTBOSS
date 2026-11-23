@@ -1,4 +1,4 @@
-import ConstructionCalculator from '../components/ConstructionCalculator';
+import ConstructionCalculator from '../components/content/ConstructionCalculator';
 import { cookies } from 'next/headers';
 
 export const metadata = {

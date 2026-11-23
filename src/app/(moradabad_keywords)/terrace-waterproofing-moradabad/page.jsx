@@ -1,9 +1,9 @@
 // app/(moradabad_keywords)/terrace-waterproofing-moradabad/page.jsx
 import Banner from './Banner';
 import Content from './Content';
-import QuickServices from '../../components/QuickServices';
-import CalculatorCTA from '../../components/CalculatorCTA';
-import Services from '../../components/Services';
+import QuickServices from '../../components/home/QuickServices';
+import CalculatorCTA from '../../components/home/CalculatorCTA';
+import Services from '../../components/home/Services';
 
 export const metadata = {
   title: 'Terrace Waterproofing in Moradabad | MTBOSS',

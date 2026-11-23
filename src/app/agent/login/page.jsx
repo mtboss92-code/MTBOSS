@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Mail, Lock, Eye, EyeOff, Smartphone, ArrowRight } from 'lucide-react';
 import { clearWebSessionExcept } from '@/lib/client-session';
-import PartnerMobileOtpAuth from '@/app/components/PartnerMobileOtpAuth';
-import RequiredAsterisk from '@/app/components/RequiredAsterisk';
+import PartnerMobileOtpAuth from '@/app/components/auth/PartnerMobileOtpAuth';
+import RequiredAsterisk from '@/app/components/shared/RequiredAsterisk';
 
 export default function AgentLoginPage() {
   const router = useRouter();

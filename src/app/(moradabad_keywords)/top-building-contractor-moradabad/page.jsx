@@ -1,9 +1,9 @@
 // app/(moradabad_keywords)/top-building-contractor-in-moradabad/page.tsx
 import Banner from './Banner';
 import Content from './Content';
-import QuickServices from '../../components/QuickServices';
-import CalculatorCTA from '../../components/CalculatorCTA';
-import Services from '../../components/Services';
+import QuickServices from '../../components/home/QuickServices';
+import CalculatorCTA from '../../components/home/CalculatorCTA';
+import Services from '../../components/home/Services';
 
 export const metadata = {
   title: 'Top Building Contractor in Moradabad | MTBOSS',

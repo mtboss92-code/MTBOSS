@@ -2,7 +2,7 @@
 
 import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import PanelLayout from '@/app/components/PanelLayout';
+import PanelLayout from '@/app/components/layout/PanelLayout';
 import {
   LayoutDashboard,
   Building2,

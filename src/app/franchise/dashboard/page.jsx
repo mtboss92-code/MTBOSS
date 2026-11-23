@@ -4,8 +4,8 @@ import { Suspense, useEffect, useMemo, useRef, useState, useCallback } from 'rea
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
-import RequiredAsterisk from '../../components/RequiredAsterisk';
-import PanelLayout from '@/app/components/PanelLayout';
+import RequiredAsterisk from '../../components/shared/RequiredAsterisk';
+import PanelLayout from '@/app/components/layout/PanelLayout';
 import {
   EMPTY_FRANCHISE_PERMISSIONS,
   normalizeFranchisePermissions,
@@ -43,19 +43,19 @@ const deferredPanelLoading = () => (
 );
 
 const FreeTimeSlotsManager = dynamic(
-  () => import('@/app/components/FreeTimeSlotsManager'),
+  () => import('@/app/components/agents/FreeTimeSlotsManager'),
   { loading: deferredPanelLoading }
 );
 const FranchiseOperationsManager = dynamic(
-  () => import('@/app/components/FranchiseOperationsManager'),
+  () => import('@/app/components/agents/FranchiseOperationsManager'),
   { loading: deferredPanelLoading }
 );
 const FranchiseStaffManager = dynamic(
-  () => import('@/app/components/FranchiseStaffManager'),
+  () => import('@/app/components/agents/FranchiseStaffManager'),
   { loading: deferredPanelLoading }
 );
 const MaterialOrdersPanel = dynamic(
-  () => import('@/app/components/MaterialOrdersPanel'),
+  () => import('@/app/components/shop/MaterialOrdersPanel'),
   { loading: deferredPanelLoading }
 );
 

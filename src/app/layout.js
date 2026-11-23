@@ -1,6 +1,6 @@
 import "./globals.css";
-import "./components/ShopNowManager.css";
-import ClientLayout from "./components/ClientLayout";
+import "./components/shop/ShopNowManager.css";
+import ClientLayout from "./components/layout/ClientLayout";
 
 export const metadata = {
   title: {
