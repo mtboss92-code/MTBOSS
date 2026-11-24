@@ -746,7 +746,7 @@ export default function LoginPage() {
                       setError('');
                     }}
                   >
-                    ← Back to customer mobile login
+                    ← Back to Admin&customer mobile login
                   </button>
                 </div>
               </>
