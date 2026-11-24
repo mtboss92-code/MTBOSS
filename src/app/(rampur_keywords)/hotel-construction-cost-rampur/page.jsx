@@ -1,0 +1,631 @@
+// app/(bareilly_keywords)/hotel-construction-cost-rampur/page.jsx
+
+import Banner from "./Banner";
+import Content from "./Content";
+import QuickServices from "../../components/home/QuickServices";
+import CalculatorCTA from "../../components/home/CalculatorCTA";
+import Services from "../../components/home/Services";
+
+export const metadata = {
+  title: "Hotel Construction Cost  Rampur | MTBoss",
+
+  description:
+    "Planning a hotel Rampur? See what drives hotel construction cost, how to budget per room, and get an itemised estimate from MTBoss. Request a quote.",
+
+  keywords:
+    "hotel construction cost Rampur, hotel construction cost in Rampur, hotel construction cost per sq ft Rampur, hotel construction cost per room Rampur, hotel construction cost factors Rampur, hotel construction budget Rampur, hotel construction budget planning Rampur, hotel construction budget guide Rampur, hotel construction cost breakdown Rampur, hotel construction cost components Rampur, hotel construction cost inclusions Rampur, hotel construction cost exclusions Rampur, hotel construction cost drivers Rampur, hotel construction cost by type Rampur, hotel construction cost by department Rampur, hotel construction cost by zone Rampur, hotel construction cost by finish level Rampur, hotel construction cost by phasing Rampur, hotel construction cost by timeline Rampur, hotel construction cost by site conditions Rampur, hotel construction cost by soil conditions Rampur, hotel construction cost by material prices Rampur, hotel construction cost by labour Rampur, hotel construction cost by utilities Rampur, hotel construction cost by equipment Rampur, hotel construction cost by furniture Rampur, hotel construction cost by IT systems Rampur, hotel construction cost by licences Rampur, hotel construction cost by approvals Rampur, hotel construction cost by HVAC Rampur, hotel construction cost by fire safety Rampur, hotel construction cost by lifts Rampur, hotel construction cost by waterproofing Rampur, hotel construction cost by plumbing Rampur, hotel construction cost by electrical Rampur, hotel construction cost by structure Rampur, hotel construction cost by foundation Rampur, hotel construction cost by masonry Rampur, hotel construction cost by finishes Rampur, hotel construction cost by interiors Rampur, hotel construction cost by site development Rampur, hotel construction cost by professional services Rampur, hotel construction cost by contingency Rampur, hotel construction cost by payment stages Rampur, hotel construction cost by cash flow Rampur, hotel construction cost by hidden costs Rampur, hotel construction cost by change process Rampur, hotel construction cost by after handover support Rampur, hotel construction cost by warranty Rampur, hotel construction cost by care guidance Rampur, hotel construction cost by 3D design Rampur, hotel construction cost by itemised quotation Rampur, hotel budget Rampur, hotel budget planning Rampur, hotel budget guide Rampur, hotel budget per room Rampur, hotel budget per sq ft Rampur, hotel budget breakdown Rampur, hotel budget components Rampur, hotel budget inclusions Rampur, hotel budget exclusions Rampur, hotel budget drivers Rampur, hotel budget by type Rampur, hotel budget by department Rampur, hotel budget by zone Rampur, hotel budget by finish level Rampur, hotel budget by phasing Rampur, hotel budget by timeline Rampur, hotel budget by site conditions Rampur, hotel budget by soil conditions Rampur, hotel budget by material prices Rampur, hotel budget by labour Rampur, hotel budget by utilities Rampur, hotel budget by equipment Rampur, hotel budget by furniture Rampur, hotel budget by IT systems Rampur, hotel budget by licences Rampur, hotel budget by approvals Rampur, hotel budget by HVAC Rampur, hotel budget by fire safety Rampur, hotel budget by lifts Rampur, hotel budget by waterproofing Rampur, hotel budget by plumbing Rampur, hotel budget by electrical Rampur, hotel budget by structure Rampur, hotel budget by foundation Rampur, hotel budget by masonry Rampur, hotel budget by finishes Rampur, hotel budget by interiors Rampur, hotel budget by site development Rampur, hotel budget by professional services Rampur, hotel budget by contingency Rampur, hotel budget by payment stages Rampur, hotel budget by cash flow Rampur, hotel budget by hidden costs Rampur, hotel budget by change process Rampur, hotel budget by after handover support Rampur, hotel budget by warranty Rampur, hotel budget by care guidance Rampur, hotel budget by 3D design Rampur, hotel budget by itemised quotation Rampur, hotel cost per room Rampur, hotel cost per sq ft Rampur, hotel cost breakdown Rampur, hotel cost components Rampur, hotel cost inclusions Rampur, hotel cost exclusions Rampur, hotel cost drivers Rampur, hotel cost by type Rampur, hotel cost by department Rampur, hotel cost by zone Rampur, hotel cost by finish level Rampur, hotel cost by phasing Rampur, hotel cost by timeline Rampur, hotel cost by site conditions Rampur, hotel cost by soil conditions Rampur, hotel cost by material prices Rampur, hotel cost by labour Rampur, hotel cost by utilities Rampur, hotel cost by equipment Rampur, hotel cost by furniture Rampur, hotel cost by IT systems Rampur, hotel cost by licences Rampur, hotel cost by approvals Rampur, hotel cost by HVAC Rampur, hotel cost by fire safety Rampur, hotel cost by lifts Rampur, hotel cost by waterproofing Rampur, hotel cost by plumbing Rampur, hotel cost by electrical Rampur, hotel cost by structure Rampur, hotel cost by foundation Rampur, hotel cost by masonry Rampur, hotel cost by finishes Rampur, hotel cost by interiors Rampur, hotel cost by site development Rampur, hotel cost by professional services Rampur, hotel cost by contingency Rampur, hotel cost by payment stages Rampur, hotel cost by cash flow Rampur, hotel cost by hidden costs Rampur, hotel cost by change process Rampur, hotel cost by after handover support Rampur, hotel cost by warranty Rampur, hotel cost by care guidance Rampur, hotel cost by 3D design Rampur, hotel cost by itemised quotation Rampur, hotel construction estimate Rampur, hotel construction estimate company Rampur, hotel construction estimate contractor Rampur, hotel construction estimate builder Rampur, hotel construction estimate firm Rampur, hotel construction estimate services Rampur, hotel construction estimate and design Rampur, hotel construction estimate and interior Rampur, hotel construction estimate and civil work Rampur, hotel construction estimate and electrical Rampur, hotel construction estimate and plumbing Rampur, hotel construction estimate and HVAC Rampur, hotel construction estimate and fire safety Rampur, hotel construction estimate and lifts Rampur, hotel construction estimate and waterproofing Rampur, hotel construction estimate and finishing Rampur, hotel construction estimate and interiors Rampur, hotel construction estimate and site development Rampur, hotel construction estimate and phasing Rampur, hotel construction estimate and budget planning Rampur, hotel construction estimate and cost planning Rampur, hotel construction estimate and quotation Rampur, hotel construction estimate and estimate Rampur, hotel construction estimate and schedule Rampur, hotel construction estimate and timeline Rampur, hotel construction estimate and project management Rampur, hotel construction estimate and supervision Rampur, hotel construction estimate and handover Rampur, hotel construction estimate and after handover Rampur, hotel construction estimate and warranty Rampur, hotel construction estimate and care guidance Rampur, hotel construction estimate and 3D design Rampur, hotel construction estimate and itemised quotation Rampur, hotel construction quotation Rampur, hotel construction quotation company Rampur, hotel construction quotation contractor Rampur, hotel construction quotation builder Rampur, hotel construction quotation firm Rampur, hotel construction quotation services Rampur, hotel construction quotation and design Rampur, hotel construction quotation and interior Rampur, hotel construction quotation and civil work Rampur, hotel construction quotation and electrical Rampur, hotel construction quotation and plumbing Rampur, hotel construction quotation and HVAC Rampur, hotel construction quotation and fire safety Rampur, hotel construction quotation and lifts Rampur, hotel construction quotation and waterproofing Rampur, hotel construction quotation and finishing Rampur, hotel construction quotation and interiors Rampur, hotel construction quotation and site development Rampur, hotel construction quotation and phasing Rampur, hotel construction quotation and budget planning Rampur, hotel construction quotation and cost planning Rampur, hotel construction quotation and quotation Rampur, hotel construction quotation and estimate Rampur, hotel construction quotation and schedule Rampur, hotel construction quotation and timeline Rampur, hotel construction quotation and project management Rampur, hotel construction quotation and supervision Rampur, hotel construction quotation and handover Rampur, hotel construction quotation and after handover Rampur, hotel construction quotation and warranty Rampur, hotel construction quotation and care guidance Rampur, hotel construction quotation and 3D design Rampur, hotel construction quotation and itemised quotation Rampur, hotel BOQ Rampur, hotel BOQ company Rampur, hotel BOQ contractor Rampur, hotel BOQ firm Rampur, hotel BOQ services Rampur, hotel BOQ and design Rampur, hotel BOQ and interior Rampur, hotel BOQ and civil work Rampur, hotel BOQ and electrical Rampur, hotel BOQ and plumbing Rampur, hotel BOQ and HVAC Rampur, hotel BOQ and fire safety Rampur, hotel BOQ and lifts Rampur, hotel BOQ and waterproofing Rampur, hotel BOQ and finishing Rampur, hotel BOQ and interiors Rampur, hotel BOQ and site development Rampur, hotel BOQ and phasing Rampur, hotel BOQ and budget planning Rampur, hotel BOQ and cost planning Rampur, hotel BOQ and quotation Rampur, hotel BOQ and estimate Rampur, hotel BOQ and schedule Rampur, hotel BOQ and timeline Rampur, hotel BOQ and project management Rampur, hotel BOQ and supervision Rampur, hotel BOQ and handover Rampur, hotel BOQ and after handover Rampur, hotel BOQ and warranty Rampur, hotel BOQ and care guidance Rampur, hotel BOQ and 3D design Rampur, hotel BOQ and itemised quotation Rampur, hotel phasing Rampur, hotel phasing company Rampur, hotel phasing contractor Rampur, hotel phasing builder Rampur, hotel phasing firm Rampur, hotel phasing services Rampur, hotel phasing and design Rampur, hotel phasing and interior Rampur, hotel phasing and civil work Rampur, hotel phasing and electrical Rampur, hotel phasing and plumbing Rampur, hotel phasing and HVAC Rampur, hotel phasing and fire safety Rampur, hotel phasing and lifts Rampur, hotel phasing and waterproofing Rampur, hotel phasing and finishing Rampur, hotel phasing and interiors Rampur, hotel phasing and site development Rampur, hotel phasing and phasing Rampur, hotel phasing and budget planning Rampur, hotel phasing and cost planning Rampur, hotel phasing and quotation Rampur, hotel phasing and estimate Rampur, hotel phasing and schedule Rampur, hotel phasing and timeline Rampur, hotel phasing and project management Rampur, hotel phasing and supervision Rampur, hotel phasing and handover Rampur, hotel phasing and after handover Rampur, hotel phasing and warranty Rampur, hotel phasing and care guidance Rampur, hotel phasing and 3D design Rampur, hotel phasing and itemised quotation Rampur, hotel timeline Rampur, hotel timeline company Rampur, hotel timeline contractor Rampur, hotel timeline builder Rampur, hotel timeline firm Rampur, hotel timeline services Rampur, hotel timeline and design Rampur, hotel timeline and interior Rampur, hotel timeline and civil work Rampur, hotel timeline and electrical Rampur, hotel timeline and plumbing Rampur, hotel timeline and HVAC Rampur, hotel timeline and fire safety Rampur, hotel timeline and lifts Rampur, hotel timeline and waterproofing Rampur, hotel timeline and finishing Rampur, hotel timeline and interiors Rampur, hotel timeline and site development Rampur, hotel timeline and phasing Rampur, hotel timeline and budget planning Rampur, hotel timeline and cost planning Rampur, hotel timeline and quotation Rampur, hotel timeline and estimate Rampur, hotel timeline and schedule Rampur, hotel timeline and timeline Rampur, hotel timeline and project management Rampur, hotel timeline and supervision Rampur, hotel timeline and handover Rampur, hotel timeline and after handover Rampur, hotel timeline and warranty Rampur, hotel timeline and care guidance Rampur, hotel timeline and 3D design Rampur, hotel timeline and itemised quotation Rampur, hotel approvals Rampur, hotel approvals company Rampur, hotel approvals contractor Rampur, hotel approvals builder Rampur, hotel approvals firm Rampur, hotel approvals services Rampur, hotel approvals and design Rampur, hotel approvals and interior Rampur, hotel approvals and civil work Rampur, hotel approvals and electrical Rampur, hotel approvals and plumbing Rampur, hotel approvals and HVAC Rampur, hotel approvals and fire safety Rampur, hotel approvals and lifts Rampur, hotel approvals and waterproofing Rampur, hotel approvals and finishing Rampur, hotel approvals and interiors Rampur, hotel approvals and site development Rampur, hotel approvals and phasing Rampur, hotel approvals and budget planning Rampur, hotel approvals and cost planning Rampur, hotel approvals and quotation Rampur, hotel approvals and estimate Rampur, hotel approvals and schedule Rampur, hotel approvals and timeline Rampur, hotel approvals and project management Rampur, hotel approvals and supervision Rampur, hotel approvals and handover Rampur, hotel approvals and after handover Rampur, hotel approvals and warranty Rampur, hotel approvals and care guidance Rampur, hotel approvals and 3D design Rampur, hotel approvals and itemised quotation Rampur, MTBoss Rampur, MTBoss Moradabad, MTBoss Bareilly",
+
+  alternates: {
+    canonical:
+      "https://www.mtboss.in/hotel-construction-cost-rampur",
+  },
+
+  openGraph: {
+    title: "Hotel Construction Cost  Rampur | MTBoss",
+
+    description:
+      "Planning a hotel Rampur? See what drives hotel construction cost, how to budget per room, and get an itemised estimate from MTBoss. Request a quote.",
+
+    url: "https://www.mtboss.in/hotel-construction-cost-rampur",
+
+    siteName: "MTBOSS Construction Private Limited",
+
+    images: [
+      {
+        url: "https://www.mtboss.in/og-hotel-construction-cost-rampur.jpg",
+        width: 1200,
+        height: 630,
+        alt: "Hotel Construction Cost in Rampur - MTBoss",
+      },
+    ],
+
+    locale: "en_IN",
+    type: "website",
+  },
+
+  twitter: {
+    card: "summary_large_image",
+
+    title: "Hotel Construction Cost  Rampur | MTBoss",
+
+    description:
+      "Planning a hotel Rampur? See what drives hotel construction cost, how to budget per room, and get an itemised estimate from MTBoss. Request a quote.",
+
+    images: [
+      "https://www.mtboss.in/og-hotel-construction-cost-rampur.jpg",
+    ],
+  },
+
+  robots: {
+    index: true,
+    follow: true,
+  },
+};
+
+export default function Page() {
+  const localBusinessSchema = {
+    "@context": "https://schema.org",
+    "@type": "InteriorDesignService",
+    name: "MTBOSS Construction Private Limited",
+    url: "https://www.mtboss.in/hotel-construction-cost-rampur",
+    telephone: "+91-9458410866",
+    email: "mtboss2016@gmail.com",
+    image:
+      "https://www.mtboss.in/og-hotel-construction-cost-rampur.jpg",
+    priceRange: "₹₹",
+    address: {
+      "@type": "PostalAddress",
+      streetAddress:
+        "Harthala Kanth Road, Behind KR Collection, near Domino's",
+      addressLocality: "Moradabad",
+      addressRegion: "Uttar Pradesh",
+      addressCountry: "IN",
+    },
+    areaServed: [
+      {
+        "@type": "City",
+        name: "Rampur",
+      },
+      {
+        "@type": "City",
+        name: "Moradabad",
+      },
+      {
+        "@type": "City",
+        name: "Bareilly",
+      },
+      {
+        "@type": "State",
+        name: "Uttar Pradesh",
+      },
+    ],
+    serviceType: [
+      "Hotel Construction Cost",
+      "Hotel Construction Cost in Rampur",
+      "Hotel Construction Cost Per Square Foot",
+      "Hotel Construction Cost Per Room",
+      "Hotel Construction Cost Factors",
+      "Hotel Construction Budget",
+      "Hotel Construction Budget Planning",
+      "Hotel Construction Budget Guide",
+      "Hotel Construction Cost Breakdown",
+      "Hotel Construction Cost Components",
+      "Hotel Construction Cost Inclusions",
+      "Hotel Construction Cost Exclusions",
+      "Hotel Construction Cost Drivers",
+      "Hotel Construction Cost by Type",
+      "Hotel Construction Cost by Department",
+      "Hotel Construction Cost by Zone",
+      "Hotel Construction Cost by Finish Level",
+      "Hotel Construction Cost by Phasing",
+      "Hotel Construction Cost by Timeline",
+      "Hotel Construction Cost by Site Conditions",
+      "Hotel Construction Cost by Soil Conditions",
+      "Hotel Construction Cost by Material Prices",
+      "Hotel Construction Cost by Labour",
+      "Hotel Construction Cost by Utilities",
+      "Hotel Construction Cost by Equipment",
+      "Hotel Construction Cost by Furniture",
+      "Hotel Construction Cost by IT Systems",
+      "Hotel Construction Cost by Licences",
+      "Hotel Construction Cost by Approvals",
+      "Hotel Construction Cost by HVAC",
+      "Hotel Construction Cost by Fire Safety",
+      "Hotel Construction Cost by Lifts",
+      "Hotel Construction Cost by Waterproofing",
+      "Hotel Construction Cost by Plumbing",
+      "Hotel Construction Cost by Electrical",
+      "Hotel Construction Cost by Structure",
+      "Hotel Construction Cost by Foundation",
+      "Hotel Construction Cost by Masonry",
+      "Hotel Construction Cost by Finishes",
+      "Hotel Construction Cost by Interiors",
+      "Hotel Construction Cost by Site Development",
+      "Hotel Construction Cost by Professional Services",
+      "Hotel Construction Cost by Contingency",
+      "Hotel Construction Cost by Payment Stages",
+      "Hotel Construction Cost by Cash Flow",
+      "Hotel Construction Cost by Hidden Costs",
+      "Hotel Construction Cost by Change Process",
+      "Hotel Construction Cost by After Handover Support",
+      "Hotel Construction Cost by Warranty",
+      "Hotel Construction Cost by Care Guidance",
+      "Hotel Construction Cost by 3D Design",
+      "Hotel Construction Cost by Itemised Quotation",
+      "Hotel Budget",
+      "Hotel Budget Planning",
+      "Hotel Budget Guide",
+      "Hotel Budget Per Room",
+      "Hotel Budget Per Square Foot",
+      "Hotel Budget Breakdown",
+      "Hotel Budget Components",
+      "Hotel Budget Inclusions",
+      "Hotel Budget Exclusions",
+      "Hotel Budget Drivers",
+      "Hotel Budget by Type",
+      "Hotel Budget by Department",
+      "Hotel Budget by Zone",
+      "Hotel Budget by Finish Level",
+      "Hotel Budget by Phasing",
+      "Hotel Budget by Timeline",
+      "Hotel Budget by Site Conditions",
+      "Hotel Budget by Soil Conditions",
+      "Hotel Budget by Material Prices",
+      "Hotel Budget by Labour",
+      "Hotel Budget by Utilities",
+      "Hotel Budget by Equipment",
+      "Hotel Budget by Furniture",
+      "Hotel Budget by IT Systems",
+      "Hotel Budget by Licences",
+      "Hotel Budget by Approvals",
+      "Hotel Budget by HVAC",
+      "Hotel Budget by Fire Safety",
+      "Hotel Budget by Lifts",
+      "Hotel Budget by Waterproofing",
+      "Hotel Budget by Plumbing",
+      "Hotel Budget by Electrical",
+      "Hotel Budget by Structure",
+      "Hotel Budget by Foundation",
+      "Hotel Budget by Masonry",
+      "Hotel Budget by Finishes",
+      "Hotel Budget by Interiors",
+      "Hotel Budget by Site Development",
+      "Hotel Budget by Professional Services",
+      "Hotel Budget by Contingency",
+      "Hotel Budget by Payment Stages",
+      "Hotel Budget by Cash Flow",
+      "Hotel Budget by Hidden Costs",
+      "Hotel Budget by Change Process",
+      "Hotel Budget by After Handover Support",
+      "Hotel Budget by Warranty",
+      "Hotel Budget by Care Guidance",
+      "Hotel Budget by 3D Design",
+      "Hotel Budget by Itemised Quotation",
+      "Hotel Cost Per Room",
+      "Hotel Cost Per Square Foot",
+      "Hotel Cost Breakdown",
+      "Hotel Cost Components",
+      "Hotel Cost Inclusions",
+      "Hotel Cost Exclusions",
+      "Hotel Cost Drivers",
+      "Hotel Cost by Type",
+      "Hotel Cost by Department",
+      "Hotel Cost by Zone",
+      "Hotel Cost by Finish Level",
+      "Hotel Cost by Phasing",
+      "Hotel Cost by Timeline",
+      "Hotel Cost by Site Conditions",
+      "Hotel Cost by Soil Conditions",
+      "Hotel Cost by Material Prices",
+      "Hotel Cost by Labour",
+      "Hotel Cost by Utilities",
+      "Hotel Cost by Equipment",
+      "Hotel Cost by Furniture",
+      "Hotel Cost by IT Systems",
+      "Hotel Cost by Licences",
+      "Hotel Cost by Approvals",
+      "Hotel Cost by HVAC",
+      "Hotel Cost by Fire Safety",
+      "Hotel Cost by Lifts",
+      "Hotel Cost by Waterproofing",
+      "Hotel Cost by Plumbing",
+      "Hotel Cost by Electrical",
+      "Hotel Cost by Structure",
+      "Hotel Cost by Foundation",
+      "Hotel Cost by Masonry",
+      "Hotel Cost by Finishes",
+      "Hotel Cost by Interiors",
+      "Hotel Cost by Site Development",
+      "Hotel Cost by Professional Services",
+      "Hotel Cost by Contingency",
+      "Hotel Cost by Payment Stages",
+      "Hotel Cost by Cash Flow",
+      "Hotel Cost by Hidden Costs",
+      "Hotel Cost by Change Process",
+      "Hotel Cost by After Handover Support",
+      "Hotel Cost by Warranty",
+      "Hotel Cost by Care Guidance",
+      "Hotel Cost by 3D Design",
+      "Hotel Cost by Itemised Quotation",
+      "Hotel Construction Estimate",
+      "Hotel Construction Estimate Company",
+      "Hotel Construction Estimate Contractor",
+      "Hotel Construction Estimate Builder",
+      "Hotel Construction Estimate Firm",
+      "Hotel Construction Estimate Services",
+      "Hotel Construction Estimate and Design",
+      "Hotel Construction Estimate and Interior",
+      "Hotel Construction Estimate and Civil Work",
+      "Hotel Construction Estimate and Electrical",
+      "Hotel Construction Estimate and Plumbing",
+      "Hotel Construction Estimate and HVAC",
+      "Hotel Construction Estimate and Fire Safety",
+      "Hotel Construction Estimate and Lifts",
+      "Hotel Construction Estimate and Waterproofing",
+      "Hotel Construction Estimate and Finishing",
+      "Hotel Construction Estimate and Interiors",
+      "Hotel Construction Estimate and Site Development",
+      "Hotel Construction Estimate and Phasing",
+      "Hotel Construction Estimate and Budget Planning",
+      "Hotel Construction Estimate and Cost Planning",
+      "Hotel Construction Estimate and Quotation",
+      "Hotel Construction Estimate and Estimate",
+      "Hotel Construction Estimate and Schedule",
+      "Hotel Construction Estimate and Timeline",
+      "Hotel Construction Estimate and Project Management",
+      "Hotel Construction Estimate and Supervision",
+      "Hotel Construction Estimate and Handover",
+      "Hotel Construction Estimate and After Handover",
+      "Hotel Construction Estimate and Warranty",
+      "Hotel Construction Estimate and Care Guidance",
+      "Hotel Construction Estimate and 3D Design",
+      "Hotel Construction Estimate and Itemised Quotation",
+      "Hotel Construction Quotation",
+      "Hotel Construction Quotation Company",
+      "Hotel Construction Quotation Contractor",
+      "Hotel Construction Quotation Builder",
+      "Hotel Construction Quotation Firm",
+      "Hotel Construction Quotation Services",
+      "Hotel Construction Quotation and Design",
+      "Hotel Construction Quotation and Interior",
+      "Hotel Construction Quotation and Civil Work",
+      "Hotel Construction Quotation and Electrical",
+      "Hotel Construction Quotation and Plumbing",
+      "Hotel Construction Quotation and HVAC",
+      "Hotel Construction Quotation and Fire Safety",
+      "Hotel Construction Quotation and Lifts",
+      "Hotel Construction Quotation and Waterproofing",
+      "Hotel Construction Quotation and Finishing",
+      "Hotel Construction Quotation and Interiors",
+      "Hotel Construction Quotation and Site Development",
+      "Hotel Construction Quotation and Phasing",
+      "Hotel Construction Quotation and Budget Planning",
+      "Hotel Construction Quotation and Cost Planning",
+      "Hotel Construction Quotation and Quotation",
+      "Hotel Construction Quotation and Estimate",
+      "Hotel Construction Quotation and Schedule",
+      "Hotel Construction Quotation and Timeline",
+      "Hotel Construction Quotation and Project Management",
+      "Hotel Construction Quotation and Supervision",
+      "Hotel Construction Quotation and Handover",
+      "Hotel Construction Quotation and After Handover",
+      "Hotel Construction Quotation and Warranty",
+      "Hotel Construction Quotation and Care Guidance",
+      "Hotel Construction Quotation and 3D Design",
+      "Hotel Construction Quotation and Itemised Quotation",
+      "Hotel BOQ",
+      "Hotel BOQ Company",
+      "Hotel BOQ Contractor",
+      "Hotel BOQ Firm",
+      "Hotel BOQ Services",
+      "Hotel BOQ and Design",
+      "Hotel BOQ and Interior",
+      "Hotel BOQ and Civil Work",
+      "Hotel BOQ and Electrical",
+      "Hotel BOQ and Plumbing",
+      "Hotel BOQ and HVAC",
+      "Hotel BOQ and Fire Safety",
+      "Hotel BOQ and Lifts",
+      "Hotel BOQ and Waterproofing",
+      "Hotel BOQ and Finishing",
+      "Hotel BOQ and Interiors",
+      "Hotel BOQ and Site Development",
+      "Hotel BOQ and Phasing",
+      "Hotel BOQ and Budget Planning",
+      "Hotel BOQ and Cost Planning",
+      "Hotel BOQ and Quotation",
+      "Hotel BOQ and Estimate",
+      "Hotel BOQ and Schedule",
+      "Hotel BOQ and Timeline",
+      "Hotel BOQ and Project Management",
+      "Hotel BOQ and Supervision",
+      "Hotel BOQ and Handover",
+      "Hotel BOQ and After Handover",
+      "Hotel BOQ and Warranty",
+      "Hotel BOQ and Care Guidance",
+      "Hotel BOQ and 3D Design",
+      "Hotel BOQ and Itemised Quotation",
+      "Hotel Phasing",
+      "Hotel Phasing Company",
+      "Hotel Phasing Contractor",
+      "Hotel Phasing Builder",
+      "Hotel Phasing Firm",
+      "Hotel Phasing Services",
+      "Hotel Phasing and Design",
+      "Hotel Phasing and Interior",
+      "Hotel Phasing and Civil Work",
+      "Hotel Phasing and Electrical",
+      "Hotel Phasing and Plumbing",
+      "Hotel Phasing and HVAC",
+      "Hotel Phasing and Fire Safety",
+      "Hotel Phasing and Lifts",
+      "Hotel Phasing and Waterproofing",
+      "Hotel Phasing and Finishing",
+      "Hotel Phasing and Interiors",
+      "Hotel Phasing and Site Development",
+      "Hotel Phasing and Phasing",
+      "Hotel Phasing and Budget Planning",
+      "Hotel Phasing and Cost Planning",
+      "Hotel Phasing and Quotation",
+      "Hotel Phasing and Estimate",
+      "Hotel Phasing and Schedule",
+      "Hotel Phasing and Timeline",
+      "Hotel Phasing and Project Management",
+      "Hotel Phasing and Supervision",
+      "Hotel Phasing and Handover",
+      "Hotel Phasing and After Handover",
+      "Hotel Phasing and Warranty",
+      "Hotel Phasing and Care Guidance",
+      "Hotel Phasing and 3D Design",
+      "Hotel Phasing and Itemised Quotation",
+      "Hotel Timeline",
+      "Hotel Timeline Company",
+      "Hotel Timeline Contractor",
+      "Hotel Timeline Builder",
+      "Hotel Timeline Firm",
+      "Hotel Timeline Services",
+      "Hotel Timeline and Design",
+      "Hotel Timeline and Interior",
+      "Hotel Timeline and Civil Work",
+      "Hotel Timeline and Electrical",
+      "Hotel Timeline and Plumbing",
+      "Hotel Timeline and HVAC",
+      "Hotel Timeline and Fire Safety",
+      "Hotel Timeline and Lifts",
+      "Hotel Timeline and Waterproofing",
+      "Hotel Timeline and Finishing",
+      "Hotel Timeline and Interiors",
+      "Hotel Timeline and Site Development",
+      "Hotel Timeline and Phasing",
+      "Hotel Timeline and Budget Planning",
+      "Hotel Timeline and Cost Planning",
+      "Hotel Timeline and Quotation",
+      "Hotel Timeline and Estimate",
+      "Hotel Timeline and Schedule",
+      "Hotel Timeline and Timeline",
+      "Hotel Timeline and Project Management",
+      "Hotel Timeline and Supervision",
+      "Hotel Timeline and Handover",
+      "Hotel Timeline and After Handover",
+      "Hotel Timeline and Warranty",
+      "Hotel Timeline and Care Guidance",
+      "Hotel Timeline and 3D Design",
+      "Hotel Timeline and Itemised Quotation",
+      "Hotel Approvals",
+      "Hotel Approvals Company",
+      "Hotel Approvals Contractor",
+      "Hotel Approvals Builder",
+      "Hotel Approvals Firm",
+      "Hotel Approvals Services",
+      "Hotel Approvals and Design",
+      "Hotel Approvals and Interior",
+      "Hotel Approvals and Civil Work",
+      "Hotel Approvals and Electrical",
+      "Hotel Approvals and Plumbing",
+      "Hotel Approvals and HVAC",
+      "Hotel Approvals and Fire Safety",
+      "Hotel Approvals and Lifts",
+      "Hotel Approvals and Waterproofing",
+      "Hotel Approvals and Finishing",
+      "Hotel Approvals and Interiors",
+      "Hotel Approvals and Site Development",
+      "Hotel Approvals and Phasing",
+      "Hotel Approvals and Budget Planning",
+      "Hotel Approvals and Cost Planning",
+      "Hotel Approvals and Quotation",
+      "Hotel Approvals and Estimate",
+      "Hotel Approvals and Schedule",
+      "Hotel Approvals and Timeline",
+      "Hotel Approvals and Project Management",
+      "Hotel Approvals and Supervision",
+      "Hotel Approvals and Handover",
+      "Hotel Approvals and After Handover",
+      "Hotel Approvals and Warranty",
+      "Hotel Approvals and Care Guidance",
+      "Hotel Approvals and 3D Design",
+      "Hotel Approvals and Itemised Quotation",
+    ],
+  };
+
+  const serviceSchema = {
+    "@context": "https://schema.org",
+    "@type": "Service",
+    name: "Hotel Construction Cost in Rampur",
+    description:
+      "Planning a hotel Rampur? See what drives hotel construction cost, how to budget per room, and get an itemised estimate from MTBoss. Request a quote. Services include hotel construction cost, hotel construction budget, hotel cost per room, hotel cost per sq ft, hotel construction estimate, hotel construction quotation, hotel BOQ, hotel phasing, hotel timeline and hotel approvals.",
+    url: "https://www.mtboss.in/hotel-construction-cost-rampur",
+    provider: {
+      "@type": "InteriorDesignService",
+      name: "MTBOSS Construction Private Limited",
+      telephone: "+91-9458410866",
+      email: "mtboss2016@gmail.com",
+      url: "https://www.mtboss.in",
+    },
+    areaServed: [
+      {
+        "@type": "City",
+        name: "Rampur",
+      },
+      {
+        "@type": "City",
+        name: "Moradabad",
+      },
+      {
+        "@type": "City",
+        name: "Bareilly",
+      },
+    ],
+    serviceType:
+      "Hotel Construction Cost, Hotel Construction Cost in Rampur, Hotel Construction Cost Per Square Foot, Hotel Construction Cost Per Room, Hotel Construction Cost Factors, Hotel Construction Budget, Hotel Construction Budget Planning, Hotel Construction Budget Guide, Hotel Construction Cost Breakdown, Hotel Construction Cost Components, Hotel Construction Cost Inclusions, Hotel Construction Cost Exclusions, Hotel Construction Cost Drivers, Hotel Construction Cost by Type, Hotel Construction Cost by Department, Hotel Construction Cost by Zone, Hotel Construction Cost by Finish Level, Hotel Construction Cost by Phasing, Hotel Construction Cost by Timeline, Hotel Construction Cost by Site Conditions, Hotel Construction Cost by Soil Conditions, Hotel Construction Cost by Material Prices, Hotel Construction Cost by Labour, Hotel Construction Cost by Utilities, Hotel Construction Cost by Equipment, Hotel Construction Cost by Furniture, Hotel Construction Cost by IT Systems, Hotel Construction Cost by Licences, Hotel Construction Cost by Approvals, Hotel Construction Cost by HVAC, Hotel Construction Cost by Fire Safety, Hotel Construction Cost by Lifts, Hotel Construction Cost by Waterproofing, Hotel Construction Cost by Plumbing, Hotel Construction Cost by Electrical, Hotel Construction Cost by Structure, Hotel Construction Cost by Foundation, Hotel Construction Cost by Masonry, Hotel Construction Cost by Finishes, Hotel Construction Cost by Interiors, Hotel Construction Cost by Site Development, Hotel Construction Cost by Professional Services, Hotel Construction Cost by Contingency, Hotel Construction Cost by Payment Stages, Hotel Construction Cost by Cash Flow, Hotel Construction Cost by Hidden Costs, Hotel Construction Cost by Change Process, Hotel Construction Cost by After Handover Support, Hotel Construction Cost by Warranty, Hotel Construction Cost by Care Guidance, Hotel Construction Cost by 3D Design, Hotel Construction Cost by Itemised Quotation, Hotel Budget, Hotel Budget Planning, Hotel Budget Guide, Hotel Budget Per Room, Hotel Budget Per Square Foot, Hotel Budget Breakdown, Hotel Budget Components, Hotel Budget Inclusions, Hotel Budget Exclusions, Hotel Budget Drivers, Hotel Budget by Type, Hotel Budget by Department, Hotel Budget by Zone, Hotel Budget by Finish Level, Hotel Budget by Phasing, Hotel Budget by Timeline, Hotel Budget by Site Conditions, Hotel Budget by Soil Conditions, Hotel Budget by Material Prices, Hotel Budget by Labour, Hotel Budget by Utilities, Hotel Budget by Equipment, Hotel Budget by Furniture, Hotel Budget by IT Systems, Hotel Budget by Licences, Hotel Budget by Approvals, Hotel Budget by HVAC, Hotel Budget by Fire Safety, Hotel Budget by Lifts, Hotel Budget by Waterproofing, Hotel Budget by Plumbing, Hotel Budget by Electrical, Hotel Budget by Structure, Hotel Budget by Foundation, Hotel Budget by Masonry, Hotel Budget by Finishes, Hotel Budget by Interiors, Hotel Budget by Site Development, Hotel Budget by Professional Services, Hotel Budget by Contingency, Hotel Budget by Payment Stages, Hotel Budget by Cash Flow, Hotel Budget by Hidden Costs, Hotel Budget by Change Process, Hotel Budget by After Handover Support, Hotel Budget by Warranty, Hotel Budget by Care Guidance, Hotel Budget by 3D Design, Hotel Budget by Itemised Quotation, Hotel Cost Per Room, Hotel Cost Per Square Foot, Hotel Cost Breakdown, Hotel Cost Components, Hotel Cost Inclusions, Hotel Cost Exclusions, Hotel Cost Drivers, Hotel Cost by Type, Hotel Cost by Department, Hotel Cost by Zone, Hotel Cost by Finish Level, Hotel Cost by Phasing, Hotel Cost by Timeline, Hotel Cost by Site Conditions, Hotel Cost by Soil Conditions, Hotel Cost by Material Prices, Hotel Cost by Labour, Hotel Cost by Utilities, Hotel Cost by Equipment, Hotel Cost by Furniture, Hotel Cost by IT Systems, Hotel Cost by Licences, Hotel Cost by Approvals, Hotel Cost by HVAC, Hotel Cost by Fire Safety, Hotel Cost by Lifts, Hotel Cost by Waterproofing, Hotel Cost by Plumbing, Hotel Cost by Electrical, Hotel Cost by Structure, Hotel Cost by Foundation, Hotel Cost by Masonry, Hotel Cost by Finishes, Hotel Cost by Interiors, Hotel Cost by Site Development, Hotel Cost by Professional Services, Hotel Cost by Contingency, Hotel Cost by Payment Stages, Hotel Cost by Cash Flow, Hotel Cost by Hidden Costs, Hotel Cost by Change Process, Hotel Cost by After Handover Support, Hotel Cost by Warranty, Hotel Cost by Care Guidance, Hotel Cost by 3D Design, Hotel Cost by Itemised Quotation, Hotel Construction Estimate, Hotel Construction Estimate Company, Hotel Construction Estimate Contractor, Hotel Construction Estimate Builder, Hotel Construction Estimate Firm, Hotel Construction Estimate Services, Hotel Construction Estimate and Design, Hotel Construction Estimate and Interior, Hotel Construction Estimate and Civil Work, Hotel Construction Estimate and Electrical, Hotel Construction Estimate and Plumbing, Hotel Construction Estimate and HVAC, Hotel Construction Estimate and Fire Safety, Hotel Construction Estimate and Lifts, Hotel Construction Estimate and Waterproofing, Hotel Construction Estimate and Finishing, Hotel Construction Estimate and Interiors, Hotel Construction Estimate and Site Development, Hotel Construction Estimate and Phasing, Hotel Construction Estimate and Budget Planning, Hotel Construction Estimate and Cost Planning, Hotel Construction Estimate and Quotation, Hotel Construction Estimate and Estimate, Hotel Construction Estimate and Schedule, Hotel Construction Estimate and Timeline, Hotel Construction Estimate and Project Management, Hotel Construction Estimate and Supervision, Hotel Construction Estimate and Handover, Hotel Construction Estimate and After Handover, Hotel Construction Estimate and Warranty, Hotel Construction Estimate and Care Guidance, Hotel Construction Estimate and 3D Design, Hotel Construction Estimate and Itemised Quotation, Hotel Construction Quotation, Hotel Construction Quotation Company, Hotel Construction Quotation Contractor, Hotel Construction Quotation Builder, Hotel Construction Quotation Firm, Hotel Construction Quotation Services, Hotel Construction Quotation and Design, Hotel Construction Quotation and Interior, Hotel Construction Quotation and Civil Work, Hotel Construction Quotation and Electrical, Hotel Construction Quotation and Plumbing, Hotel Construction Quotation and HVAC, Hotel Construction Quotation and Fire Safety, Hotel Construction Quotation and Lifts, Hotel Construction Quotation and Waterproofing, Hotel Construction Quotation and Finishing, Hotel Construction Quotation and Interiors, Hotel Construction Quotation and Site Development, Hotel Construction Quotation and Phasing, Hotel Construction Quotation and Budget Planning, Hotel Construction Quotation and Cost Planning, Hotel Construction Quotation and Quotation, Hotel Construction Quotation and Estimate, Hotel Construction Quotation and Schedule, Hotel Construction Quotation and Timeline, Hotel Construction Quotation and Project Management, Hotel Construction Quotation and Supervision, Hotel Construction Quotation and Handover, Hotel Construction Quotation and After Handover, Hotel Construction Quotation and Warranty, Hotel Construction Quotation and Care Guidance, Hotel Construction Quotation and 3D Design, Hotel Construction Quotation and Itemised Quotation, Hotel BOQ, Hotel BOQ Company, Hotel BOQ Contractor, Hotel BOQ Firm, Hotel BOQ Services, Hotel BOQ and Design, Hotel BOQ and Interior, Hotel BOQ and Civil Work, Hotel BOQ and Electrical, Hotel BOQ and Plumbing, Hotel BOQ and HVAC, Hotel BOQ and Fire Safety, Hotel BOQ and Lifts, Hotel BOQ and Waterproofing, Hotel BOQ and Finishing, Hotel BOQ and Interiors, Hotel BOQ and Site Development, Hotel BOQ and Phasing, Hotel BOQ and Budget Planning, Hotel BOQ and Cost Planning, Hotel BOQ and Quotation, Hotel BOQ and Estimate, Hotel BOQ and Schedule, Hotel BOQ and Timeline, Hotel BOQ and Project Management, Hotel BOQ and Supervision, Hotel BOQ and Handover, Hotel BOQ and After Handover, Hotel BOQ and Warranty, Hotel BOQ and Care Guidance, Hotel BOQ and 3D Design, Hotel BOQ and Itemised Quotation, Hotel Phasing, Hotel Phasing Company, Hotel Phasing Contractor, Hotel Phasing Builder, Hotel Phasing Firm, Hotel Phasing Services, Hotel Phasing and Design, Hotel Phasing and Interior, Hotel Phasing and Civil Work, Hotel Phasing and Electrical, Hotel Phasing and Plumbing, Hotel Phasing and HVAC, Hotel Phasing and Fire Safety, Hotel Phasing and Lifts, Hotel Phasing and Waterproofing, Hotel Phasing and Finishing, Hotel Phasing and Interiors, Hotel Phasing and Site Development, Hotel Phasing and Phasing, Hotel Phasing and Budget Planning, Hotel Phasing and Cost Planning, Hotel Phasing and Quotation, Hotel Phasing and Estimate, Hotel Phasing and Schedule, Hotel Phasing and Timeline, Hotel Phasing and Project Management, Hotel Phasing and Supervision, Hotel Phasing and Handover, Hotel Phasing and After Handover, Hotel Phasing and Warranty, Hotel Phasing and Care Guidance, Hotel Phasing and 3D Design, Hotel Phasing and Itemised Quotation, Hotel Timeline, Hotel Timeline Company, Hotel Timeline Contractor, Hotel Timeline Builder, Hotel Timeline Firm, Hotel Timeline Services, Hotel Timeline and Design, Hotel Timeline and Interior, Hotel Timeline and Civil Work, Hotel Timeline and Electrical, Hotel Timeline and Plumbing, Hotel Timeline and HVAC, Hotel Timeline and Fire Safety, Hotel Timeline and Lifts, Hotel Timeline and Waterproofing, Hotel Timeline and Finishing, Hotel Timeline and Interiors, Hotel Timeline and Site Development, Hotel Timeline and Phasing, Hotel Timeline and Budget Planning, Hotel Timeline and Cost Planning, Hotel Timeline and Quotation, Hotel Timeline and Estimate, Hotel Timeline and Schedule, Hotel Timeline and Timeline, Hotel Timeline and Project Management, Hotel Timeline and Supervision, Hotel Timeline and Handover, Hotel Timeline and After Handover, Hotel Timeline and Warranty, Hotel Timeline and Care Guidance, Hotel Timeline and 3D Design, Hotel Timeline and Itemised Quotation, Hotel Approvals, Hotel Approvals Company, Hotel Approvals Contractor, Hotel Approvals Builder, Hotel Approvals Firm, Hotel Approvals Services, Hotel Approvals and Design, Hotel Approvals and Interior, Hotel Approvals and Civil Work, Hotel Approvals and Electrical, Hotel Approvals and Plumbing, Hotel Approvals and HVAC, Hotel Approvals and Fire Safety, Hotel Approvals and Lifts, Hotel Approvals and Waterproofing, Hotel Approvals and Finishing, Hotel Approvals and Interiors, Hotel Approvals and Site Development, Hotel Approvals and Phasing, Hotel Approvals and Budget Planning, Hotel Approvals and Cost Planning, Hotel Approvals and Quotation, Hotel Approvals and Estimate, Hotel Approvals and Schedule, Hotel Approvals and Timeline, Hotel Approvals and Project Management, Hotel Approvals and Supervision, Hotel Approvals and Handover, Hotel Approvals and After Handover, Hotel Approvals and Warranty, Hotel Approvals and Care Guidance, Hotel Approvals and 3D Design and Hotel Approvals and Itemised Quotation",
+  };
+
+  const faqSchema = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: [
+      {
+        "@type": "Question",
+        name: "What is the hotel construction cost in Rampur?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "It depends on rooms, finish, services and site. We give an itemised estimate after a visit [add range if published].",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "Do you have an office in Rampur?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "No. We serve Rampur through visits, shared drawings and updates.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "Is cost quoted per room or per sq ft?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "We show both, with inclusions and exclusions listed in writing.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "What costs sit outside the construction rate?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "Furniture, kitchen equipment, authority fees, connections and pre-opening costs.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "Do lifts, air conditioning and fire systems cost extra?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "They are priced as separate lines, so you can see each clearly.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "Can I build in phases?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "Yes. We plan foundations and services for the full building.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "How are payments structured?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "In stages linked to completed work, with a tax invoice for each payment.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "Can I check the cost first?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "Yes. Use the Budget Calculator on www.mtboss.in for an early idea.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "How do I contact MTBoss?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "Call or WhatsApp +91 94584 10866, or use \"Get a Construction Quote\" on www.mtboss.in.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "Which areas do you serve?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "Moradabad, Bareilly and nearby areas. Confirm Rampur when you first contact us.",
+        },
+      },
+    ],
+  };
+
+  const breadcrumbSchema = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: "Home",
+        item: "https://www.mtboss.in/",
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: "Hotel Construction",
+        item: "https://www.mtboss.in/hotel-construction",
+      },
+      {
+        "@type": "ListItem",
+        position: 3,
+        name: "Hotel Construction Cost Rampur",
+        item: "https://www.mtboss.in/hotel-construction-cost-rampur",
+      },
+    ],
+  };
+
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(localBusinessSchema),
+        }}
+      />
+
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(serviceSchema),
+        }}
+      />
+
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(faqSchema),
+        }}
+      />
+
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(breadcrumbSchema),
+        }}
+      />
+
+      <Banner />
+      <Content />
+      <QuickServices />
+      <Services />
+      <CalculatorCTA />
+    </>
+  );
+}
