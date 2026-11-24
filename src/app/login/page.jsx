@@ -638,7 +638,7 @@ export default function LoginPage() {
                       setError('');
                     }}
                   >
-                    Admin sign-in with email & password →
+                    Admin&Customers sign-in with email & password →
                   </button>
                 </div>
 
@@ -730,7 +730,7 @@ export default function LoginPage() {
                       <><span className="lp-spinner" /> Signing in…</>
                     ) : (
                       <>
-                        Admin sign in
+                        Admin&Customers sign in
                         <ArrowRight size={17} strokeWidth={2.25} />
                       </>
                     )}
@@ -746,7 +746,7 @@ export default function LoginPage() {
                       setError('');
                     }}
                   >
-                    ← Back to customer mobile login
+                    ← Back to Admin&customer mobile login
                   </button>
                 </div>
               </>

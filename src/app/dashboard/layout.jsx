@@ -7,6 +7,7 @@ import { AdminStatusBadge } from "./AdminUI";
 import DashboardNotifications from "./DashboardNotifications";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ACTIVE_ROLE_KEY } from "@/lib/client-session";
+import { isAdminEmail } from "@/lib/admin-email";
 import {
   LayoutDashboard,
   UserCog,
@@ -555,6 +556,8 @@ export default function DashboardLayout({ children }) {
             router.replace("/supplier/dashboard");
             return;
           }
+          router.replace("/login");
+          return;
         }
 
         let u = null;
@@ -582,6 +585,18 @@ export default function DashboardLayout({ children }) {
             }
           }
         }
+
+        // Previous admin IDs must not keep the admin panel open.
+        if (u?.role === "admin" && !isAdminEmail(u.email)) {
+          localStorage.removeItem("admin-token");
+          localStorage.removeItem("token");
+          localStorage.removeItem("admin");
+          localStorage.removeItem("user");
+          localStorage.removeItem(ACTIVE_ROLE_KEY);
+          router.replace("/login");
+          return;
+        }
+
         setUser(u || {});
       } catch {
         setUser({});

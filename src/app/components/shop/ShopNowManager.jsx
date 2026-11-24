@@ -1363,7 +1363,6 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                 { id: 'variants', label: 'Variants', icon: '🧬', num: 7, badge: form.variants?.length || 0 },
                 { id: 'bulk', label: 'Bulk Prices', icon: '📊', num: 8 },
                 { id: 'seo', label: 'SEO & Policies', icon: '🔍', num: 9 },
-                ...(!isSeller ? [{ id: 'admin_only', label: 'Admin Internal', icon: '🔒', num: 10 }] : []),
               ].map((tab) => {
                 const isActive = formTab === tab.id;
                 return (
@@ -1388,68 +1387,6 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
             {/* TAB 1: BASIC INFO */}
             {formTab === 'basic' && (
               <div className="shop-tab-pane shop-admin-wide" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
-                {!isSeller && (
-                  <div
-                    className="shop-admin-wide"
-                    style={{
-                      background: 'var(--shop-admin-subtle, #f8fafc)',
-                      padding: '14px 18px',
-                      borderRadius: 10,
-                      border: '1px solid var(--shop-admin-border, #cbd5e1)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      flexWrap: 'wrap',
-                      gap: 14,
-                    }}
-                  >
-                    <div>
-                      <strong style={{ fontSize: 13, display: 'block', color: 'var(--shop-admin-text, #0f172a)' }}>
-                        🛡️ Product Approval & Store Status
-                      </strong>
-                      <span style={{ fontSize: 12, color: 'var(--shop-admin-muted, #64748b)' }}>
-                        Control whether this product is approved for customers to buy on Shop Now.
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <label style={{ margin: 0, fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        Approval Status:
-                        <select
-                          value={form.approval_status || 'approved'}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setForm({
-                              ...form,
-                              approval_status: val,
-                              is_available: val === 'approved',
-                            });
-                          }}
-                          style={{
-                            padding: '6px 12px',
-                            borderRadius: 6,
-                            fontWeight: 700,
-                            borderColor: form.approval_status === 'approved' ? '#16a34a' : form.approval_status === 'rejected' ? '#dc2626' : '#d97706',
-                          }}
-                        >
-                          <option value="approved">✓ Approved (Active on Store)</option>
-                          <option value="pending">⏳ Pending Approval</option>
-                          <option value="rejected">✕ Rejected</option>
-                        </select>
-                      </label>
-
-                      {form.approval_status === 'rejected' && (
-                        <input
-                          value={form.rejection_reason || ''}
-                          onChange={(e) => setForm({ ...form, rejection_reason: e.target.value })}
-                          placeholder="Rejection reason for seller..."
-                          style={{ minWidth: 260, padding: '6px 10px', fontSize: 12 }}
-                        />
-                      )}
-                    </div>
-                  </div>
-                )}
-
                 <label className="shop-admin-wide">
                   <span>Product Name <span style={{ color: '#ef4444' }}>*</span></span>
                   <input required maxLength={255} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. UltraTech Super Cement 50 Kg Bag" />
@@ -2460,30 +2397,6 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
               </div>
             )}
 
-            {/* TAB 10: ADMIN INTERNAL (Admin Only) */}
-            {!isSeller && formTab === 'admin_only' && (
-              <div className="shop-tab-pane shop-admin-wide" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
-                <label>
-                  <span>HTTP Status Code</span>
-                  <input
-                    value={form.http_status || '200'}
-                    onChange={(e) => setForm({ ...form, http_status: e.target.value })}
-                    placeholder="200"
-                  />
-                  <small style={{ color: 'var(--shop-admin-muted)' }}>Extraction / import tracking status.</small>
-                </label>
-
-                <label className="shop-admin-wide">
-                  <span>Internal Extraction Notes (Admin Only)</span>
-                  <textarea
-                    rows="4"
-                    value={form.extraction_notes}
-                    onChange={(e) => setForm({ ...form, extraction_notes: e.target.value })}
-                    placeholder="Internal administrative notes, source supplier reference, scraper remarks (Never shown to vendors or customers)..."
-                  />
-                </label>
-              </div>
-            )}
           </div>
 
           {/* Form Actions Footer */}
@@ -2492,7 +2405,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
               type="button"
               className="shop-tab-nav-btn"
               onClick={() => {
-                const tabs = ['basic', 'identifiers', 'pricing', 'inventory', 'media', 'specs', 'variants', 'bulk', 'seo', ...(!isSeller ? ['admin_only'] : [])];
+                const tabs = ['basic', 'identifiers', 'pricing', 'inventory', 'media', 'specs', 'variants', 'bulk', 'seo'];
                 const curIdx = tabs.indexOf(formTab);
                 if (curIdx > 0) setFormTab(tabs[curIdx - 1]);
               }}
@@ -2504,11 +2417,11 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
               type="button"
               className="shop-tab-nav-btn"
               onClick={() => {
-                const tabs = ['basic', 'identifiers', 'pricing', 'inventory', 'media', 'specs', 'variants', 'bulk', 'seo', ...(!isSeller ? ['admin_only'] : [])];
+                const tabs = ['basic', 'identifiers', 'pricing', 'inventory', 'media', 'specs', 'variants', 'bulk', 'seo'];
                 const curIdx = tabs.indexOf(formTab);
                 if (curIdx < tabs.length - 1) setFormTab(tabs[curIdx + 1]);
               }}
-              disabled={formTab === (isSeller ? 'seo' : 'admin_only')}
+              disabled={formTab === 'seo'}
             >
               Next Tab →
             </button>

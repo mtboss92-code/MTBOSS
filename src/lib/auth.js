@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { NextResponse } from 'next/server';
+import { isAdminEmail } from '@/lib/admin-email';
 
 const DEV_JWT_SECRET = 'development-only-change-me';
 
@@ -62,6 +63,8 @@ export function verifyBearer(req, role) {
 export function requireRole(req, role) {
   const user = verifyBearer(req, role);
   if (!user || user.role !== role) return null;
+  // Old admin JWTs (previous emails) must not keep admin panel/API access.
+  if (role === 'admin' && !isAdminEmail(user.email)) return null;
   return user;
 }
 
