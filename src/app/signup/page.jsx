@@ -235,10 +235,13 @@ export default function SignupPage() {
             max-width: 34rem !important;
           }
 
-          /* The desktop brand panel has a fixed 300px width. Hide it on
-             narrow screens so the account form receives the full viewport. */
+          /* Stack the brand information above the form on narrow screens. */
           .signup-brand {
-            display: none !important;
+            display: flex !important;
+            flex: none !important;
+            min-height: 0 !important;
+            padding: 1.5rem !important;
+            gap: 1.5rem;
           }
 
           .signup-form-panel {
@@ -254,6 +257,10 @@ export default function SignupPage() {
           }
 
           .signup-form-panel {
+            padding: 1.25rem 1rem !important;
+          }
+
+          .signup-brand {
             padding: 1.25rem 1rem !important;
           }
         }
