@@ -178,7 +178,7 @@ export default function ClientLayout({ children }) {
         href={COMPANY_CONTACT.telHref}
         aria-label={`Call MTBOSS at ${COMPANY_CONTACT.phone}`}
         title={`Call ${COMPANY_CONTACT.phone}`}
-        className="fixed bottom-24 right-6 z-[9999] flex h-14 w-14 items-center justify-center rounded-full bg-[var(--brand-blue)] text-white shadow-lg transition-transform hover:scale-110"
+        className="support-call-button fixed bottom-24 right-6 z-[9999] flex h-14 w-14 items-center justify-center rounded-full bg-[var(--brand-blue)] text-white shadow-lg transition-transform hover:scale-110"
       >
         <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.09 5.18 2 2 0 0 1 5.08 3h3a2 2 0 0 1 2 1.72c.12.96.35 1.9.68 2.79a2 2 0 0 1-.45 2.11L9.04 10.9a16 16 0 0 0 4.06 4.06l1.28-1.27a2 2 0 0 1 2.11-.45c.89.33 1.83.56 2.79.68A2 2 0 0 1 22 16.92z" />
@@ -188,6 +188,7 @@ export default function ClientLayout({ children }) {
         href={COMPANY_CONTACT.whatsappHref}
         target="_blank"
         rel="noopener noreferrer"
+        className="support-whatsapp-button"
         style={{
           position: 'fixed',
           bottom: '24px',
@@ -222,6 +223,20 @@ export default function ClientLayout({ children }) {
 
       {/* CSS for WhatsApp Pulse animation */}
       <style>{`
+        /* Shared floating-support layout: call above WhatsApp, AI launcher
+           to their left. This keeps all touch targets distinct at every size. */
+        @media (max-width: 768px) {
+          .support-call-button {
+            bottom: 5.875rem !important;
+            right: 1.5rem !important;
+          }
+
+          .support-whatsapp-button {
+            bottom: 1.5rem !important;
+            right: 1.5rem !important;
+          }
+        }
+
         @keyframes pulse-wa {
           0% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0.5); }
           70% { box-shadow: 0 0 0 15px rgba(37, 211, 102, 0); }

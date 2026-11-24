@@ -31,6 +31,7 @@ I am your official AI Project Advisor. You can ask me anything in **English** or
 export default function ChatbotWidget({ isDarkMode, hideLauncher = false }) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
   const [messages, setMessages] = useState([INITIAL_MESSAGE]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -38,16 +39,32 @@ export default function ChatbotWidget({ isDarkMode, hideLauncher = false }) {
   const [isListening, setIsListening] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState(null);
   const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const recognitionRef = useRef(null);
 
   useEffect(() => {
     const openAssistant = () => {
       setIsOpen(true);
+      setIsClosing(false);
       setHasUnread(false);
     };
     window.addEventListener("MTBOSS:open-chat", openAssistant);
     return () => window.removeEventListener("MTBOSS:open-chat", openAssistant);
   }, []);
+
+  const openChat = () => {
+    setIsClosing(false);
+    setIsOpen(true);
+    setHasUnread(false);
+  };
+
+  const closeChat = () => {
+    setIsClosing(true);
+    window.setTimeout(() => {
+      setIsOpen(false);
+      setIsClosing(false);
+    }, 180);
+  };
   // Play subtle feedback chime
   const playChime = (type = 'receive') => {
     try {
@@ -80,15 +97,28 @@ export default function ChatbotWidget({ isDarkMode, hideLauncher = false }) {
   };
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    }
   };
 
+  // A newly opened chat should begin at its welcome message, not at the
+  // bottom of the preloaded content. Only scroll down after a new message.
   useEffect(() => {
-    if (isOpen) {
-      scrollToBottom();
-      setHasUnread(false);
+    if (!isOpen) return;
+    setHasUnread(false);
+    messagesContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (messages.length <= 1) {
+      messagesContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+      return;
     }
-  }, [messages, isOpen]);
+    scrollToBottom();
+  }, [isOpen, messages]);
 
   // Voice Input Setup
   useEffect(() => {
@@ -252,15 +282,15 @@ export default function ChatbotWidget({ isDarkMode, hideLauncher = false }) {
   return (
     <>
       {/* ── FLOATING LAUNCHER BUTTON ── */}
-      <div className={hideLauncher ? "hidden" : "fixed bottom-15 right-24 z-[9998] flex items-center"}>
+      <div className={hideLauncher ? "hidden" : "chatbot-launcher fixed bottom-4 right-4 z-[9998]"}>
         {!isOpen && (
           <button
-            onClick={() => setIsOpen(true)}
-            className="relative flex items-center gap-2.5 px-4 py-3 bg-gradient-to-r from-sky-500 via-[var(--brand-blue)] to-blue-600 text-black font-black text-xs uppercase tracking-wider rounded-full shadow-[0_10px_30px_rgba(0,180,216,0.4)] hover:scale-105 active:scale-95 transition-all duration-300 border-2 border-white/50 group"
+            onClick={openChat}
+            className="relative flex h-12 w-12 items-center justify-center rounded-full border border-white/30 bg-gradient-to-br from-sky-400 via-[var(--brand-blue)] to-blue-600 text-black shadow-[0_8px_24px_rgba(0,180,216,0.38)] transition-transform duration-200 hover:scale-105 active:scale-95 sm:h-14 sm:w-auto sm:gap-2.5 sm:px-5"
             aria-label="Open MTBOSS Assistant Chat"
           >
-            <span className="text-base group-hover:rotate-12 transition-transform">🤖</span>
-            <span className="hidden sm:inline font-bold">Ask MTBOSS AI</span>
+            <span className="text-lg" aria-hidden="true">🤖</span>
+            <span className="hidden sm:inline text-xs font-black uppercase tracking-wide">Ask MTBOSS AI</span>
 
             {hasUnread && (
               <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-[9px] font-black flex items-center justify-center animate-bounce shadow">
@@ -273,28 +303,28 @@ export default function ChatbotWidget({ isDarkMode, hideLauncher = false }) {
 
       {/* ── MODERN CHAT MODAL WINDOW ── */}
       {isOpen && (
-        <div className="fixed bottom-6 right-6 z-[10000] w-[calc(100vw-2rem)] sm:w-[420px] h-[600px] max-h-[88vh] rounded-3xl overflow-hidden border flex flex-col backdrop-blur-xl animate-fadeIn transition-all duration-300 shadow-[0_25px_70px_rgba(0,0,0,0.5)] border-sky-500/30">
+        <div className={`chatbot-widget-window ${isClosing ? 'chatbot-widget-closing' : 'chatbot-widget-opening'} fixed right-4 bottom-4 z-[10000] overflow-hidden border flex flex-col backdrop-blur-xl shadow-[0_18px_42px_rgba(0,0,0,0.42)] border-sky-500/30`}>
           <div className={`w-full h-full flex flex-col ${cardBg}`}>
             
             {/* Header */}
-            <div className="p-3.5 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-zinc-900 via-sky-950 to-zinc-900 text-white">
+            <div className="chatbot-header border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-zinc-900 via-sky-950 to-zinc-900 text-white">
               <div className="flex items-center gap-3">
                 <div className="relative">
-                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-sky-400 to-[var(--brand-blue)] text-black font-black flex items-center justify-center text-sm shadow-md">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-sky-400 to-[var(--brand-blue)] text-black font-black flex items-center justify-center text-[10px] shadow-md">
                     MT
                   </div>
                   <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-zinc-900 animate-pulse" />
                 </div>
                 <div>
                   <div className="flex items-center gap-1.5">
-                    <h3 className="text-xs font-black uppercase tracking-tight text-white">
+                    <h3 className="text-[11px] font-black uppercase tracking-tight text-white">
                       MTBOSS AI Advisor
                     </h3>
                     <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30">
                       Live
                     </span>
                   </div>
-                  <p className="text-[10px] text-zinc-400">
+                  <p className="chatbot-header-subtitle text-[9px] text-zinc-400">
                     Trained on All MTBOSS Services &amp; Rates
                   </p>
                 </div>
@@ -318,7 +348,7 @@ export default function ChatbotWidget({ isDarkMode, hideLauncher = false }) {
                   <span>WhatsApp</span>
                 </a>
                 <button
-                  onClick={() => setIsOpen(false)}
+                  onClick={closeChat}
                   className="w-7 h-7 rounded-full flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/10 transition-colors text-xs font-bold"
                   aria-label="Close chat"
                 >
@@ -328,13 +358,14 @@ export default function ChatbotWidget({ isDarkMode, hideLauncher = false }) {
             </div>
 
             {/* Quick Action Navigation Strip */}
-            <div className="chatbot-quick-strip px-3 py-2 bg-zinc-900/60 border-b border-white/5 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+            <div className="chatbot-quick-strip bg-zinc-900/60 border-b border-white/5 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
               {QUICK_ACTIONS.map((qa, i) => (
                 <button
                   key={i}
                   type="button"
                   onClick={() => {
                     if (qa.href) {
+                      closeChat();
                       router.push(qa.href);
                     } else {
                       handleSend(qa.prompt);
@@ -350,13 +381,15 @@ export default function ChatbotWidget({ isDarkMode, hideLauncher = false }) {
 
             {/* Chat Messages Body */}
             <div 
-              className="flex-1 p-4 overflow-y-auto space-y-3.5"
+              className="chatbot-messages flex-1 overflow-y-auto"
+              ref={messagesContainerRef}
               onClick={(e) => {
                 const target = e.target.closest('a');
                 if (target && target.getAttribute('data-internal') === 'true') {
                   const href = target.getAttribute('href');
                   if (href) {
                     e.preventDefault();
+                    closeChat();
                     router.push(href);
                   }
                 }
@@ -420,7 +453,7 @@ export default function ChatbotWidget({ isDarkMode, hideLauncher = false }) {
                 e.preventDefault();
                 handleSend();
               }}
-              className="p-3 border-t border-white/10 flex items-center gap-2 bg-zinc-950/40"
+              className="chatbot-input-row border-t border-white/10 flex items-center gap-2 bg-zinc-950/40"
             >
               <button
                 type="button"
@@ -462,6 +495,169 @@ export default function ChatbotWidget({ isDarkMode, hideLauncher = false }) {
           </div>
         </div>
       )}
+      <style jsx global>{`
+        /* Keep the assistant visually distinct from the site's display font. */
+        .chatbot-widget-window,
+        .chatbot-widget-window button,
+        .chatbot-widget-window input,
+        .chatbot-widget-window p,
+        .chatbot-widget-window li,
+        .chatbot-widget-window h3,
+        .chatbot-widget-window span,
+        .chatbot-widget-window a {
+          font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+        }
+
+        .chatbot-widget-window {
+          background: rgba(9, 14, 22, 0.96);
+          width: clamp(320px, 25vw, 380px);
+          height: min(50dvh, 520px);
+          border-radius: 16px;
+          animation: chatbot-open 180ms cubic-bezier(.2, .8, .2, 1) both;
+        }
+
+        .chatbot-widget-closing {
+          animation: chatbot-close 180ms ease-in both;
+        }
+
+        .chatbot-header {
+          min-height: 52px;
+          padding: 9px 10px;
+        }
+
+        .chatbot-quick-strip {
+          min-height: 40px;
+          padding: 6px 8px;
+          scrollbar-width: none !important;
+          -ms-overflow-style: none;
+        }
+
+        .chatbot-quick-strip::-webkit-scrollbar {
+          display: none;
+        }
+
+        .chatbot-widget-window .chatbot-quick-action {
+          padding: 5px 9px !important;
+          font-size: 9px !important;
+          letter-spacing: 0.01em;
+        }
+
+        .chatbot-messages {
+          min-height: 0;
+          padding: 10px;
+          scrollbar-width: thin;
+          scrollbar-color: rgba(56, 189, 248, 0.45) transparent;
+        }
+
+        .chatbot-messages > div {
+          margin-bottom: 8px;
+        }
+
+        .chatbot-messages .group {
+          max-width: 94%;
+          padding: 10px;
+          border-radius: 12px;
+          font-size: 11px;
+        }
+
+        .chatbot-messages p,
+        .chatbot-messages li {
+          font-size: 11px !important;
+          line-height: 1.45 !important;
+        }
+
+        .chatbot-input-row {
+          flex: 0 0 auto;
+          padding: 8px;
+        }
+
+        .chatbot-input-row input {
+          min-width: 0;
+          padding: 8px 10px !important;
+          border-radius: 10px !important;
+        }
+
+        .chatbot-input-row button {
+          width: 34px;
+          height: 34px;
+          border-radius: 10px;
+          flex: 0 0 34px;
+        }
+
+        .chatbot-widget-window input {
+          letter-spacing: 0;
+        }
+
+        /* Closed launcher sits beside, rather than beneath, WhatsApp. */
+        .chatbot-launcher {
+          right: 6rem !important;
+          bottom: 3.5rem !important;
+        }
+
+        @keyframes chatbot-open {
+          from { opacity: 0; transform: translateY(10px) scale(0.97); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes chatbot-close {
+          from { opacity: 1; transform: translateY(0) scale(1); }
+          to { opacity: 0; transform: translateY(8px) scale(0.97); }
+        }
+
+        @media (max-width: 768px) {
+          .chatbot-widget-window {
+            width: min(72vw, 300px);
+            height: min(43dvh, 390px);
+            right: 12px;
+            bottom: 12px;
+            border-radius: 14px;
+          }
+
+          .chatbot-launcher {
+            right: 6rem !important;
+            bottom: 3.5rem !important;
+          }
+
+          .chatbot-header {
+            min-height: 46px;
+            padding: 7px 8px;
+          }
+
+          .chatbot-header-subtitle,
+          .chatbot-header [title="Clear Chat History"] {
+            display: none;
+          }
+
+          .chatbot-quick-strip {
+            min-height: 34px;
+            padding: 4px 6px;
+          }
+
+          .chatbot-widget-window .chatbot-quick-action {
+            padding: 4px 8px !important;
+            font-size: 8px !important;
+          }
+
+          .chatbot-messages {
+            padding: 8px;
+          }
+
+          .chatbot-messages .group {
+            padding: 8px;
+            font-size: 10px;
+          }
+
+          .chatbot-messages p,
+          .chatbot-messages li {
+            font-size: 10px !important;
+            line-height: 1.4 !important;
+          }
+
+          .chatbot-input-row {
+            padding: 6px;
+          }
+        }
+      `}</style>
     </>
   );
 }
