@@ -95,11 +95,11 @@ export default function SignupPage() {
   );
 
   return (
-    <div style={{ minHeight: '100vh', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', fontFamily: "'DM Sans', system-ui, sans-serif", transition: 'background 0.3s' }}>
-      <div style={{ display: 'flex', width: '100%', maxWidth: 820, background: surface, border: `1px solid ${border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 40px rgba(0,0,0,.08)', transition: 'background 0.3s, border-color 0.3s' }}>
+    <div className="signup-page" style={{ minHeight: '100vh', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', fontFamily: "'DM Sans', system-ui, sans-serif", transition: 'background 0.3s' }}>
+      <div className="signup-card" style={{ display: 'flex', width: '100%', maxWidth: 820, background: surface, border: `1px solid ${border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 40px rgba(0,0,0,.08)', transition: 'background 0.3s, border-color 0.3s' }}>
 
         {/* Brand Panel */}
-        <div style={{ flex: '0 0 300px', background: dark ? '#111' : '#111113', padding: '2.5rem 2rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }} className="hidden sm:flex flex-col">
+        <div className="signup-brand" style={{ flex: '0 0 300px', background: dark ? '#111' : '#111113', padding: '2.5rem 2rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
             <div style={{ fontSize: '1rem', fontWeight: 800, color: '#fff', letterSpacing: '-0.02em', marginBottom: '2.5rem' }}>
               MT<span style={{ color: 'var(--brand-blue)' }}>BOSS</span>
@@ -121,7 +121,7 @@ export default function SignupPage() {
         </div>
 
         {/* Form Panel */}
-        <div style={{ flex: 1, padding: '2rem 2rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', background: surface, transition: 'background 0.3s' }}>
+        <div className="signup-form-panel" style={{ flex: 1, padding: '2rem 2rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', background: surface, transition: 'background 0.3s' }}>
           <div style={{ fontSize: '1.125rem', fontWeight: 700, color: text, marginBottom: '0.2rem' }}>Create Account</div>
           <div style={{ fontSize: '0.8125rem', color: muted, marginBottom: '1.25rem' }}>Sign up to get started with MTBOSS</div>
 
@@ -223,6 +223,41 @@ export default function SignupPage() {
           </div>
         </div>
       </div>
+      <style jsx>{`
+        @media (max-width: 768px) {
+          .signup-page {
+            align-items: flex-start !important;
+            padding: 1rem !important;
+          }
+
+          .signup-card {
+            display: block !important;
+            max-width: 34rem !important;
+          }
+
+          /* The desktop brand panel has a fixed 300px width. Hide it on
+             narrow screens so the account form receives the full viewport. */
+          .signup-brand {
+            display: none !important;
+          }
+
+          .signup-form-panel {
+            width: 100% !important;
+            min-width: 0 !important;
+            padding: 1.5rem !important;
+          }
+        }
+
+        @media (max-width: 400px) {
+          .signup-page {
+            padding: 0.75rem !important;
+          }
+
+          .signup-form-panel {
+            padding: 1.25rem 1rem !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
