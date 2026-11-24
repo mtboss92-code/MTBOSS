@@ -1,21 +1,20 @@
-const LEGACY_ADMIN_EMAILS = ['admin@MTBOSS.in', 'admin@mtboss.in', 'admin@mtboss.com', 'clear'];
+/** Sole admin login email — previous IDs cannot open the admin panel. */
+const SOLE_ADMIN_EMAIL = 'mtboss2016@gmail.com';
 
 function cleanEnv(value) {
   return String(value || '').replace(/^\uFEFF/, '').trim().toLowerCase();
 }
 
+export function getPrimaryAdminEmail() {
+  return SOLE_ADMIN_EMAIL;
+}
+
+/**
+ * Only mtboss2016@gmail.com may open the admin panel.
+ * Env ADMIN_EMAIL / aliases / legacy IDs are intentionally ignored for access.
+ */
 export function isAdminEmail(email) {
   const normalized = cleanEnv(email);
   if (!normalized) return false;
-
-  const configured = [
-    process.env.ADMIN_EMAIL,
-    process.env.NEXT_PUBLIC_ADMIN_EMAIL,
-    ...(process.env.ADMIN_EMAIL_ALIASES || '').split(','),
-    ...LEGACY_ADMIN_EMAILS,
-  ]
-    .map(cleanEnv)
-    .filter(Boolean);
-
-  return new Set(configured).has(normalized);
+  return normalized === SOLE_ADMIN_EMAIL;
 }

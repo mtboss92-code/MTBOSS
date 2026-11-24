@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { clearOtherAuthCookies, getJwtSecret, setAuthCookie } from '@/lib/auth';
-import { isAdminEmail } from '@/lib/admin-email';
+import { getPrimaryAdminEmail, isAdminEmail } from '@/lib/admin-email';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,21 +13,19 @@ function readEnv(name, fallback = '') {
   return String(value).replace(/^\uFEFF/, '').trim();
 }
 
-const ADMIN_EMAIL =
-  readEnv('ADMIN_EMAIL') ||
-  (process.env.NODE_ENV !== 'production' ? 'admin@gmail.com' : '');
-const ADMIN_PASSWORD =
-  readEnv('ADMIN_PASSWORD') ||
-  (process.env.NODE_ENV !== 'production' ? '123456' : '');
+const ADMIN_EMAIL = getPrimaryAdminEmail();
+const ADMIN_PASSWORD = readEnv('ADMIN_PASSWORD');
 
 function matchesEnvAdmin(email, password) {
   if (!ADMIN_PASSWORD) return false;
   const normalizedEmail = String(email || '').trim().toLowerCase();
   const normalizedPassword = String(password || '').trim();
   if (!normalizedEmail || !normalizedPassword) return false;
-  if (normalizedPassword !== ADMIN_PASSWORD) return false;
-  if (ADMIN_EMAIL && normalizedEmail === ADMIN_EMAIL.toLowerCase()) return true;
-  return isAdminEmail(normalizedEmail);
+  // Exact sole admin email only — previous admin IDs cannot use env password.
+  return (
+    isAdminEmail(normalizedEmail) &&
+    normalizedPassword === ADMIN_PASSWORD
+  );
 }
 
 function issueAdminToken(email, name = 'Admin', id = 0) {
