@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import { requireRole, unauthorized } from '@/lib/auth';
 import { ensureProjectManagementSchema, actorFromAdmin, writePmAudit, assertAgentAccess, assertSameDayEditable } from '@/lib/project-management';
+import { cleanReceiptEmail, hasInvoiceDetails, isReceiptEmail, nextInvoiceNumber, sanitizeInvoiceDetails } from '@/lib/party-payment-receipts';
 
 function values(b) {
   const amount = Number(b.amount);
@@ -19,6 +20,13 @@ export async function PATCH(req, { params }) {
     if (!Number.isInteger(id) || !v) {
       return NextResponse.json({ success: false, error: 'Provide valid payment details' }, { status: 400 });
     }
+    const clientEmail = cleanReceiptEmail(body.client_email);
+    if (!isReceiptEmail(clientEmail)) {
+      return NextResponse.json({ success: false, field: 'client_email', error: 'Enter a valid client email or clear the field' }, { status: 400 });
+    }
+    let details = sanitizeInvoiceDetails(body.invoice_details);
+    if (hasInvoiceDetails(details) && !details.invoice_number) details = { ...details, invoice_number: nextInvoiceNumber() };
+    const transactionReference = String(body.transaction_reference || '').trim() || null;
 
     const client = await pool.connect();
     try {
@@ -43,8 +51,11 @@ export async function PATCH(req, { params }) {
 
       const actor = actorFromAdmin(auth.user);
       const result = await client.query(
-        'UPDATE pm_party_payments SET amount = $1, payment_date = $2, mode = $3, note = $4, updated_by = $5, updated_at = NOW() WHERE id = $6 RETURNING *',
-        [...v, actor, id]
+        `UPDATE pm_party_payments
+            SET amount = $1, payment_date = $2, mode = $3, note = $4, transaction_reference = $5,
+                client_email = $6, invoice_details = $7::jsonb, updated_by = $8, updated_at = NOW()
+          WHERE id = $9 RETURNING *`,
+        [...v, transactionReference, clientEmail || null, JSON.stringify(details), actor, id]
       );
       await writePmAudit(client, 'party_payment', id, 'updated', actor, old, result.rows[0]);
       await client.query('COMMIT');

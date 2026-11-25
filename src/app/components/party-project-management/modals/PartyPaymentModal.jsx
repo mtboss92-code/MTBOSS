@@ -3,6 +3,7 @@
 import { usePm } from '../PmContext';
 import pmStyles from '../pmStyles';
 import { Input } from '../shared';
+import PartyInvoiceFields, { ClientEmailField } from '../tabs/payments/PartyInvoiceFields';
 
 export default function PartyPaymentModal() {
   const {
@@ -43,6 +44,8 @@ export default function PartyPaymentModal() {
                 <Input label="Transaction Reference / UPI ID" name="transaction_reference" value={partyPaymentForm.transaction_reference || ''} set={setPartyPaymentForm} placeholder="e.g. UPI ID, UTR number, or bank transaction ID" />
               )}
               <Input label="Note / Reference" name="note" value={partyPaymentForm.note} set={setPartyPaymentForm} />
+              <PartyInvoiceFields />
+              <ClientEmailField />
             </div>
           </fieldset>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>

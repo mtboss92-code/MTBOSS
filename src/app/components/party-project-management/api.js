@@ -36,7 +36,9 @@ export async function api(path, opts = {}) {
     throw new Error(text || `Request failed with status ${res.status}`);
   }
   if (!res.ok || data.success === false) {
-    throw new Error(data.error || `Request failed with status ${res.status}`);
+    const error = new Error(data.error || `Request failed with status ${res.status}`);
+    error.field = data.field;
+    throw error;
   }
   return data;
 }

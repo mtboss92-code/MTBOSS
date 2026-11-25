@@ -8,7 +8,7 @@ export function isSmtpConfigured() {
   return Boolean(host && user && pass);
 }
 
-export async function sendMail({ to, subject, html, text, replyTo }) {
+export async function sendMail({ to, subject, html, text, replyTo, attachments }) {
   const host = process.env.SMTP_HOST || process.env.EMAIL_HOST;
   const port = parseInt(process.env.SMTP_PORT || '587', 10);
   const user = process.env.SMTP_USER || process.env.EMAIL_USER;
@@ -46,6 +46,7 @@ export async function sendMail({ to, subject, html, text, replyTo }) {
         subject,
         text,
         html,
+        attachments,
         replyTo: configuredReplyTo,
         // Keep the SMTP envelope aligned with the authenticated sender. This
         // avoids SPF failures when SMTP_FROM is a display name or alias.
