@@ -24,9 +24,10 @@ export async function PATCH(req, { params }) {
     if (!isReceiptEmail(clientEmail)) {
       return NextResponse.json({ success: false, field: 'client_email', error: 'Enter a valid client email or clear the field' }, { status: 400 });
     }
-    let details = sanitizeInvoiceDetails(body.invoice_details);
-    if (hasInvoiceDetails(details) && !details.invoice_number) details = { ...details, invoice_number: nextInvoiceNumber() };
     const transactionReference = String(body.transaction_reference || '').trim() || null;
+    const hasInvoiceUpdate = Object.prototype.hasOwnProperty.call(body, 'invoice_details');
+    let details = hasInvoiceUpdate ? sanitizeInvoiceDetails(body.invoice_details) : null;
+    if (details && hasInvoiceDetails(details) && !details.invoice_number) details = { ...details, invoice_number: nextInvoiceNumber() };
 
     const client = await pool.connect();
     try {
@@ -55,7 +56,7 @@ export async function PATCH(req, { params }) {
             SET amount = $1, payment_date = $2, mode = $3, note = $4, transaction_reference = $5,
                 client_email = $6, invoice_details = $7::jsonb, updated_by = $8, updated_at = NOW()
           WHERE id = $9 RETURNING *`,
-        [...v, transactionReference, clientEmail || null, JSON.stringify(details), actor, id]
+        [...v, transactionReference, clientEmail || null, JSON.stringify(details || old.invoice_details || {}), actor, id]
       );
       await writePmAudit(client, 'party_payment', id, 'updated', actor, old, result.rows[0]);
       await client.query('COMMIT');

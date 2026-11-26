@@ -135,7 +135,6 @@ export function registerPartyRecords(ctx, h) {
             transaction_reference: partyPaymentForm.transaction_reference,
             note: partyPaymentForm.note,
             client_email: email,
-            invoice_details: partyPaymentForm.invoice_details || {},
           }),
         });
         setMessage('Party payment updated successfully');
@@ -147,7 +146,7 @@ export function registerPartyRecords(ctx, h) {
         await api('/api/admin/project-management/payments', {
           method: 'POST',
           headers: { 'Idempotency-Key': submission_key },
-          body: JSON.stringify({ ...partyPaymentForm, client_email: email, submission_key, project_id: project.id }),
+          body: JSON.stringify({ ...partyPaymentForm, client_email: email, invoice_details: {}, submission_key, project_id: project.id }),
         });
         setPartyPaymentForm({ amount: '', payment_date: today(), mode: 'bank', note: '', transaction_reference: '', client_email: '', invoice_details: {}, submission_key: '' });
         setMessage('Party payment recorded successfully');

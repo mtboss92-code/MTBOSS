@@ -184,7 +184,7 @@ export function ClientEmailField() {
       />
       {partyPaymentForm.client_email_error
         ? <small role="alert" style={{ display: 'block', marginTop: 4, color: '#b91c1c' }}>{partyPaymentForm.client_email_error}</small>
-        : <small style={{ display: 'block', marginTop: 4, color: '#64748b' }}>Leave blank to save without sending. A valid email receives one Word tax invoice, not a PDF.</small>}
+        : <small style={{ display: 'block', marginTop: 4, color: '#64748b' }}>Leave blank to save without sending. A valid email receives the payment message with no Word file.</small>}
     </label>
   );
 }

@@ -4,7 +4,7 @@ import { usePm } from '../../PmContext';
 import pmStyles from '../../pmStyles';
 import { Input, INR, isSameDayIST, today } from '../../shared';
 import { api } from '../../api';
-import PartyInvoiceFields, { ClientEmailField } from './PartyInvoiceFields';
+import { ClientEmailField } from './PartyInvoiceFields';
 
 export default function PartyPaymentsView() {
   const {
@@ -34,7 +34,6 @@ export default function PartyPaymentsView() {
         <option value="upi">UPI</option>
       </select>
       </label>
-      <PartyInvoiceFields />
       {(partyPaymentForm.mode === 'upi' || partyPaymentForm.mode === 'bank') && (
       <Input label="Transaction Reference / UPI ID" name="transaction_reference" value={partyPaymentForm.transaction_reference || ''} set={setPartyPaymentForm} placeholder="e.g. UPI ID, UTR number, or bank transaction ID" />
       )}

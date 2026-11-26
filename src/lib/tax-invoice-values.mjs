@@ -44,6 +44,57 @@ export function hasInvoiceDetails(value) {
   return TEXT_KEYS.some((key) => key !== 'gst_type' && String(details[key] || '').trim());
 }
 
+const COMPLETED_INVOICE_KEYS = TEXT_KEYS.filter((key) => key !== 'invoice_number' && key !== 'gst_type');
+
+export function isCompletedInvoice(value) {
+  const details = value && typeof value === 'object' ? value : {};
+  if (Array.isArray(details.items) && details.items.some(itemHasContent)) return true;
+  if (String(details.linked_payment_id || '').trim() && hasInvoiceDetails(details)) return true;
+  return COMPLETED_INVOICE_KEYS.some((key) => String(details[key] || '').trim());
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function paymentAmountLabel(value) {
+  const amount = Number(value);
+  const formatted = (Number.isFinite(amount) ? amount : 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `₹${formatted}`;
+}
+
+function paymentDateLabel(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeZone: 'Asia/Kolkata' }).format(value);
+  }
+  const text = String(value || '').trim();
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    const parsed = new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00+05:30`);
+    return new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeZone: 'Asia/Kolkata' }).format(parsed);
+  }
+  return text;
+}
+
+function paymentMethodLabel(mode) {
+  return { bank: 'Bank Transfer', cheque: 'Cheque', cash: 'Cash', upi: 'UPI' }[String(mode || '').toLowerCase()] || String(mode || '').trim() || 'Payment';
+}
+
+export function clientInvoiceEmail(row) {
+  const lines = [
+    'Thank you for your payment.',
+    `Actual amount received: ${paymentAmountLabel(row?.amount)}`,
+    `Payment date: ${paymentDateLabel(row?.payment_date)}`,
+    `Payment method: ${paymentMethodLabel(row?.mode)}`,
+    `Payment receipt number: ${row?.receipt_number || ''}`,
+  ];
+  return {
+    lines,
+    text: lines.join('\n'),
+    html: lines.map((line) => escapeHtml(line)).join('<br>\n'),
+  };
+}
+
 function num(value, fallback = 0) {
   if (value === null || value === undefined || String(value).trim() === '') return fallback;
   const parsed = Number(String(value).replace(/,/g, '').replace(/[^\d.-]/g, ''));

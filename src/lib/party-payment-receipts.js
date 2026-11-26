@@ -1,17 +1,12 @@
 import { randomUUID } from 'crypto';
 import pool from '@/lib/db';
 import { isSmtpConfigured, sendMail } from '@/lib/email';
-import { buildTaxInvoiceDocx } from '@/lib/mtboss-tax-invoice-docx.mjs';
-import { hasInvoiceDetails, sanitizeInvoiceDetails } from '@/lib/tax-invoice-values.mjs';
+import { clientInvoiceEmail, hasInvoiceDetails, isCompletedInvoice, sanitizeInvoiceDetails } from '@/lib/tax-invoice-values.mjs';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const cleanReceiptEmail = (value) => String(value || '').trim().toLowerCase();
 export const isReceiptEmail = (value) => !value || EMAIL_RE.test(value);
-const inr = (value) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(Number(value || 0));
-const date = (value) => new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeZone: 'Asia/Kolkata' }).format(new Date(value));
-const modeLabel = (mode) => ({ bank: 'Bank Transfer', cheque: 'Cheque', cash: 'Cash', upi: 'UPI' }[String(mode || '').toLowerCase()] || mode || 'payment');
-
-export { hasInvoiceDetails, sanitizeInvoiceDetails };
+export { hasInvoiceDetails, isCompletedInvoice, sanitizeInvoiceDetails };
 
 export function nextInvoiceNumber() {
   return `INV-${new Date().getFullYear()}-${randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase()}`;
@@ -80,18 +75,6 @@ async function jobPayload(client, jobId) {
   return result.rows[0];
 }
 
-function emailBody(row) {
-  return `Hi ${row.party_name}, thank you for your payment. We received ${inr(row.amount)} on ${date(row.payment_date)} via ${modeLabel(row.mode)} for ${row.project_name}. Your tax invoice is attached. Receipt No. ${row.receipt_number}.`;
-}
-
-function wordAttachment(row, details) {
-  const docx = buildTaxInvoiceDocx({ ...row, invoice_details: details });
-  if (!docx.filename.endsWith('.docx') || docx.contentType !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-    throw new Error('Invoice email did not produce a Word attachment');
-  }
-  return { filename: docx.filename, content: docx.buffer, contentType: docx.contentType };
-}
-
 export async function processReceiptEmailJob(jobId) {
   const client = await pool.connect();
   let claimed = false;
@@ -108,22 +91,20 @@ export async function processReceiptEmailJob(jobId) {
     const row = await jobPayload(client, jobId);
     if (!row) throw new Error('Payment email job could not be loaded');
     let details = typeof row.invoice_details === 'string' ? JSON.parse(row.invoice_details) : (row.invoice_details || {});
-    if (!String(details.invoice_number || '').trim()) {
+    const invoiceEmail = isCompletedInvoice(details);
+    if (invoiceEmail && !String(details.invoice_number || '').trim()) {
       details = { ...details, invoice_number: nextInvoiceNumber() };
       await client.query(`UPDATE pm_party_payments SET invoice_details = $2::jsonb, updated_at = NOW() WHERE id = $1`, [row.payment_id, JSON.stringify(details)]);
     }
-    const attachment = wordAttachment(row, details);
+    const message = clientInvoiceEmail(row);
     if (!isSmtpConfigured()) throw new Error('Receipt email is not configured (set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM)');
-    const body = emailBody(row);
     const info = await sendMail({
       to: row.recipient_email,
       subject: `Payment received for ${row.project_name} | ${row.receipt_number}`,
-      text: body,
-      html: `<p>${body}</p>`,
-      attachments: [attachment],
+      text: message.text,
     });
     await client.query(`UPDATE pm_payment_receipt_email_jobs SET status='sent', provider_message_id=$2, sent_at=NOW(), updated_at=NOW(), error_message=NULL WHERE id=$1 AND status='processing'`, [jobId, info?.messageId || null]);
-    return { sent: true, filename: attachment.filename };
+    return { sent: true };
   } catch (error) {
     if (claimed) {
       await client.query(`UPDATE pm_payment_receipt_email_jobs SET status='failed', error_message=$2, updated_at=NOW() WHERE id=$1 AND status='processing'`, [jobId, String(error.message || 'Email delivery failed').slice(0, 1000)]).catch(() => {});
