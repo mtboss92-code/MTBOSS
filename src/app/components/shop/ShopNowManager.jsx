@@ -351,6 +351,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       if (approvalFilter === 'approved') return status === 'approved';
       if (approvalFilter === 'pending') return status === 'pending';
       if (approvalFilter === 'rejected') return status === 'rejected';
+      if (approvalFilter === 'assigned_admin') return p.is_admin_assigned === true;
       if (approvalFilter === 'hidden') return p.is_available === false;
       if (approvalFilter === 'live') return p.is_available === true;
     }
@@ -2768,6 +2769,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                 Approval Status
                 <select value={approvalFilter} onChange={(e) => setApprovalFilter(e.target.value)}>
                   <option value="all">All Products</option>
+                  {isSeller && <option value="assigned_admin">Assigned by Admin</option>}
                   <option value="approved">✓ Approved / Live</option>
                   <option value="pending">⏳ Pending Approval</option>
                   <option value="rejected">✕ Rejected Products</option>
@@ -2831,6 +2833,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                               <strong style={{ fontSize: 13, lineHeight: 1.35, wordBreak: 'break-word', color: 'var(--shop-admin-text)' }}>
                                 {product.name}
                               </strong>
+                              {product.is_admin_assigned && <div style={{ marginTop: 4 }}><span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 999, background: '#dbeafe', color: '#1d4ed8', fontSize: 10, fontWeight: 800 }}>Assigned by Admin</span></div>}
                               <div className="shop-product-badges">
                                 <span
                                   className="shop-product-code-badge"
