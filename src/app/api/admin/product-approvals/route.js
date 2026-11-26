@@ -208,8 +208,11 @@ export async function POST(req) {
       return NextResponse.json({ success: false, error: 'Valid product ID is required' }, { status: 400 });
     }
 
-    if (!['approve', 'reject', 'delete'].includes(action)) {
-      return NextResponse.json({ success: false, error: 'Action must be approve, reject or delete' }, { status: 400 });
+    if (!['approve', 'reject', 'delete', 'publish'].includes(action)) {
+      return NextResponse.json({ success: false, error: 'Action must be approve, reject, delete or publish' }, { status: 400 });
+    }
+    if (ids.length === 0 && ['delete', 'publish'].includes(action)) {
+      return NextResponse.json({ success: false, error: `${action} requires one or more selected product IDs` }, { status: 400 });
     }
 
     // Bulk operations are intentionally available only through this admin-protected route.
@@ -222,18 +225,20 @@ export async function POST(req) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        const requiredStatus = action === 'publish' ? 'approved' : 'pending';
         const productsRes = await client.query(
           `SELECT id, name, is_available, status
            FROM supplier_materials
            WHERE id = ANY($1::int[]) AND is_deleted = FALSE
              AND (vendor_id IS NOT NULL OR (supplier_id IS NOT NULL AND supplier_id > 0))
+             AND COALESCE(specifications->'__approval__'->>'status', 'approved') = $2
            FOR UPDATE`,
-          [ids]
+          [ids, requiredStatus]
         );
         const products = productsRes.rows;
         if (products.length !== ids.length) {
           await client.query('ROLLBACK');
-          return NextResponse.json({ success: false, error: 'One or more selected products are unavailable' }, { status: 404 });
+          return NextResponse.json({ success: false, error: `One or more selected products are not ${requiredStatus}` }, { status: 409 });
         }
 
         const adminIdentifier = admin.email || admin.username || (admin.id ? `Admin #${admin.id}` : 'Admin');
@@ -245,6 +250,11 @@ export async function POST(req) {
         if (action === 'delete') {
           await client.query(
             `UPDATE supplier_materials SET is_deleted = TRUE, is_available = FALSE, status = 'archived', updated_at = NOW()
+             WHERE id = ANY($1::int[])`, [ids]
+          );
+        } else if (action === 'publish') {
+          await client.query(
+            `UPDATE supplier_materials SET is_available = TRUE, status = 'active', updated_at = NOW()
              WHERE id = ANY($1::int[])`, [ids]
           );
         } else {
@@ -266,7 +276,9 @@ export async function POST(req) {
             previousValues: { is_deleted: false, is_available: product.is_available, status: product.status },
             newValues: action === 'delete'
               ? { is_deleted: true, is_available: false, status: 'archived' }
-              : { is_available: action === 'approve', status: action === 'approve' ? 'active' : 'rejected', approval: approvalMetadata },
+              : action === 'publish'
+                ? { is_available: true, status: 'active' }
+                : { is_available: action === 'approve', status: action === 'approve' ? 'active' : 'rejected', approval: approvalMetadata },
             userId: admin.id,
             userRole: 'admin',
             userName: admin.name || adminIdentifier,
@@ -275,7 +287,8 @@ export async function POST(req) {
         }
         await client.query('COMMIT');
         if (globalThis.__shopProductCache) globalThis.__shopProductCache.clear();
-        return NextResponse.json({ success: true, count: products.length, message: `${products.length} product(s) ${action === 'delete' ? 'archived' : `${action}d`} successfully` });
+        const actionLabel = action === 'delete' ? 'archived' : action === 'publish' ? 'published' : `${action}d`;
+        return NextResponse.json({ success: true, count: products.length, message: `${products.length} product(s) ${actionLabel} successfully` });
       } catch (bulkError) {
         await client.query('ROLLBACK');
         throw bulkError;

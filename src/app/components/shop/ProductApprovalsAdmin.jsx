@@ -125,6 +125,10 @@ export default function ProductApprovalsAdmin({ isDarkMode }) {
     fetchProducts();
   }, [fetchProducts]);
 
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [filter]);
+
   const openProduct = (product) => {
     setSelectedProduct(product);
     setActiveImageIdx(0);
@@ -364,6 +368,7 @@ export default function ProductApprovalsAdmin({ isDarkMode }) {
         .bulk-approve { background: #059669; }
         .bulk-reject { background: #d97706; }
         .bulk-delete { background: #dc2626; }
+        .bulk-publish { background: #2563eb; }
 
         .filter-tabs {
           display: flex;
@@ -1224,18 +1229,28 @@ export default function ProductApprovalsAdmin({ isDarkMode }) {
             />
           </div>
 
-          <div className="bulk-actions">
-            <strong>{selectedIds.length} selected</strong>
-            <button type="button" className="bulk-btn bulk-approve" disabled={!selectedIds.length || actionLoading} onClick={() => handleBulkAction('approve')}>
-              Approve selected
-            </button>
-            <button type="button" className="bulk-btn bulk-reject" disabled={!selectedIds.length || actionLoading} onClick={() => handleBulkAction('reject')}>
-              Reject selected
-            </button>
-            <button type="button" className="bulk-btn bulk-delete" disabled={!selectedIds.length || actionLoading} onClick={() => handleBulkAction('delete')}>
-              Archive selected
-            </button>
-          </div>
+          {filter === 'pending' && (
+            <div className="bulk-actions">
+              <strong>{selectedIds.length} selected</strong>
+              <button type="button" className="bulk-btn bulk-approve" disabled={!selectedIds.length || actionLoading} onClick={() => handleBulkAction('approve')}>
+                Approve selected
+              </button>
+              <button type="button" className="bulk-btn bulk-reject" disabled={!selectedIds.length || actionLoading} onClick={() => handleBulkAction('reject')}>
+                Reject selected
+              </button>
+              <button type="button" className="bulk-btn bulk-delete" disabled={!selectedIds.length || actionLoading} onClick={() => handleBulkAction('delete')}>
+                Archive selected
+              </button>
+            </div>
+          )}
+          {filter === 'approved' && (
+            <div className="bulk-actions">
+              <strong>{selectedIds.length} selected</strong>
+              <button type="button" className="bulk-btn bulk-publish" disabled={!selectedIds.length || actionLoading} onClick={() => handleBulkAction('publish')}>
+                Publish selected
+              </button>
+            </div>
+          )}
 
           {/* Table */}
           <div className="table-wrap">
@@ -1249,7 +1264,9 @@ export default function ProductApprovalsAdmin({ isDarkMode }) {
               <table className="approvals-table">
                 <thead>
                   <tr>
-                    <th><input type="checkbox" aria-label="Select all products" checked={products.length > 0 && selectedIds.length === products.length} onChange={toggleAllSelected} /></th>
+                    {(filter === 'pending' || filter === 'approved') && (
+                      <th><input type="checkbox" aria-label="Select all products" checked={products.length > 0 && selectedIds.length === products.length} onChange={toggleAllSelected} /></th>
+                    )}
                     <th>Product</th>
                     <th>Category</th>
                     <th>Price / Quote</th>
@@ -1275,9 +1292,11 @@ export default function ProductApprovalsAdmin({ isDarkMode }) {
                         className="clickable-product-row"
                         title="Click to view full product details"
                       >
-                        <td onClick={(e) => e.stopPropagation()}>
-                          <input type="checkbox" aria-label={`Select ${p.name}`} checked={selectedIds.includes(p.id)} onChange={() => toggleSelected(p.id)} />
-                        </td>
+                        {(filter === 'pending' || filter === 'approved') && (
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <input type="checkbox" aria-label={`Select ${p.name}`} checked={selectedIds.includes(p.id)} onChange={() => toggleSelected(p.id)} />
+                          </td>
+                        )}
                         <td>
                           <div className="product-cell">
                             {coverImg ? (
