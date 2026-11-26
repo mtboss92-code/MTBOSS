@@ -1,4 +1,5 @@
 import { isTransientConnectionError, queryRaw, queryReadWithRetry } from '@/lib/db';
+import { createInitializationGuard } from '@/lib/api-utils';
 
 /**
  * Login reads go through the shared singleton pool.
@@ -6,6 +7,12 @@ import { isTransientConnectionError, queryRaw, queryReadWithRetry } from '@/lib/
  */
 
 export const AUTH_LOGIN_ATTEMPTS = 3;
+
+// Keeps deployments safe when application code reaches a server before the
+// additive migration has been run. The migration remains the normal path.
+export const ensureAuthVersionSchema = createInitializationGuard(async () => {
+  await queryRaw('ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_version INTEGER NOT NULL DEFAULT 0');
+}, 24 * 60 * 60 * 1000, 'auth-version-schema');
 
 export async function authLoginQuery(text, params = []) {
   return queryReadWithRetry(text, params, { maxAttempts: AUTH_LOGIN_ATTEMPTS });

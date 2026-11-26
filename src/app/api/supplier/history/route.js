@@ -13,7 +13,7 @@ export async function GET(req) {
          me.id,
          'enquiry' AS history_type,
          me.category_name AS product_name,
-         me.material_name,
+         me.material_type AS material_name,
          me.quantity,
          me.unit,
          me.amount_received AS amount,

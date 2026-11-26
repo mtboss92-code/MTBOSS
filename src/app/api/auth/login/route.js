@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { clearOtherAuthCookies, getJwtSecret, setAuthCookie } from '@/lib/auth';
-import { getPrimaryAdminEmail, isAdminEmail } from '@/lib/admin-email';
+import { isAdminEmail } from '@/lib/admin-email';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,25 +13,23 @@ function readEnv(name, fallback = '') {
   return String(value).replace(/^\uFEFF/, '').trim();
 }
 
-const ADMIN_EMAIL = getPrimaryAdminEmail();
+
 const ADMIN_PASSWORD = readEnv('ADMIN_PASSWORD');
 
 function matchesEnvAdmin(email, password) {
-  if (!ADMIN_PASSWORD) return false;
   const normalizedEmail = String(email || '').trim().toLowerCase();
   const normalizedPassword = String(password || '').trim();
-  if (!normalizedEmail || !normalizedPassword) return false;
+  if (!ADMIN_PASSWORD || !normalizedEmail || !normalizedPassword) return false;
+  return isAdminEmail(normalizedEmail) && normalizedPassword === ADMIN_PASSWORD;
   // Exact sole admin email only — previous admin IDs cannot use env password.
-  return (
-    isAdminEmail(normalizedEmail) &&
-    normalizedPassword === ADMIN_PASSWORD
-  );
 }
 
-function issueAdminToken(email, name = 'Admin', id = 0) {
+// Environment credentials only bridge an existing administrator into the
+// database-backed password flow; they are disabled after the first change.
+function issueAdminToken(email, name = 'Admin', id, authVersion = 0) {
   const normalizedEmail = String(email).trim().toLowerCase();
   const token = jwt.sign(
-    { id, email: normalizedEmail, role: 'admin' },
+    { id, email: normalizedEmail, role: 'admin', authVersion },
     getJwtSecret(),
     { expiresIn: process.env.JWT_EXPIRY || '7d' }
   );
@@ -54,24 +52,22 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Email and password required' }, { status: 400 });
     }
 
-    // Env admin must succeed without importing/touching the database module.
-    if (matchesEnvAdmin(normalizedEmail, password)) {
-      return issueAdminToken(ADMIN_EMAIL || normalizedEmail);
-    }
-
-    // Lazy-load DB helpers only for customer/DB-backed accounts.
+    // Admin authentication is database-backed, so a changed password applies immediately.
     const { isDatabaseConnectionError } = await import('@/lib/api-utils');
     const { BLOCKED_ACCOUNT_MESSAGE } = await import('@/lib/user-moderation');
     const {
       authLoginQuery,
+      ensureAuthVersionSchema,
       softAuthLoginQuery,
       touchUserLastLogin,
     } = await import('@/lib/auth-login-db');
 
+    await ensureAuthVersionSchema();
+
     let userResult;
     try {
       userResult = await authLoginQuery(
-        `SELECT id, email, password, name, is_blocked
+        `SELECT id, email, password, name, is_blocked, auth_version
            FROM users
           WHERE LOWER(email) = $1
           LIMIT 1`,
@@ -80,7 +76,7 @@ export async function POST(req) {
     } catch (error) {
       if (!String(error?.message || '').toLowerCase().includes('is_blocked')) throw error;
       userResult = await authLoginQuery(
-        `SELECT id, email, password, name, FALSE AS is_blocked
+        `SELECT id, email, password, name, FALSE AS is_blocked, auth_version
            FROM users
           WHERE LOWER(email) = $1
           LIMIT 1`,
@@ -121,7 +117,15 @@ export async function POST(req) {
     const user = userResult.rows[0];
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
+      // One-time migration from the former environment-only admin login. A
+      // password change increments auth_version, permanently disabling this.
+      if (isAdminEmail(user.email) && Number(user.auth_version) === 0 && matchesEnvAdmin(user.email, password)) {
+        const { queryRaw } = await import('@/lib/db');
+        const passwordHash = await bcrypt.hash(password, 10);
+        await queryRaw('UPDATE users SET password = $1 WHERE id = $2 AND auth_version = 0', [passwordHash, user.id]);
+      } else {
+        return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
+      }
     }
     if (user.is_blocked) {
       return NextResponse.json({ error: BLOCKED_ACCOUNT_MESSAGE }, { status: 403 });
@@ -131,7 +135,7 @@ export async function POST(req) {
     touchUserLastLogin(user.id);
 
     if (userRole === 'admin') {
-      return issueAdminToken(user.email, user.name || 'Admin', user.id);
+      return issueAdminToken(user.email, user.name || 'Admin', user.id, Number(user.auth_version) || 0);
     }
 
     const token = jwt.sign(
