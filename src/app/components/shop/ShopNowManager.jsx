@@ -206,7 +206,7 @@ async function uploadImage(file) {
   return data.secure_url;
 }
 
-function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', initialShowForm = false, isDarkMode = false }) {
+function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', initialShowForm = false, initialShowAssign = false, assignmentOnly = false, isDarkMode = false }) {
   const isVendor = ownerRole === 'vendor';
   const isSupplier = ownerRole === 'supplier';
   const isSeller = isVendor || isSupplier;
@@ -234,6 +234,17 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
   const [formAttributes, setFormAttributes] = useState({ thickness: '', size: '', type: '', color: '', material: '', grade: '', pack_size: '' });
   const [isDark, setIsDark] = useState(isDarkMode);
   const [commissionInfo, setCommissionInfo] = useState({ rate: 0, rateSource: 'default', loaded: false, loading: false });
+  const [vendorAssignmentModal, setVendorAssignmentModal] = useState({ open: false, product: null, vendors: [], assignedIds: [], loading: false, savingId: null });
+  const [bulkVendorId, setBulkVendorId] = useState('');
+  const [bulkVendors, setBulkVendors] = useState([]);
+  const [selectedProductIds, setSelectedProductIds] = useState([]);
+  const [assignmentSummary, setAssignmentSummary] = useState([]);
+  const [bulkAssigning, setBulkAssigning] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [showAssignModal, setShowAssignModal] = useState(initialShowAssign);
+  const [assignmentProducts, setAssignmentProducts] = useState([]);
+  const [assignmentSearch, setAssignmentSearch] = useState('');
+  const [assignmentProductFilter, setAssignmentProductFilter] = useState('all');
 
   // Resolve admin commission rate whenever category or editing product changes
   useEffect(() => {
@@ -424,7 +435,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
         : (() => {
             const params = new URLSearchParams({
               page: String(productPage),
-              limit: '25',
+              limit: '100',
               fields: 'list',
               sort: 'created_at',
               order: 'desc',
@@ -457,6 +468,22 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
 
   useEffect(() => { loadReferenceData(); }, [loadReferenceData]);
   useEffect(() => { load(); }, [load]);
+
+  const loadAssignmentData = useCallback(async () => {
+    if (isSeller) return;
+    try {
+      const [vendorsRes, summaryRes, productsRes] = await Promise.all([
+        fetch('/api/admin/vendors?lite=1&limit=200', { headers: shopHeaders('admin') }),
+        fetch('/api/admin/shop-products/vendors', { headers: shopHeaders('admin') }),
+        fetch('/api/admin/shop-products?limit=100&approval_status=approved&sort=name&order=asc', { headers: shopHeaders('admin') }),
+      ]);
+      const [vendorsData, summaryData, productsData] = await Promise.all([readApiJson(vendorsRes), readApiJson(summaryRes), readApiJson(productsRes)]);
+      if (vendorsRes.ok) setBulkVendors((vendorsData.data || []).filter((vendor) => vendor.is_approved && vendor.status === 'active'));
+      if (summaryRes.ok) setAssignmentSummary(summaryData.data || []);
+      if (productsRes.ok) setAssignmentProducts(productsData.data || []);
+    } catch (error) { setNotice(error.message); }
+  }, [isSeller]);
+  useEffect(() => { loadAssignmentData(); }, [loadAssignmentData]);
 
   // CSV parser that supports quoted commas and escaped quotes. The import API
   // remains the authority for field validation and duplicate handling.
@@ -1061,6 +1088,56 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     } catch (error) { setNotice(error.message); }
   };
 
+  const openVendorAssignments = async (product) => {
+    setVendorAssignmentModal({ open: true, product, vendors: [], assignedIds: [], loading: true, savingId: null });
+    try {
+      const response = await fetch(`/api/admin/shop-products/vendors?product_id=${product.id}`, { headers: shopHeaders('admin') });
+      const data = await readApiJson(response);
+      if (!response.ok) throw new Error(data.error || 'Could not load vendors');
+      setVendorAssignmentModal((current) => ({ ...current, vendors: data.data || [], assignedIds: data.assigned_vendor_ids || [], loading: false }));
+    } catch (error) {
+      setVendorAssignmentModal((current) => ({ ...current, loading: false }));
+      setNotice(error.message);
+    }
+  };
+
+  const toggleVendorAssignment = async (vendorId) => {
+    const modal = vendorAssignmentModal;
+    const assigned = modal.assignedIds.includes(vendorId);
+    setVendorAssignmentModal({ ...modal, savingId: vendorId });
+    try {
+      const response = await fetch(assigned ? `/api/admin/shop-products/vendors?product_id=${modal.product.id}&vendor_id=${vendorId}` : '/api/admin/shop-products/vendors', {
+        method: assigned ? 'DELETE' : 'POST', headers: shopHeaders('admin'),
+        body: assigned ? undefined : JSON.stringify({ product_id: modal.product.id, vendor_id: vendorId }),
+      });
+      const data = await readApiJson(response);
+      if (!response.ok) throw new Error(data.error || 'Could not update vendor assignment');
+      setVendorAssignmentModal((current) => ({ ...current, savingId: null, assignedIds: assigned ? current.assignedIds.filter((id) => id !== vendorId) : [...current.assignedIds, vendorId] }));
+      setNotice(assigned ? 'Vendor detached from product.' : 'Product attached to vendor. Existing commission rules will apply.');
+    } catch (error) {
+      setVendorAssignmentModal((current) => ({ ...current, savingId: null }));
+      setNotice(error.message);
+    }
+  };
+
+  const assignSelectedProducts = async () => {
+    if (!bulkVendorId) return setNotice('Select a vendor first.');
+    if (!selectedProductIds.length) return setNotice('Select at least one product.');
+    setBulkAssigning(true);
+    try {
+      const response = await fetch('/api/admin/shop-products/vendors', {
+        method: 'POST', headers: shopHeaders('admin'),
+        body: JSON.stringify({ vendor_id: Number(bulkVendorId), product_ids: selectedProductIds }),
+      });
+      const data = await readApiJson(response);
+      if (!response.ok) throw new Error(data.error || 'Could not assign products');
+      setNotice(data.message || 'Products assigned successfully.');
+      setSelectedProductIds([]);
+      await loadAssignmentData();
+    } catch (error) { setNotice(error.message); }
+    finally { setBulkAssigning(false); }
+  };
+
   const handleUpload = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1209,7 +1286,17 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     );
   };
 
-  return <div className="shop-admin-panel">
+  return <div className={`shop-admin-panel ${assignmentOnly ? 'assignment-only' : ''}`}>
+    {assignmentOnly && <style jsx global>{`.assignment-only .product-management-header, .assignment-only .product-management-stats, .assignment-only .product-catalog-section { display: none !important; } .assignment-only .assignment-page { width: 100%; }`}</style>}
+    {!isSeller && vendorAssignmentModal.open && (
+      <div className="shop-modal-overlay" onClick={() => setVendorAssignmentModal({ open: false, product: null, vendors: [], assignedIds: [], loading: false, savingId: null })}>
+        <div className="shop-modal-container" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+          <div className="shop-modal-header"><div><h3>Assign Vendors</h3><small>{vendorAssignmentModal.product?.name}</small></div><button type="button" className="shop-action-btn-sm" onClick={() => setVendorAssignmentModal({ open: false, product: null, vendors: [], assignedIds: [], loading: false, savingId: null })}>×</button></div>
+          <div className="shop-modal-body"><p style={{ fontSize: 13, color: 'var(--shop-admin-muted)' }}>Select active vendors who can see this existing product in their dashboard. The product is not duplicated and its existing commission rule is used.</p>{vendorAssignmentModal.loading ? <p>Loading vendors…</p> : <div style={{ display: 'grid', gap: 8 }}>{vendorAssignmentModal.vendors.map((vendor) => { const checked = vendorAssignmentModal.assignedIds.includes(Number(vendor.id)); return <label key={vendor.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, border: '1px solid var(--shop-admin-border)', borderRadius: 7, cursor: 'pointer' }}><input type="checkbox" checked={checked} disabled={vendorAssignmentModal.savingId === Number(vendor.id)} onChange={() => toggleVendorAssignment(Number(vendor.id))} /><span>{vendor.name}</span>{vendorAssignmentModal.savingId === Number(vendor.id) && <small>Saving…</small>}</label>; })}</div>}</div>
+          <div className="shop-modal-footer"><button type="button" className="shop-action-btn-sm" onClick={() => setVendorAssignmentModal({ open: false, product: null, vendors: [], assignedIds: [], loading: false, savingId: null })}>Done</button></div>
+        </div>
+      </div>
+    )}
     {/* Stock Movement History Modal */}
     {stockHistoryModal.open && (
       <div className="shop-modal-overlay" onClick={() => setStockHistoryModal({ open: false, product: null, movements: [], loading: false })}>
@@ -2437,7 +2524,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       </>
     ) : (
       <>
-        <div className="shop-admin-heading">
+        <div className="shop-admin-heading product-management-header">
           <div>
             <h2>{isSeller ? 'My Products & Inventory' : 'Product & Inventory Management'}</h2>
             <p>{isSeller ? 'Manage your catalog, stock and pricing. All updates comply with MT-Boss standards.' : 'Complete Product Management, Inventory Tracking & 27-Column CSV Engine.'}</p>
@@ -2462,6 +2549,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
             >
               <Plus size={16} /> Add Product
             </button>
+            <button type="button" className="shop-action-btn-sm" onClick={() => setShowImportModal(true)}><UploadCloud size={14} /> Import Excel</button>
             <button type="button" className="shop-action-btn-sm" onClick={downloadImportTemplate} title="Download 27-Column CSV Template">
               <Download size={14} /> 27-Col Template
             </button>
@@ -2476,7 +2564,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
 
         {/* Dashboard Statistics Summary (Admin only) */}
         {!isSeller && dashboardStats && (
-          <div className="shop-stats-grid">
+          <div className="shop-stats-grid product-management-stats">
             <div className="shop-stat-card stat-blue">
               <span className="stat-label">Total Catalog</span>
               <span className="stat-val">{dashboardStats.total_products || 0}</span>
@@ -2514,8 +2602,8 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
 
         {notice && <p className="shop-admin-notice" role="status">{notice}</p>}
 
-        {/* 27-Column Bulk CSV Import Section */}
-        <section className="shop-admin-card" style={{ marginBottom: 16, border: '1px dashed var(--border, #cbd5e1)' }}>
+        {/* 27-Column Bulk CSV Import Modal */}
+        {showImportModal && <div className="shop-modal-overlay" onClick={() => setShowImportModal(false)}><section className="shop-modal-container shop-admin-card" style={{ maxWidth: 1080, maxHeight: '88vh', overflow: 'auto', border: '1px dashed var(--border, #cbd5e1)' }} onClick={(e) => e.stopPropagation()}>
           <div className="shop-admin-list-head" style={{ gap: 12 }}>
             <div>
               <h3 style={{ marginBottom: 4 }}>Complete 27-Column CSV &amp; Excel Import</h3>
@@ -2615,10 +2703,46 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
               </div>
             </div>
           )}
-        </section>
+          <div className="shop-modal-footer"><button type="button" className="shop-action-btn-sm" onClick={() => setShowImportModal(false)}>Close</button></div>
+        </section></div>}
+
+        {!isSeller && showAssignModal && (
+          <div className={assignmentOnly ? 'assignment-page' : 'shop-modal-overlay'} onClick={assignmentOnly ? undefined : () => setShowAssignModal(false)}><section className={`${assignmentOnly ? '' : 'shop-modal-container'} shop-admin-card`} style={assignmentOnly ? { width: '100%', maxWidth: 'none', overflow: 'visible', margin: 0 } : { maxWidth: 1120, maxHeight: '88vh', overflow: 'auto' }} onClick={(e) => e.stopPropagation()}>
+            <style jsx>{`button { min-height: 38px; border: 1px solid #94a3b8; border-radius: 6px; padding: 8px 13px; background: #fff; color: #0f172a; font-weight: 700; cursor: pointer; } button:hover { background: #f1f5f9; } button:disabled { cursor: not-allowed; opacity: .5; }`}</style>
+            <div className="shop-admin-list-head"><div><h3>Assign Vendors</h3><p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--shop-admin-muted)' }}>Choose one vendor, tick multiple products, then assign them together.</p></div><button type="button" onClick={loadAssignmentData}>Refresh assignments</button></div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'end', flexWrap: 'wrap', marginBottom: 14 }}>
+              <label style={{ minWidth: 260, display: 'grid', gap: 5 }}><span style={{ fontSize: 12, fontWeight: 700 }}>Vendor</span><select value={bulkVendorId} onChange={(e) => setBulkVendorId(e.target.value)}><option value="">Select active vendor</option>{bulkVendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.shop_name || vendor.vendor_name || `Vendor #${vendor.id}`}</option>)}</select></label>
+              <button type="button" disabled={bulkAssigning || !bulkVendorId || !selectedProductIds.length} onClick={assignSelectedProducts}>{bulkAssigning ? 'Assigning…' : `Assign ${selectedProductIds.length} selected product(s)`}</button>
+              {selectedProductIds.length > 0 && <button type="button" onClick={() => setSelectedProductIds([])}>Clear selection</button>}
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}><input value={assignmentSearch} onChange={(e) => setAssignmentSearch(e.target.value)} placeholder="Search product by name, code, SKU or category…" style={{ flex: '1 1 420px', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 7, border: '1px solid #94a3b8', fontSize: 14 }} /><select value={assignmentProductFilter} onChange={(e) => setAssignmentProductFilter(e.target.value)} style={{ minWidth: 230, padding: '10px 12px', border: '1px solid #94a3b8', borderRadius: 7, background: '#fff', fontWeight: 700 }}><option value="all">All Products</option><option value="assigned">Assigned Vendor Products</option></select></div>
+            {(() => {
+              const selectedVendorSummary = assignmentSummary.find((row) => Number(row.vendor_id) === Number(bulkVendorId));
+              const allAssignments = new Map();
+              assignmentSummary.forEach((row) => (row.products || []).forEach((product) => {
+                const productId = Number(product.id);
+                const names = allAssignments.get(productId) || [];
+                if (!names.includes(row.vendor_name)) names.push(row.vendor_name);
+                allAssignments.set(productId, names);
+              }));
+              const assignedIds = new Set((selectedVendorSummary?.products || []).map((product) => Number(product.id)));
+              const filterAssignedIds = bulkVendorId ? assignedIds : new Set(allAssignments.keys());
+              const matchingProducts = assignmentProducts.filter((product) => {
+                const matchesSearch = `${product.name} ${product.product_code || ''} ${product.sku || ''} ${product.category || ''}`.toLowerCase().includes(assignmentSearch.trim().toLowerCase());
+                return matchesSearch && (assignmentProductFilter === 'all' || filterAssignedIds.has(Number(product.id)));
+              });
+              const toggleAllMatching = (checked) => setSelectedProductIds((ids) => checked
+                ? [...new Set([...ids, ...matchingProducts.map((product) => Number(product.id))])]
+                : ids.filter((id) => !matchingProducts.some((product) => Number(product.id) === id)));
+              return <div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 7, fontSize: 12, color: '#64748b' }}><span>{matchingProducts.length} approved product(s)</span><strong style={{ color: '#047857' }}>{bulkVendorId ? `${assignedIds.size} assigned to selected vendor` : `${allAssignments.size} assigned across all vendors`}</strong></div><div className="shop-admin-table-wrap" style={{ height: 300, overflow: 'auto', border: '1px solid #cbd5e1', borderRadius: 8 }}><table><thead><tr><th><input type="checkbox" aria-label="Select all matching products" checked={matchingProducts.length > 0 && matchingProducts.every((product) => selectedProductIds.includes(Number(product.id)))} onChange={(e) => toggleAllMatching(e.target.checked)} /></th><th>Approved product</th><th>Code</th><th>Category</th><th>Status</th></tr></thead><tbody>{matchingProducts.map((product) => { const vendorNames = allAssignments.get(Number(product.id)) || []; const isAssigned = vendorNames.length > 0; return <tr key={`assign-${product.id}`} style={{ background: isAssigned ? '#f0fdf4' : undefined }}><td><input type="checkbox" checked={selectedProductIds.includes(Number(product.id))} onChange={(e) => setSelectedProductIds((ids) => e.target.checked ? [...new Set([...ids, Number(product.id)])] : ids.filter((id) => id !== Number(product.id)))} /></td><td><strong>{product.name}</strong></td><td>{product.product_code || `#${product.id}`}</td><td>{product.category || 'Unassigned'}</td><td>{isAssigned ? <span title={vendorNames.join(', ')} style={{ padding: '3px 8px', borderRadius: 999, background: '#dcfce7', color: '#166534', fontSize: 11, fontWeight: 800 }}>Assigned · {vendorNames.join(', ')}</span> : <span style={{ color: '#64748b', fontSize: 11 }}>Available</span>}</td></tr>; })}{!matchingProducts.length && <tr><td colSpan="5" style={{ textAlign: 'center', padding: 30, color: '#64748b' }}>{assignmentProductFilter === 'assigned' ? 'No assigned products found for this selection.' : 'No approved product found.'}</td></tr>}</tbody></table></div></div>;
+            })()}
+            <div style={{ marginTop: 18 }}><h4 style={{ margin: '0 0 8px' }}>Vendor assignment summary</h4>{!assignmentSummary.length ? <p style={{ margin: 0, color: 'var(--shop-admin-muted)', fontSize: 13 }}>No products are assigned to vendors yet.</p> : <div className="shop-admin-table-wrap" style={{ border: '1px solid #dbe3ee', borderRadius: 8 }}><table><thead><tr><th>Vendor</th><th>Assigned</th><th>Product details</th></tr></thead><tbody>{assignmentSummary.map((row) => { const selected = Number(row.vendor_id) === Number(bulkVendorId); return <tr key={row.vendor_id} style={{ background: selected ? '#eff6ff' : undefined }}><td><strong>{row.vendor_name}</strong>{selected && <div style={{ color: '#1d4ed8', fontSize: 11, fontWeight: 800 }}>Selected vendor</div>}</td><td><span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 999, background: '#e0e7ff', color: '#3730a3', fontWeight: 800 }}>{row.product_count}</span></td><td style={{ maxWidth: 650 }}>{selected ? <div style={{ maxHeight: 110, overflow: 'auto', display: 'flex', flexWrap: 'wrap', gap: 5 }}>{(row.products || []).map((product) => <span key={product.id} style={{ padding: '4px 7px', border: '1px solid #bfdbfe', borderRadius: 5, background: '#fff', fontSize: 11 }}>{product.name}</span>)}</div> : <span style={{ color: '#64748b', fontSize: 12 }}>Select vendor above to view products</span>}</td></tr>; })}</tbody></table></div>}</div>
+            {!assignmentOnly && <div className="shop-modal-footer"><button type="button" className="shop-action-btn-sm" onClick={() => setShowAssignModal(false)}>Done</button></div>}
+          </section></div>
+        )}
 
         {/* Product Catalog Table */}
-        <div className="shop-admin-card">
+        <div className="shop-admin-card product-catalog-section">
           <div className="shop-admin-list-head">
             <h3>{isSeller ? 'My Products' : 'All Products'} ({isSeller ? products.length : productPagination.total})</h3>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -2841,6 +2965,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                               </>
                             )}
                             <button type="button" onClick={() => edit(product)}>Edit</button>
+                            {!isSeller && <button type="button" onClick={() => openVendorAssignments(product)} title="Attach this existing product to vendors">Assign vendor</button>}
                             <button type="button" onClick={() => duplicateProduct(product)} title="Duplicate with new Product ID and SKU">
                               <Copy size={12} style={{ display: 'inline', marginRight: 2 }} /> Copy
                             </button>
@@ -3563,6 +3688,14 @@ export function ShopProductsManager({ isDarkMode = false }) {
   return (
     <div className={`shop-admin-root ${isDarkMode ? 'dark-mode dark' : ''}`}>
       <ProductManager ownerRole="admin" formId="shop-product-form" initialShowForm={showForm} isDarkMode={isDarkMode} />
+    </div>
+  );
+}
+
+export function AssignVendorsManager({ isDarkMode = false }) {
+  return (
+    <div className={`shop-admin-root ${isDarkMode ? 'dark-mode dark' : ''}`}>
+      <ProductManager ownerRole="admin" formId="assign-vendor-product-form" initialShowAssign assignmentOnly isDarkMode={isDarkMode} />
     </div>
   );
 }

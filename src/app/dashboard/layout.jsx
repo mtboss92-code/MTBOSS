@@ -130,6 +130,7 @@ const menuStructure = [
     children: [
       { label: 'Shop Now Manager', tab: 'shop-categories' },
       { label: '+ Add Shop Product', tab: 'shop-products' },
+      { label: 'Assign Vendors', tab: 'assign-vendors' },
       { label: 'Orders History', tab: 'orders-history' },
       { label: 'Shipping Settings', tab: 'shipping-settings' },
       { label: 'Vendor Commission', tab: 'shop-commission-settings' },

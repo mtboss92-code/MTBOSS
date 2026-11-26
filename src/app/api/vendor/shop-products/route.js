@@ -17,6 +17,12 @@ import { recordStockMovement } from '@/lib/stock-movements';
 const ensureTable = createInitializationGuard(async () => {
   await pool.query(`CREATE SEQUENCE IF NOT EXISTS shop_product_code_seq START WITH 1;`);
   await pool.query(QUALITY_TIER_COLUMN_SQL);
+  await pool.query(`CREATE TABLE IF NOT EXISTS shop_product_vendors (
+    product_id INTEGER NOT NULL REFERENCES supplier_materials(id) ON DELETE CASCADE,
+    vendor_id INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+    assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), assigned_by INTEGER,
+    PRIMARY KEY (product_id, vendor_id)
+  )`);
 });
 
 const unauthorized = () => NextResponse.json({ success: false, error: 'Vendor access required' }, { status: 401 });
@@ -189,7 +195,9 @@ export async function GET(req) {
                 weight, dimensions, measurement_unit, low_stock_threshold, stock_status, has_variants, status,
                 COALESCE(faqs, '[]'::jsonb) AS faqs, returns_policy, COALESCE(highlights, '[]'::jsonb) AS highlights, created_at
          FROM supplier_materials
-         WHERE id=$1 AND vendor_id=$2 AND is_deleted=FALSE`,
+         WHERE id=$1 AND is_deleted=FALSE AND (vendor_id=$2 OR EXISTS (
+           SELECT 1 FROM shop_product_vendors spv WHERE spv.product_id = supplier_materials.id AND spv.vendor_id = $2
+         ))`,
         [id, vendor.id]
       );
       if (!one.rows.length) return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
@@ -210,7 +218,9 @@ export async function GET(req) {
               weight, dimensions, measurement_unit, low_stock_threshold, stock_status, has_variants, status,
               COALESCE(faqs, '[]'::jsonb) AS faqs, returns_policy, COALESCE(highlights, '[]'::jsonb) AS highlights, created_at
        FROM supplier_materials
-       WHERE vendor_id=$1 AND is_deleted=FALSE
+       WHERE (vendor_id=$1 OR EXISTS (
+         SELECT 1 FROM shop_product_vendors spv WHERE spv.product_id = supplier_materials.id AND spv.vendor_id = $1
+       )) AND is_deleted=FALSE
        ORDER BY created_at DESC, id DESC`,
       [vendor.id]
     );
