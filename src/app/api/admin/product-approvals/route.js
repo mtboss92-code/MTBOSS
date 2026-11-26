@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import pool, { isTransientConnectionError, queryReadWithRetry } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
+import { recordProductAuditLog } from '@/lib/stock-movements';
 
 const unauthorized = () =>
   NextResponse.json({ success: false, error: 'Admin access required' }, { status: 401 });
@@ -34,7 +35,8 @@ export async function GET(req) {
       const pendingCountRes = await queryReadWithRetry(`
         SELECT COUNT(*)::int AS count
         FROM supplier_materials m
-        WHERE (m.vendor_id IS NOT NULL OR (m.supplier_id IS NOT NULL AND m.supplier_id > 0))
+        WHERE m.is_deleted = FALSE
+          AND (m.vendor_id IS NOT NULL OR (m.supplier_id IS NOT NULL AND m.supplier_id > 0))
           AND COALESCE(m.specifications->'__approval__'->>'status', 'approved') = 'pending'
       `);
       return NextResponse.json({
@@ -49,7 +51,7 @@ export async function GET(req) {
     const limit = Math.max(1, Math.min(100, Number(searchParams.get('limit')) || 20));
     const offset = (page - 1) * limit;
 
-    const whereClauses = ['(m.vendor_id IS NOT NULL OR (m.supplier_id IS NOT NULL AND m.supplier_id > 0))'];
+    const whereClauses = ['m.is_deleted = FALSE', '(m.vendor_id IS NOT NULL OR (m.supplier_id IS NOT NULL AND m.supplier_id > 0))'];
     const queryParams = [];
 
     if (statusFilter === 'pending') {
@@ -87,7 +89,8 @@ export async function GET(req) {
         FROM supplier_materials m
         LEFT JOIN vendors v ON v.id = m.vendor_id
         LEFT JOIN suppliers s ON s.id = m.supplier_id
-        WHERE (m.vendor_id IS NOT NULL OR (m.supplier_id IS NOT NULL AND m.supplier_id > 0))
+        WHERE m.is_deleted = FALSE
+          AND (m.vendor_id IS NOT NULL OR (m.supplier_id IS NOT NULL AND m.supplier_id > 0))
       ),
       filtered AS (
         SELECT m.id
@@ -196,15 +199,89 @@ export async function POST(req) {
   try {
     const body = await req.json();
     const id = Number(body.id);
+    const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map(Number))]
+      .filter((productId) => Number.isInteger(productId) && productId > 0);
     const action = String(body.action || '').trim().toLowerCase();
     const reason = String(body.reason || '').trim();
 
-    if (!Number.isInteger(id) || id < 1) {
+    if ((!Number.isInteger(id) || id < 1) && ids.length === 0) {
       return NextResponse.json({ success: false, error: 'Valid product ID is required' }, { status: 400 });
     }
 
-    if (!['approve', 'reject'].includes(action)) {
-      return NextResponse.json({ success: false, error: 'Action must be approve or reject' }, { status: 400 });
+    if (!['approve', 'reject', 'delete'].includes(action)) {
+      return NextResponse.json({ success: false, error: 'Action must be approve, reject or delete' }, { status: 400 });
+    }
+
+    // Bulk operations are intentionally available only through this admin-protected route.
+    // The UI sends `ids`; the single-product flow below remains compatible with existing callers.
+    if (ids.length > 0) {
+      if (action === 'reject' && (!reason || reason.length < 3)) {
+        return NextResponse.json({ success: false, error: 'A rejection reason is required (at least 3 characters)' }, { status: 400 });
+      }
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const productsRes = await client.query(
+          `SELECT id, name, is_available, status
+           FROM supplier_materials
+           WHERE id = ANY($1::int[]) AND is_deleted = FALSE
+             AND (vendor_id IS NOT NULL OR (supplier_id IS NOT NULL AND supplier_id > 0))
+           FOR UPDATE`,
+          [ids]
+        );
+        const products = productsRes.rows;
+        if (products.length !== ids.length) {
+          await client.query('ROLLBACK');
+          return NextResponse.json({ success: false, error: 'One or more selected products are unavailable' }, { status: 404 });
+        }
+
+        const adminIdentifier = admin.email || admin.username || (admin.id ? `Admin #${admin.id}` : 'Admin');
+        const nowIso = new Date().toISOString();
+        let approvalMetadata = null;
+        if (action === 'approve') approvalMetadata = { status: 'approved', approved_by: adminIdentifier, approved_at: nowIso };
+        if (action === 'reject') approvalMetadata = { status: 'rejected', rejection_reason: reason, rejected_by: adminIdentifier, rejected_at: nowIso };
+
+        if (action === 'delete') {
+          await client.query(
+            `UPDATE supplier_materials SET is_deleted = TRUE, is_available = FALSE, status = 'archived', updated_at = NOW()
+             WHERE id = ANY($1::int[])`, [ids]
+          );
+        } else {
+          await client.query(
+            `UPDATE supplier_materials
+             SET is_available = $1, status = $2,
+                 specifications = jsonb_set(COALESCE(specifications, '{}'::jsonb), '{__approval__}', $3::jsonb, TRUE),
+                 updated_at = NOW()
+             WHERE id = ANY($4::int[])`,
+            [action === 'approve', action === 'approve' ? 'active' : 'rejected', JSON.stringify(approvalMetadata), ids]
+          );
+        }
+
+        for (const product of products) {
+          await recordProductAuditLog({
+            clientOrPool: client,
+            productId: product.id,
+            action: action === 'delete' ? 'delete' : action,
+            previousValues: { is_deleted: false, is_available: product.is_available, status: product.status },
+            newValues: action === 'delete'
+              ? { is_deleted: true, is_available: false, status: 'archived' }
+              : { is_available: action === 'approve', status: action === 'approve' ? 'active' : 'rejected', approval: approvalMetadata },
+            userId: admin.id,
+            userRole: 'admin',
+            userName: admin.name || adminIdentifier,
+            notes: action === 'reject' ? `Bulk rejection: ${reason}` : `Bulk ${action} by admin`,
+          });
+        }
+        await client.query('COMMIT');
+        if (globalThis.__shopProductCache) globalThis.__shopProductCache.clear();
+        return NextResponse.json({ success: true, count: products.length, message: `${products.length} product(s) ${action === 'delete' ? 'archived' : `${action}d`} successfully` });
+      } catch (bulkError) {
+        await client.query('ROLLBACK');
+        throw bulkError;
+      } finally {
+        client.release();
+      }
     }
 
     // Writes use pool.query with NO automatic retry (avoid duplicate approvals).
@@ -215,7 +292,7 @@ export async function POST(req) {
        FROM supplier_materials m
        LEFT JOIN vendors v ON v.id = m.vendor_id
        LEFT JOIN suppliers s ON s.id = m.supplier_id
-       WHERE m.id = $1 AND (m.vendor_id IS NOT NULL OR (m.supplier_id IS NOT NULL AND m.supplier_id > 0))`,
+       WHERE m.id = $1 AND m.is_deleted = FALSE AND (m.vendor_id IS NOT NULL OR (m.supplier_id IS NOT NULL AND m.supplier_id > 0))`,
       [id]
     );
 
