@@ -35,8 +35,13 @@ export default function Footer() {
     { label: "FAQs", href: "/faqs" },
     { label: "Contact", href: "/contact" },
     { label: "Review Us", isReviewAction: true },
+  ];
+
+  const legalLinks = [
     { label: "Privacy Policy", href: "/privacy-policy" },
     { label: "Terms and Conditions", href: "/terms-and-conditions" },
+    { label: "Return, Refund & Cancellation Policy", href: "/return-refund-cancellation-policy" },
+    { label: "Trademark Registration Certificate", href: "/trademark-certificate" },
   ];
 
 
@@ -83,7 +88,7 @@ export default function Footer() {
   return (
     <footer className={`transition-colors duration-500 border-t ${isDark ? "bg-black border-zinc-900" : "bg-white border-zinc-100"}`}>
       <div className="max-w-7xl mx-auto px-6 sm:px-10 lg:px-16 py-16">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-12">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-12">
 
           <div className="space-y-6">
             <div className="flex items-center gap-3">
@@ -169,6 +174,24 @@ export default function Footer() {
 
           <div>
             <h3 className={`text-xs font-black uppercase tracking-[0.2em] mb-6 ${isDark ? "text-white" : "text-zinc-900"}`}>
+              Legal
+            </h3>
+            <ul className="space-y-3.5">
+              {legalLinks.map((link) => (
+                <li key={link.href}>
+                  <a
+                    href={link.href}
+                    className={`text-sm font-medium transition-colors duration-200 hover:text-[var(--brand-blue)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand-blue)] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}
+                  >
+                    {link.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <h3 className={`text-xs font-black uppercase tracking-[0.2em] mb-6 ${isDark ? "text-white" : "text-zinc-900"}`}>
               Office
             </h3>
             <div className="space-y-5">
@@ -210,12 +233,6 @@ export default function Footer() {
             >
               <Star size={12} className="fill-current" aria-hidden="true" /> Review Us
             </button>
-            <a href="/privacy-policy" className="text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-[var(--brand-blue)]">
-              Privacy
-            </a>
-            <a href="/terms-and-conditions" className="text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-[var(--brand-blue)]">
-              Terms
-            </a>
           </div>
         </div>
       </div>

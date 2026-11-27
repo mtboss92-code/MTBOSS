@@ -533,7 +533,7 @@ export default function SupplierLoginPage() {
               By signing in, you agree to our{' '}
               <Link href="/terms" style={{ color: 'inherit', textDecoration: 'underline' }}>Terms</Link>{' '}
               and{' '}
-              <Link href="/privacy" style={{ color: 'inherit', textDecoration: 'underline' }}>Privacy Policy</Link>
+              <Link href="/privacy-policy" style={{ color: 'inherit', textDecoration: 'underline' }}>Privacy Policy</Link>
             </div>
           </div>
         </div>

@@ -73,6 +73,26 @@ const nextConfig = {
         destination: '/Services/all',
         permanent: true,
       },
+      {
+        source: '/legal/mtboss-privacy-policy.pdf',
+        destination: '/documents/mtboss-privacy-policy.pdf',
+        permanent: true,
+      },
+      {
+        source: '/legal/mtboss-return-refund-cancellation-policy.pdf',
+        destination: '/documents/mtboss-return-refund-cancellation-policy.pdf',
+        permanent: true,
+      },
+      {
+        source: '/legal/mtboss-terms-and-conditions.pdf',
+        destination: '/documents/mtboss-terms-and-conditions.pdf',
+        permanent: true,
+      },
+      {
+        source: '/legal/mtboss-trademark-certificate.pdf',
+        destination: '/documents/mtboss-trademark-registration-certificate.pdf',
+        permanent: true,
+      },
     ];
   },
   async rewrites() {

@@ -2314,4 +2314,21 @@
 
 
 
+  <url>
+    <loc>https://www.mtboss.in/privacy-policy</loc>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.mtboss.in/terms-and-conditions</loc>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.mtboss.in/return-refund-cancellation-policy</loc>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://www.mtboss.in/trademark-certificate</loc>
+    <priority>0.4</priority>
+  </url>
+
 </urlset>
