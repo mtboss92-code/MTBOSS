@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, Suspense } from 'react';
+import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
@@ -207,6 +207,8 @@ async function uploadImage(file) {
 }
 
 function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', initialShowForm = false, initialShowAssign = false, assignmentOnly = false, isDarkMode = false }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const isVendor = ownerRole === 'vendor';
   const isSupplier = ownerRole === 'supplier';
   const isSeller = isVendor || isSupplier;
@@ -319,12 +321,18 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [notice, setNotice] = useState('');
-  const [tierFilter, setTierFilter] = useState('any');
-  const [approvalFilter, setApprovalFilter] = useState('all');
-  const [productPage, setProductPage] = useState(1);
+  const [tierFilter, setTierFilter] = useState(() => searchParams.get('tier') || 'any');
+  const [approvalFilter, setApprovalFilter] = useState(() => searchParams.get('approval_status') || 'all');
+  const [productPage, setProductPage] = useState(() => Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1));
   const [productPagination, setProductPagination] = useState({ page: 1, limit: 25, total: 0, pages: 1 });
-  const [productSearch, setProductSearch] = useState('');
-  const [debouncedProductSearch, setDebouncedProductSearch] = useState('');
+  const [productSearch, setProductSearch] = useState(() => searchParams.get('q') || '');
+  const [debouncedProductSearch, setDebouncedProductSearch] = useState(() => searchParams.get('q') || '');
+  const [pageInput, setPageInput] = useState('');
+  const [pageError, setPageError] = useState('');
+  const [highlightedProductId, setHighlightedProductId] = useState(null);
+  const rowRefs = useRef(new Map());
+  const restoreListPositionRef = useRef(null);
+  const highlightTimeoutRef = useRef(null);
   const [importRows, setImportRows] = useState([]);
   const [importFileName, setImportFileName] = useState('');
   const [importMode, setImportMode] = useState('create');
@@ -358,6 +366,43 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     return true;
   });
 
+  const updateListUrl = useCallback((changes, { replace = false } = {}) => {
+    const params = new URLSearchParams(searchParams.toString());
+    Object.entries(changes).forEach(([key, value]) => {
+      if (value === '' || value === null || value === undefined || (key === 'page' && Number(value) === 1)) params.delete(key);
+      else params.set(key, String(value));
+    });
+    const query = params.toString();
+    const url = `${window.location.pathname}${query ? `?${query}` : ''}`;
+    if (replace) router.replace(url, { scroll: false });
+    else router.push(url, { scroll: false });
+  }, [router, searchParams]);
+
+  const rememberListPosition = useCallback((productId) => {
+    restoreListPositionRef.current = {
+      productId: Number(productId),
+      scrollY: typeof window === 'undefined' ? 0 : window.scrollY,
+      url: typeof window === 'undefined' ? '' : `${window.location.pathname}${window.location.search}`,
+    };
+  }, []);
+
+  const goToProductPage = useCallback(() => {
+    const value = pageInput.trim();
+    const totalPages = Math.max(1, Number(productPagination.pages) || 1);
+    if (!/^\d+$/.test(value)) {
+      setPageError('Enter a whole page number.');
+      return;
+    }
+    const page = Number(value);
+    if (page < 1 || page > totalPages) {
+      setPageError(`Enter a page from 1 to ${totalPages}.`);
+      return;
+    }
+    setPageError('');
+    setPageInput('');
+    if (page !== productPage) updateListUrl({ page });
+  }, [pageInput, productPagination.pages, productPage, updateListUrl]);
+
   const approveProduct = async (product) => {
     try {
       const response = await fetch(productEndpoint, {
@@ -369,7 +414,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       if (!response.ok) throw new Error(data.error || 'Could not approve product');
       notifyShopProductsUpdated();
       setNotice(`Product "${product.name}" approved successfully.`);
-      await load();
+      await refreshListAfterAction(product.id);
     } catch (err) {
       setNotice(err.message);
     }
@@ -388,7 +433,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       if (!response.ok) throw new Error(data.error || 'Could not reject product');
       notifyShopProductsUpdated();
       setNotice(`Product "${product.name}" marked as rejected.`);
-      await load();
+      await refreshListAfterAction(product.id);
     } catch (err) {
       setNotice(err.message);
     }
@@ -406,11 +451,30 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
   }, [isSeller]);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedProductSearch(productSearch.trim()), 300);
+    const t = setTimeout(() => {
+      const value = productSearch.trim();
+      if (value !== (searchParams.get('q') || '')) updateListUrl({ q: value, page: 1 });
+    }, 300);
     return () => clearTimeout(t);
-  }, [productSearch]);
+  }, [productSearch, searchParams, updateListUrl]);
 
-  useEffect(() => { setProductPage(1); }, [tierFilter, approvalFilter, debouncedProductSearch]);
+  // The URL is the list's source of truth, so refreshes and browser history
+  // restore the exact page and active list context.
+  useEffect(() => {
+    const nextPage = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1);
+    const nextTier = searchParams.get('tier') || 'any';
+    const nextApproval = searchParams.get('approval_status') || 'all';
+    const nextSearch = searchParams.get('q') || '';
+    setProductPage(nextPage);
+    setTierFilter(nextTier);
+    setApprovalFilter(nextApproval);
+    setProductSearch(nextSearch);
+    setDebouncedProductSearch(nextSearch);
+  }, [searchParams]);
+
+  useEffect(() => () => {
+    if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+  }, []);
 
   const loadReferenceData = useCallback(async () => {
     try {
@@ -461,11 +525,40 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
         })();
         return { ...p, images: imgs, specifications: specs };
       };
+      const pagination = productData.pagination || { page: 1, limit: 25, total: (productData.data || []).length, pages: 1 };
+      // A mutation can make the final page disappear. Canonicalise the URL and
+      // let the normal URL-driven fetch load the nearest valid page.
+      if (!isSeller && productPage > pagination.pages) {
+        updateListUrl({ page: Math.max(1, pagination.pages) }, { replace: true });
+        return;
+      }
       setProducts((productData.data || []).map(normalizeProduct));
-      setProductPagination(productData.pagination || { page: 1, limit: 25, total: (productData.data || []).length, pages: 1 });
+      setProductPagination(pagination);
     } catch (error) { setNotice(error.message); }
     finally { setLoading(false); }
-  }, [isSeller, ownerRole, productEndpoint, productPage, debouncedProductSearch, tierFilter, approvalFilter]);
+  }, [isSeller, ownerRole, productEndpoint, productPage, debouncedProductSearch, tierFilter, approvalFilter, updateListUrl]);
+
+  const refreshListAfterAction = useCallback(async (productId) => {
+    rememberListPosition(productId);
+    await load();
+  }, [load, rememberListPosition]);
+
+  useEffect(() => {
+    const restore = restoreListPositionRef.current;
+    if (!restore || loading) return;
+    const row = rowRefs.current.get(restore.productId);
+    if (row) {
+      requestAnimationFrame(() => {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setHighlightedProductId(restore.productId);
+        if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+        highlightTimeoutRef.current = setTimeout(() => setHighlightedProductId(null), 2500);
+      });
+    } else if (typeof window !== 'undefined') {
+      window.scrollTo({ top: restore.scrollY, behavior: 'auto' });
+    }
+    restoreListPositionRef.current = null;
+  }, [products, loading, showProductForm]);
 
   useEffect(() => { loadReferenceData(); }, [loadReferenceData]);
   useEffect(() => { load(); }, [load]);
@@ -824,6 +917,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
   };
 
   const edit = async (product) => {
+    rememberListPosition(product.id);
     let full = product;
     // The catalog endpoint intentionally returns a compact row for speed. It
     // omits editor-only values such as bulk pricing, FAQs, delivery cities and
@@ -840,6 +934,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       } catch (error) {
         // Failing closed prevents an incomplete list row from erasing details
         // on the next save.
+        restoreListPositionRef.current = null;
         setNotice(error.message || 'Could not load complete product details. Please try again.');
         return;
       }
@@ -1059,7 +1154,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       } else {
         setNotice(isEditing ? 'Product updated.' : 'Product added successfully.');
       }
-      await load();
+      await refreshListAfterAction(isEditing ? editingId : data?.data?.id);
     } catch (error) { setNotice(error.message); }
     finally { setSaving(false); }
   };
@@ -1073,7 +1168,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       const data = await readApiJson(response);
       if (!response.ok) throw new Error(data.error || 'Could not update product');
       notifyShopProductsUpdated();
-      await load();
+      await refreshListAfterAction(product.id);
     } catch (error) { setNotice(error.message); }
   };
 
@@ -1085,7 +1180,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
       if (!response.ok) throw new Error(data.error || 'Could not delete product');
       notifyShopProductsUpdated();
       setNotice('Product deleted.');
-      await load();
+      await refreshListAfterAction(product.id);
     } catch (error) { setNotice(error.message); }
   };
 
@@ -2757,7 +2852,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
               )}
               <label className="shop-admin-tier-filter">
                 Quality Tier
-                <select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)}>
+                <select value={tierFilter} onChange={(e) => { const value = e.target.value; setTierFilter(value); updateListUrl({ tier: value === 'any' ? '' : value, page: 1 }); }}>
                   <option value="any">All products</option>
                   <option value="none">No Quality Tier set</option>
                   {QUALITY_TIER_OPTIONS.map((tier) => (
@@ -2767,7 +2862,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
               </label>
               <label className="shop-admin-tier-filter">
                 Approval Status
-                <select value={approvalFilter} onChange={(e) => setApprovalFilter(e.target.value)}>
+                <select value={approvalFilter} onChange={(e) => { const value = e.target.value; setApprovalFilter(value); updateListUrl({ approval_status: value === 'all' ? '' : value, page: 1 }); }}>
                   <option value="all">All Products</option>
                   {isSeller && <option value="assigned_admin">Assigned by Admin</option>}
                   <option value="approved">✓ Approved / Live</option>
@@ -2812,7 +2907,11 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                     const productCode = product.product_code || `MTB-PROD-${String(product.id).padStart(6, '0')}`;
 
                     return (
-                      <tr key={product.id}>
+                      <tr
+                        key={product.id}
+                        ref={(node) => { if (node) rowRefs.current.set(Number(product.id), node); else rowRefs.current.delete(Number(product.id)); }}
+                        className={highlightedProductId === Number(product.id) ? 'shop-product-row-highlight' : undefined}
+                      >
                         <td className="shop-product-cell" style={{ minWidth: 260 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                             <div
@@ -2993,13 +3092,27 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
             </div>
           )}
 
-          {!isSeller && !loading && productPagination.pages > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 12, color: 'var(--shop-admin-muted)' }}>Page {productPagination.page} of {productPagination.pages}</span>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button type="button" disabled={productPage <= 1} onClick={() => setProductPage((p) => Math.max(1, p - 1))}>Prev</button>
-                <button type="button" disabled={productPage >= productPagination.pages} onClick={() => setProductPage((p) => p + 1)}>Next</button>
-              </div>
+          {!isSeller && !loading && (
+            <div className="shop-product-pagination">
+              <button type="button" disabled={productPage <= 1} onClick={() => updateListUrl({ page: productPage - 1 })}>Previous</button>
+              <span className="shop-product-page-status" aria-live="polite">Page {productPagination.page} of {productPagination.pages}</span>
+              <form className="shop-product-go-to-page" onSubmit={(event) => { event.preventDefault(); goToProductPage(); }}>
+                <label htmlFor="shop-product-go-to-page">Go to page</label>
+                <input
+                  id="shop-product-go-to-page"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={pageInput}
+                  onChange={(event) => { setPageInput(event.target.value); setPageError(''); }}
+                  aria-invalid={Boolean(pageError)}
+                  aria-describedby={pageError ? 'shop-product-page-error' : undefined}
+                  disabled={loading}
+                />
+                <button type="submit" disabled={loading}>Go</button>
+              </form>
+              <button type="button" disabled={productPage >= productPagination.pages} onClick={() => updateListUrl({ page: productPage + 1 })}>Next</button>
+              {pageError && <span id="shop-product-page-error" className="shop-product-page-error" role="alert">{pageError}</span>}
             </div>
           )}
         </div>
