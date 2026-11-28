@@ -90,7 +90,6 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const [propertyOpen, setPropertyOpen] = useState(false);
-  const [agentOpen, setAgentOpen] = useState(false);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -135,7 +134,6 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
     const frame = requestAnimationFrame(() => {
       setIsOpen(false);
       setPropertyOpen(false);
-      setAgentOpen(false);
     });
     return () => cancelAnimationFrame(frame);
   }, [pathname]);
@@ -150,7 +148,6 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
   const closeMobileMenu = () => {
     setIsOpen(false);
     setPropertyOpen(false);
-    setAgentOpen(false);
   };
 
   const handleLogout = async () => {
@@ -260,29 +257,6 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
               className={`px-2 2xl:px-3 py-2 text-xs 2xl:text-sm font-medium whitespace-nowrap ${text} ${textHover} transition-colors rounded-md`}
             >
               Construction
-            </Link>
-
-            <DropdownButton label="Agent" text={text} textHover={textHover} dropdownBg={dropdownBg}>
-              <div className="w-48">
-                <Link
-                  href="/agent"
-                  className={`block px-4 py-2.5 text-sm transition-colors ${dropdownTxt}`}
-                >
-                  Become an Agent
-                </Link>
-                <Link
-                  href="/agent/login"
-                  className={`block px-4 py-2.5 text-sm transition-colors ${dropdownTxt}`}
-                >
-                  Agent Login
-                </Link>
-              </div>
-            </DropdownButton>
-            <Link
-              href="/franchise"
-              className={`px-2 2xl:px-3 py-2 text-xs 2xl:text-sm font-medium whitespace-nowrap ${text} ${textHover} transition-colors rounded-md`}
-            >
-              Franchise
             </Link>
 
             <Link
@@ -624,72 +598,6 @@ export default function Navbar({ isDarkMode, toggleTheme }) {
               {link.label}
             </Link>
           ))}
-
-          {/* Mobile Agent */}
-          <div>
-            <button
-              type="button"
-              aria-expanded={agentOpen}
-              aria-controls="mobile-submenu-agent"
-              onClick={() => setAgentOpen(!agentOpen)}
-              className={`w-full min-h-[44px] flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
-                ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
-                : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
-                }`}
-            >
-              <span>Agent</span>
-              <svg
-                className={`w-4 h-4 transition-transform duration-200 ${agentOpen ? 'rotate-180' : ''
-                  }`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 9l-7 7-7-7"
-                />
-              </svg>
-            </button>
-            {agentOpen && (
-              <div id="mobile-submenu-agent" className="ml-4 mt-1 space-y-1">
-                <Link
-                  href="/agent"
-                  onClick={closeMobileMenu}
-                  className={`block min-h-[44px] flex items-center px-3 py-2 text-sm rounded-md transition-colors ${isDarkMode
-                    ? 'text-zinc-400 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
-                    : 'text-zinc-500 hover:text-zinc-900 hover:bg-gray-50'
-                    }`}
-                >
-                  Become an Agent
-                </Link>
-                <Link
-                  href="/agent/login"
-                  onClick={closeMobileMenu}
-                  className={`block min-h-[44px] flex items-center px-3 py-2 text-sm rounded-md transition-colors ${isDarkMode
-                    ? 'text-zinc-400 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
-                    : 'text-zinc-500 hover:text-zinc-900 hover:bg-gray-50'
-                    }`}
-                >
-                  Agent Login
-                </Link>
-              </div>
-            )}
-          </div>
-
-          <Link
-            href="/franchise"
-            onClick={closeMobileMenu}
-            className={`block min-h-[44px] flex items-center px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${isDarkMode
-              ? 'text-zinc-300 hover:text-[var(--brand-blue)] hover:bg-zinc-800'
-              : 'text-zinc-600 hover:text-zinc-900 hover:bg-gray-50'
-              }`}
-          >
-            Franchise
-          </Link>
 
           {/* Mobile Auth */}
           <div className="pt-4 space-y-2 border-t" style={{ borderTopColor: isDarkMode ? '#27272a' : '#e5e7eb' }}>

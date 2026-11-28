@@ -545,19 +545,21 @@ export default function LoginPage() {
           margin-top: 1.25rem;
           padding-top: 1.15rem;
           border-top: 1px solid var(--lp-border);
-          display: flex;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 0.625rem;
         }
         .lp-alt-login {
-          flex: 1;
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 0.35rem;
+          min-height: 46px;
           padding: 0.55rem 0.5rem;
           border-radius: 10px;
           font-size: 0.6875rem;
           font-weight: 600;
+          text-align: center;
           text-decoration: none;
           transition: opacity 0.15s, background 0.15s;
         }
@@ -571,7 +573,24 @@ export default function LoginPage() {
           border: 1px solid rgba(99, 102, 241, 0.45);
           background: ${dark ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.06)'};
         }
+        .lp-alt-login--agent {
+          color: #2563eb;
+          border: 1px solid rgba(37, 99, 235, 0.45);
+          background: ${dark ? 'rgba(37, 99, 235, 0.08)' : 'rgba(37, 99, 235, 0.06)'};
+        }
+        .lp-alt-login--franchise {
+          color: #7c3aed;
+          border: 1px solid rgba(124, 58, 237, 0.45);
+          background: ${dark ? 'rgba(124, 58, 237, 0.08)' : 'rgba(124, 58, 237, 0.06)'};
+        }
         .lp-alt-login:hover { opacity: 0.88; }
+        .lp-alt-login:focus-visible {
+          outline: 2px solid var(--lp-accent-light);
+          outline-offset: 2px;
+        }
+        @media (max-width: 480px) {
+          .lp-alt-logins { grid-template-columns: 1fr; }
+        }
       `}</style>
 
       <div className="lp-root">
@@ -760,6 +779,22 @@ export default function LoginPage() {
               <Link href="/supplier/login" className="lp-alt-login lp-alt-login--supplier">
                 <Package size={14} strokeWidth={2} />
                 Vendor Login
+              </Link>
+              <Link href="/agent/login" className="lp-alt-login lp-alt-login--agent">
+                <Briefcase size={14} strokeWidth={2} />
+                Agent Login
+              </Link>
+              <Link href="/agent" className="lp-alt-login lp-alt-login--agent">
+                <Wrench size={14} strokeWidth={2} />
+                Agent Registration
+              </Link>
+              <Link href="/franchise/login" className="lp-alt-login lp-alt-login--franchise">
+                <Building2 size={14} strokeWidth={2} />
+                Franchise Login
+              </Link>
+              <Link href="/franchise" className="lp-alt-login lp-alt-login--franchise">
+                <Package size={14} strokeWidth={2} />
+                Franchise Registration
               </Link>
             </div>
           </div>

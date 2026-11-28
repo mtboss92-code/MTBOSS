@@ -54,6 +54,13 @@ export default function Footer() {
     { label: "Construction Calculator", href: "/calculator" },
   ];
 
+  const partnerLinks = [
+    { label: "Agent Login", href: "/agent/login" },
+    { label: "Agent Registration", href: "/agent" },
+    { label: "Franchise Login", href: "/franchise/login" },
+    { label: "Franchise Registration", href: "/franchise" },
+  ];
+
   const socialLinks = [
     {
       label: "Facebook",
@@ -88,7 +95,7 @@ export default function Footer() {
   return (
     <footer className={`transition-colors duration-500 border-t ${isDark ? "bg-black border-zinc-900" : "bg-white border-zinc-100"}`}>
       <div className="max-w-7xl mx-auto px-6 sm:px-10 lg:px-16 py-16">
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-12">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-12">
 
           <div className="space-y-6">
             <div className="flex items-center gap-3">
@@ -178,6 +185,24 @@ export default function Footer() {
             </h3>
             <ul className="space-y-3.5">
               {legalLinks.map((link) => (
+                <li key={link.href}>
+                  <a
+                    href={link.href}
+                    className={`text-sm font-medium transition-colors duration-200 hover:text-[var(--brand-blue)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand-blue)] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}
+                  >
+                    {link.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <h3 className={`text-xs font-black uppercase tracking-[0.2em] mb-6 ${isDark ? "text-white" : "text-zinc-900"}`}>
+              Partner With Us
+            </h3>
+            <ul className="space-y-3.5">
+              {partnerLinks.map((link) => (
                 <li key={link.href}>
                   <a
                     href={link.href}
