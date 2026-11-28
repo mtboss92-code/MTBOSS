@@ -208,6 +208,8 @@ async function uploadImage(file) {
 function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', initialShowForm = false, initialShowAssign = false, assignmentOnly = false, isDarkMode = false }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const listQuery = searchParams.toString();
+  const listParams = new URLSearchParams(listQuery);
   const isVendor = ownerRole === 'vendor';
   const isSupplier = ownerRole === 'supplier';
   const isSeller = isVendor || isSupplier;
@@ -367,7 +369,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
   });
 
   const updateListUrl = useCallback((changes, { replace = false } = {}) => {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(listQuery);
     Object.entries(changes).forEach(([key, value]) => {
       if (value === '' || value === null || value === undefined || (key === 'page' && Number(value) === 1)) params.delete(key);
       else params.set(key, String(value));
@@ -376,7 +378,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     const url = `${window.location.pathname}${query ? `?${query}` : ''}`;
     if (replace) router.replace(url, { scroll: false });
     else router.push(url, { scroll: false });
-  }, [router, searchParams]);
+  }, [router, listQuery]);
 
   const rememberListPosition = useCallback((productId) => {
     restoreListPositionRef.current = {
@@ -400,7 +402,12 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     }
     setPageError('');
     setPageInput('');
-    if (page !== productPage) updateListUrl({ page });
+    if (page !== productPage) {
+      // Update immediately; router navigation is asynchronous and must not
+      // leave the list showing the previous page in the meantime.
+      setProductPage(page);
+      updateListUrl({ page });
+    }
   }, [pageInput, productPagination.pages, productPage, updateListUrl]);
 
   const approveProduct = async (product) => {
@@ -453,24 +460,24 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
   useEffect(() => {
     const t = setTimeout(() => {
       const value = productSearch.trim();
-      if (value !== (searchParams.get('q') || '')) updateListUrl({ q: value, page: 1 });
+      if (value !== (listParams.get('q') || '')) updateListUrl({ q: value, page: 1 });
     }, 300);
     return () => clearTimeout(t);
-  }, [productSearch, searchParams, updateListUrl]);
+  }, [productSearch, listQuery, updateListUrl]);
 
   // The URL is the list's source of truth, so refreshes and browser history
   // restore the exact page and active list context.
   useEffect(() => {
-    const nextPage = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1);
-    const nextTier = searchParams.get('tier') || 'any';
-    const nextApproval = searchParams.get('approval_status') || 'all';
-    const nextSearch = searchParams.get('q') || '';
+    const nextPage = Math.max(1, Number.parseInt(listParams.get('page') || '1', 10) || 1);
+    const nextTier = listParams.get('tier') || 'any';
+    const nextApproval = listParams.get('approval_status') || 'all';
+    const nextSearch = listParams.get('q') || '';
     setProductPage(nextPage);
     setTierFilter(nextTier);
     setApprovalFilter(nextApproval);
     setProductSearch(nextSearch);
     setDebouncedProductSearch(nextSearch);
-  }, [searchParams]);
+  }, [listQuery]);
 
   useEffect(() => () => {
     if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
@@ -3096,7 +3103,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
 
           {!isSeller && !loading && (
             <div className="shop-product-pagination">
-              <button type="button" disabled={productPage <= 1} onClick={() => updateListUrl({ page: productPage - 1 })}>Previous</button>
+              <button type="button" disabled={productPage <= 1} onClick={() => { const page = productPage - 1; setProductPage(page); updateListUrl({ page }); }}>Previous</button>
               <span className="shop-product-page-status" aria-live="polite">Page {productPagination.page} of {productPagination.pages}</span>
               <form className="shop-product-go-to-page" onSubmit={(event) => { event.preventDefault(); goToProductPage(); }}>
                 <label htmlFor="shop-product-go-to-page">Go to page</label>
@@ -3113,7 +3120,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
                 />
                 <button type="submit" disabled={loading}>Go</button>
               </form>
-              <button type="button" disabled={productPage >= productPagination.pages} onClick={() => updateListUrl({ page: productPage + 1 })}>Next</button>
+              <button type="button" disabled={productPage >= productPagination.pages} onClick={() => { const page = productPage + 1; setProductPage(page); updateListUrl({ page }); }}>Next</button>
               {pageError && <span id="shop-product-page-error" className="shop-product-page-error" role="alert">{pageError}</span>}
             </div>
           )}
