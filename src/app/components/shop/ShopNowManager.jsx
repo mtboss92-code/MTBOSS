@@ -22,7 +22,6 @@ const ShopCouponsManager = dynamic(() => import('./ShopCouponsManager'), {
   loading: () => <p>Loading coupons…</p>,
 });
 
-const units = ['bag', 'bags', 'pcs', 'kg', 'quintal', 'box', 'bundle', 'cft', 'ton', 'meter', 'set', 'bucket'];
 const emptyProduct = {
   name: '',
   description: '',
@@ -219,6 +218,7 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
     : '/api/admin/shop-products';
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [units, setUnits] = useState([]);
   const [cities, setCities] = useState([]);
   const [form, setForm] = useState(emptyProduct);
   const [imagesList, setImagesList] = useState([]);
@@ -478,14 +478,16 @@ function ProductManager({ ownerRole = 'admin', formId = 'shop-product-form', ini
 
   const loadReferenceData = useCallback(async () => {
     try {
-      const [categoryRes, cityRes] = await Promise.all([
+      const [categoryRes, cityRes, unitsRes] = await Promise.all([
         fetch(isSeller ? '/api/shop-categories' : '/api/shop-categories?admin=true', { headers: shopHeaders(ownerRole) }),
         fetch('/api/cities'),
+        fetch('/api/shop-units'),
       ]);
-      const [categoryData, cityData] = await Promise.all([readApiJson(categoryRes), readApiJson(cityRes)]);
+      const [categoryData, cityData, unitsData] = await Promise.all([readApiJson(categoryRes), readApiJson(cityRes), readApiJson(unitsRes)]);
       if (!categoryRes.ok || !cityRes.ok) throw new Error(categoryData.error || cityData.error || 'Could not load shop reference data');
       setCategories(categoryData.data || []);
       setCities(cityData.cities || []);
+      setUnits(unitsRes.ok ? (unitsData.data || []).map((unit) => typeof unit === 'string' ? unit : unit.name).filter(Boolean) : []);
       if (!isSeller) loadStats();
     } catch (error) {
       setNotice(error.message);
