@@ -228,7 +228,7 @@ export const returnPolicy = {
             "Email: legal@mtboss.in | Website: www.mtboss.in (My Orders)",
             "Grievance Officer: [__ Name], [__ Designation] | Phone: [__ +91 number] | Hours: [Mon to Sat, 10:00 to 18:00 IST]",
             "Address: In front of Dharam Kanta, Vidhya Nagar, Kanth Road, Moradabad, Uttar Pradesh 244001, India",
-            "Support: MTBOSS2016@gmail.com | +91 94584 10866",
+            "Support: inquiry@mtboss.in | +91 94584 10866",
             "We acknowledge complaints within 48 hours and aim to resolve them within one month.",
           ],
         },

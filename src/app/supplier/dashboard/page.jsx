@@ -1086,7 +1086,7 @@ function SupplierDashboardContent() {
                   </div>
                 ) : null)}
                 <div style={{ marginTop: '1rem', padding: '0.75rem', background: dark ? '#1a1a1a' : '#f9f9f9', borderRadius: 8, fontSize: '0.78rem', color: muted, lineHeight: 1.6 }}>
-                  🔒 To update contact details or Aadhaar, contact <strong>MTBOSS2016@gmail.com</strong>
+                  🔒 To update contact details or Aadhaar, contact <strong>inquiry@mtboss.in</strong>
                 </div>
               </div>
             </div>

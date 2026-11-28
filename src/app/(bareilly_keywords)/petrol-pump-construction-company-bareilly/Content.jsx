@@ -680,10 +680,10 @@ const Content = () => {
                 <li>
                   <strong>Email:</strong>{" "}
                   <a
-                    href="mailto:mtboss2016@gmail.com"
+                    href="mailto:inquiry@mtboss.in"
                     className="text-blue-600 underline"
                   >
-                    mtboss2016@gmail.com
+                    inquiry@mtboss.in
                   </a>
                 </li>
                 <li>

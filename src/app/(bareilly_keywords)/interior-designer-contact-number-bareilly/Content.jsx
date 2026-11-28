@@ -52,10 +52,10 @@ const Content = () => {
                 <li>
                   <strong>Email:</strong>{" "}
                   <a
-                    href="mailto:MTBOSS2016@gmail.com"
+                    href="mailto:inquiry@mtboss.in"
                     className="text-blue-600 underline"
                   >
-                    MTBOSS2016@gmail.com
+                    inquiry@mtboss.in
                   </a>
                 </li>
                 <li>
@@ -787,10 +787,10 @@ const Content = () => {
                 <li>
                   <strong>Email:</strong>{" "}
                   <a
-                    href="mailto:MTBOSS2016@gmail.com"
+                    href="mailto:inquiry@mtboss.in"
                     className="text-blue-600 underline"
                   >
-                    MTBOSS2016@gmail.com
+                    inquiry@mtboss.in
                   </a>
                 </li>
                 <li>
@@ -842,10 +842,10 @@ const Content = () => {
                   </a>
                   , or email{" "}
                   <a
-                    href="mailto:MTBOSS2016@gmail.com"
+                    href="mailto:inquiry@mtboss.in"
                     className="text-blue-600 underline"
                   >
-                    MTBOSS2016@gmail.com
+                    inquiry@mtboss.in
                   </a>
                   . You can also use the quote form on{" "}
                   <a

@@ -54,7 +54,7 @@ export default function Page() {
     name: 'MTBOSS Construction Private Limited',
     url: 'https://www.MTBOSS.in/contractor-for-house-construction-moradabad',
     telephone: '+91-9458410866',
-    email: 'MTBOSS2016@gmail.com',
+    email: 'inquiry@mtboss.in',
     address: {
       '@type': 'PostalAddress',
       streetAddress: "Harthala Kanth Road, Behind Kr Collection, near Domino's",

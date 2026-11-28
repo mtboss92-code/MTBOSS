@@ -72,7 +72,7 @@ export default function Page() {
 
     telephone: "+91-9458410866",
 
-    email: "MTBOSS2016@gmail.com",
+    email: "inquiry@mtboss.in",
 
     image:
       "https://www.MTBOSS.in/og-petrol-pump-construction-moradabad.jpg",
@@ -143,7 +143,7 @@ export default function Page() {
       "@type": "GeneralContractor",
       name: "MTBOSS Construction Private Limited",
       telephone: "+91-9458410866",
-      email: "MTBOSS2016@gmail.com",
+      email: "inquiry@mtboss.in",
       url: "https://www.MTBOSS.in",
     },
 

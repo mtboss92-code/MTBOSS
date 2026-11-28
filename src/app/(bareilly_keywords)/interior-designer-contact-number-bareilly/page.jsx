@@ -69,7 +69,7 @@ export default function Page() {
     name: "MTBOSS Construction Private Limited",
     url: "https://www.MTBOSS.in/interior-designer-contact-number-in-bareilly",
     telephone: "+91-9458410866",
-    email: "MTBOSS2016@gmail.com",
+    email: "inquiry@mtboss.in",
     image:
       "https://www.MTBOSS.in/og-interior-designer-contact-number-bareilly.jpg",
     priceRange: "₹₹",
@@ -120,7 +120,7 @@ export default function Page() {
       "@type": "InteriorDesignService",
       name: "MTBOSS Construction Private Limited",
       telephone: "+91-9458410866",
-      email: "MTBOSS2016@gmail.com",
+      email: "inquiry@mtboss.in",
       url: "https://www.MTBOSS.in",
     },
     areaServed: [
@@ -146,7 +146,7 @@ export default function Page() {
         name: "What is the contact number of MTBOSS for interior design in Bareilly?",
         acceptedAnswer: {
           "@type": "Answer",
-          text: "You can call or WhatsApp MTBOSS at +91 94584 10866, or email MTBOSS2016@gmail.com. You can also use the quote form on www.MTBOSS.in.",
+          text: "You can call or WhatsApp MTBOSS at +91 94584 10866, or email inquiry@mtboss.in. You can also use the quote form on www.MTBOSS.in.",
         },
       },
       {

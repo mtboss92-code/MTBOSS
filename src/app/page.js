@@ -51,7 +51,7 @@ const organizationSchema = {
   url: 'https://www.MTBOSS.in/',
   logo: 'https://www.MTBOSS.in/logo.png',
   telephone: '+91-9458410866',
-  email: 'MTBOSS2016@gmail.com',
+  email: 'inquiry@mtboss.in',
   address: {
     '@type': 'PostalAddress',
     streetAddress: "Harthala Kanth Road, Behind Kr Collection, near Domino's",

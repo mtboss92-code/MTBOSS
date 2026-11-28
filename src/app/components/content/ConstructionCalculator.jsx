@@ -624,7 +624,7 @@ function buildReportHtml(snapshot) {
           <div>
             <strong>Contact Us</strong>
             Phone: <a href={COMPANY_CONTACT.telHref}>{COMPANY_CONTACT.phone}</a><br />
-            Email: <a href="mailto:MTBOSS2016@gmail.com">MTBOSS2016@gmail.com</a><br />
+            Email: <a href="mailto:inquiry@mtboss.in">inquiry@mtboss.in</a><br />
             Web: <a href="/contact">Contact Us</a>
           </div>
         </div>

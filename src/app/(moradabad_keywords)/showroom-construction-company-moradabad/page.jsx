@@ -69,7 +69,7 @@ export default function Page() {
     name: "MTBOSS Construction Private Limited",
     url: "https://www.MTBOSS.in/showroom-construction-company-in-moradabad",
     telephone: "+91-9458410866",
-    email: "MTBOSS2016@gmail.com",
+    email: "inquiry@mtboss.in",
     image: "https://www.MTBOSS.in/og-showroom-construction-moradabad.jpg",
     priceRange: "₹₹",
     address: {
@@ -125,7 +125,7 @@ export default function Page() {
       "@type": "GeneralContractor",
       name: "MTBOSS Construction Private Limited",
       telephone: "+91-9458410866",
-      email: "MTBOSS2016@gmail.com",
+      email: "inquiry@mtboss.in",
       url: "https://www.MTBOSS.in",
     },
     areaServed: [

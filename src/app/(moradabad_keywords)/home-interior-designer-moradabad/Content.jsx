@@ -138,7 +138,7 @@ const Content = () => {
     {
       question: "Q9. How do I book a consultation?",
       answer:
-        "Call or WhatsApp +91 94584 10866, email MTBOSS2016@gmail.com, or use the website enquiry form.",
+        "Call or WhatsApp +91 94584 10866, email inquiry@mtboss.in, or use the website enquiry form.",
     },
   ];
 
@@ -493,10 +493,10 @@ const Content = () => {
                 <li>
                   <strong>Email:</strong>{" "}
                   <a
-                    href="mailto:MTBOSS2016@gmail.com"
+                    href="mailto:inquiry@mtboss.in"
                     className="text-blue-600 underline"
                   >
-                    MTBOSS2016@gmail.com
+                    inquiry@mtboss.in
                   </a>
                 </li>
                 <li>

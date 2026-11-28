@@ -69,7 +69,7 @@ export default function Page() {
     name: "MTBOSS Construction Private Limited",
     url: "https://www.mtboss.in/home-construction-company-rampur",
     telephone: "+91-9458410866",
-    email: "mtboss2016@gmail.com",
+    email: "inquiry@mtboss.in",
     image:
       "https://www.mtboss.in/og-home-construction-company-rampur.jpg",
     priceRange: "₹₹",
@@ -513,7 +513,7 @@ export default function Page() {
       "@type": "InteriorDesignService",
       name: "MTBOSS Construction Private Limited",
       telephone: "+91-9458410866",
-      email: "mtboss2016@gmail.com",
+      email: "inquiry@mtboss.in",
       url: "https://www.mtboss.in",
     },
     areaServed: [

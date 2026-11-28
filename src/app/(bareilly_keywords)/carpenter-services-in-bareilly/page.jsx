@@ -54,7 +54,7 @@ export default function Page() {
     name: "MTBOSS Construction Private Limited",
     url: "https://www.mtboss.in/carpenter-services-in-bareilly",
     telephone: "+91-9458410866",
-    email: "mtboss2016@gmail.com",
+    email: "inquiry@mtboss.in",
     address: {
       "@type": "PostalAddress",
       streetAddress:

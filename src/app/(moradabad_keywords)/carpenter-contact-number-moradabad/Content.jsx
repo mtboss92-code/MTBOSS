@@ -27,10 +27,10 @@ const Content = () => {
                 </a>
                 , email{" "}
                 <a
-                  href="mailto:MTBOSS2016@gmail.com"
+                  href="mailto:inquiry@mtboss.in"
                   className="text-blue-600 underline"
                 >
-                  MTBOSS2016@gmail.com
+                  inquiry@mtboss.in
                 </a>
                 , or click &quot;Get a Construction Quote&quot; on MTBOSS.in.
                 Share photos, measurements and your location, and the team will
@@ -58,10 +58,10 @@ const Content = () => {
                 <li>
                   <strong>Email:</strong>{" "}
                   <a
-                    href="mailto:MTBOSS2016@gmail.com"
+                    href="mailto:inquiry@mtboss.in"
                     className="text-blue-600 underline"
                   >
-                    MTBOSS2016@gmail.com
+                    inquiry@mtboss.in
                   </a>
                 </li>
                 <li>
@@ -143,10 +143,10 @@ const Content = () => {
                 <li>
                   <strong>Email.</strong> Write to{" "}
                   <a
-                    href="mailto:MTBOSS2016@gmail.com"
+                    href="mailto:inquiry@mtboss.in"
                     className="text-blue-600 underline"
                   >
-                    MTBOSS2016@gmail.com
+                    inquiry@mtboss.in
                   </a>{" "}
                   with drawings, a list of items and documents. Best for larger
                   jobs, society or office requests and anything that needs a
@@ -585,10 +585,10 @@ const Content = () => {
                 <li>
                   <strong>Email:</strong>{" "}
                   <a
-                    href="mailto:MTBOSS2016@gmail.com"
+                    href="mailto:inquiry@mtboss.in"
                     className="text-blue-600 underline"
                   >
-                    MTBOSS2016@gmail.com
+                    inquiry@mtboss.in
                   </a>
                 </li>
                 <li>
@@ -661,10 +661,10 @@ const Content = () => {
                 <li>
                   <strong>Email:</strong>{" "}
                   <a
-                    href="mailto:MTBOSS2016@gmail.com"
+                    href="mailto:inquiry@mtboss.in"
                     className="text-blue-600 underline"
                   >
-                    MTBOSS2016@gmail.com
+                    inquiry@mtboss.in
                   </a>
                 </li>
                 <li>
@@ -721,10 +721,10 @@ const Content = () => {
                   <br />
                   Write to{" "}
                   <a
-                    href="mailto:MTBOSS2016@gmail.com"
+                    href="mailto:inquiry@mtboss.in"
                     className="text-blue-600 underline"
                   >
-                    MTBOSS2016@gmail.com
+                    inquiry@mtboss.in
                   </a>{" "}
                   with drawings and details.
                 </li>

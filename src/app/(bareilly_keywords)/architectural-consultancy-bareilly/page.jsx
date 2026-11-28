@@ -60,7 +60,7 @@ export default function Page() {
     url:
       'https://www.mtboss.in/architectural-consultancy-in-bareilly',
     telephone: '+91-9458410866',
-    email: 'mtboss2016@gmail.com',
+    email: 'inquiry@mtboss.in',
     address: {
       '@type': 'PostalAddress',
       streetAddress:

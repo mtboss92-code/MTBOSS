@@ -333,7 +333,7 @@ export default function CareersPage() {
             We are always looking for talented people. Drop your resume and we will reach out when the right opportunity comes up.
           </p>
           <a
-            href="mailto:MTBOSS2016@gmail.com"
+            href="mailto:inquiry@mtboss.in"
             className="inline-flex items-center gap-3 px-10 py-4 bg-[var(--brand-blue)] text-black font-black uppercase text-xs tracking-widest hover:bg-[var(--brand-blue-dark)] transition-all"
           >
             Send Your Resume

@@ -227,7 +227,7 @@ export default function ContactPage() {
               📞 Call Us
             </a>
             <a
-              href="mailto:MTBOSS2016@gmail.com"
+              href="mailto:inquiry@mtboss.in"
               className="flex items-center gap-2 px-5 py-2.5 border-2 border-white text-white text-xs font-bold uppercase tracking-widest rounded-lg hover:bg-white hover:text-black transition-all"
             >
               ✉️ Email Us
@@ -512,13 +512,13 @@ export default function ContactPage() {
                       </div>
                     </a>
 
-                    <a href="mailto:MTBOSS2016@gmail.com" className="flex items-start gap-3 group">
+                    <a href="mailto:inquiry@mtboss.in" className="flex items-start gap-3 group">
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 transition-all ${dark ? 'bg-[var(--brand-blue)]/20 group-hover:bg-[var(--brand-blue-dark)]' : 'bg-sky-100 group-hover:bg-[var(--brand-blue-dark)]'}`}>
                         <span className="text-lg">✉️</span>
                       </div>
                       <div>
                         <p className={`text-xs font-bold uppercase tracking-widest mb-1 ${dark ? 'text-gray-500' : 'text-gray-600'}`}>Email</p>
-                        <p className={`font-bold transition-colors ${textPrimaryClass}`}>MTBOSS2016@gmail.com</p>
+                        <p className={`font-bold transition-colors ${textPrimaryClass}`}>inquiry@mtboss.in</p>
                       </div>
                     </a>
 

@@ -14,7 +14,7 @@ function formatIndianPhone(value) {
 
 export const COMPANY_CONTACT = {
   address: "Harthala Kanth Road Behind Kr Collection, near Domino's, Uttar Pradesh, India",
-  email: "MTBOSS2016@gmail.com",
+  email: "inquiry@mtboss.in",
   phone: formatIndianPhone(phoneDigits),
   phoneDigits,
   telHref: phoneDigits ? `tel:+${phoneDigits}` : "",

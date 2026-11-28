@@ -356,7 +356,7 @@ export default function ServiceDetailPage() {
   const aboutBody     = service.about_body     || service.description;
   const ctaHeading    = service.cta_heading    || `Start Your ${service.title} Project`;
   const phone         = service.contact_phone || COMPANY_CONTACT.phone;
-  const email         = service.contact_email  || "MTBOSS2016@gmail.com";
+  const email         = service.contact_email  || "inquiry@mtboss.in";
 
   const getTomorrowIso = () => {
     const d = new Date();
@@ -438,7 +438,7 @@ export default function ServiceDetailPage() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-white/70 text-[10px] leading-none mb-1">Corporate email</p>
-                        <p className="text-white font-bold text-xs leading-tight truncate">{email || "mtboss2016@gmail.com"}</p>
+                        <p className="text-white font-bold text-xs leading-tight truncate">{email || "inquiry@mtboss.in"}</p>
                       </div>
                     </a>
                   </div>

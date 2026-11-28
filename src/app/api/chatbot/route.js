@@ -19,7 +19,7 @@ You are the official Senior AI Project Advisor & Consultant for "MTBOSS Construc
 - **Bareilly Regional Office**: Bareilly, UP (Exact GPS Location: 28°23'51.0"N 79°27'10.1"E).
 - **Service Zones**: Bareilly, Moradabad, Meerut, Noida, Greater Noida, Ghaziabad, Delhi NCR, Lucknow, Dehradun, Haridwar, Haldwani.
 - **Direct Phone & WhatsApp**: [+91 94584 10866](https://wa.me/919458410866)
-- **Official Email**: MTBOSS2016@gmail.com
+- **Official Email**: inquiry@mtboss.in
 - **Social Media**:
   * Instagram: [Instagram @MTBOSS.in](https://www.instagram.com/mtboss.in_?stkn=NTQxMTczN2JrZGs4)
   * Facebook: [Facebook MTBOSS](https://www.facebook.com/share/1ZUCWwWZZu/)
@@ -336,7 +336,7 @@ Explore verified listings on our [Properties Portal](/buy-sale) or connect with 
       return `Aap MTBOSS team se niche diye gaye kisi bhi medium se direct sampark kar sakte hain:
 
 - 📞 **Helpline & WhatsApp:** [+91 94584 10866](https://wa.me/919458410866)
-- ✉️ **Email:** MTBOSS2016@gmail.com
+- ✉️ **Email:** inquiry@mtboss.in
 - 📍 **Head Office:** Harthala Kanth Road Behind Kr Collection, near Domino's, Moradabad, UP
 - 📍 **Bareilly Office:** Bareilly, UP (GPS: 28°23'51.0"N 79°27'10.1"E)
 
@@ -345,7 +345,7 @@ Aap hamare [Contact Us Page](/contact) par message bhi chhod sakte hain!`;
     return `You can reach MTBOSS Construction Private Limited directly through the following channels:
 
 - 📞 **Phone & WhatsApp:** [+91 94584 10866](https://wa.me/919458410866)
-- ✉️ **Email:** MTBOSS2016@gmail.com
+- ✉️ **Email:** inquiry@mtboss.in
 - 📍 **Head Office:** Harthala Kanth Road Behind Kr Collection, near Domino's, Moradabad, UP
 - 📍 **Bareilly Office:** Bareilly, UP (Location: 28°23'51.0"N 79°27'10.1"E)
 

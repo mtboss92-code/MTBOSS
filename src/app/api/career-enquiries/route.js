@@ -10,10 +10,7 @@ import {
   ensureCareerTrackingSchema,
 } from '@/lib/career-applications';
 
-const ADMIN_EMAIL =
-  process.env.ADMIN_EMAIL ||
-  process.env.NEXT_PUBLIC_ADMIN_EMAIL ||
-  'MTBOSS2016@gmail.com';
+const ADMIN_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL || 'inquiry@mtboss.in';
 
 const ensureTable = createInitializationGuard(async () => {
   await pool.query(`

@@ -104,10 +104,10 @@ const Content = () => {
                       </td>
                       <td className="border border-gray-200 px-4 py-3">
                         <a
-                          href="mailto:mtboss2016@gmail.com"
+                          href="mailto:inquiry@mtboss.in"
                           className="text-blue-600 underline"
                         >
-                          mtboss2016@gmail.com
+                          inquiry@mtboss.in
                         </a>
                       </td>
                       <td className="border border-gray-200 px-4 py-3">
@@ -814,10 +814,10 @@ const Content = () => {
                 <li>
                   <strong>Email:</strong>{" "}
                   <a
-                    href="mailto:mtboss2016@gmail.com"
+                    href="mailto:inquiry@mtboss.in"
                     className="text-blue-600 underline"
                   >
-                    mtboss2016@gmail.com
+                    inquiry@mtboss.in
                   </a>
                 </li>
                 <li>
@@ -910,10 +910,10 @@ const Content = () => {
                   </a>
                   , or email{" "}
                   <a
-                    href="mailto:mtboss2016@gmail.com"
+                    href="mailto:inquiry@mtboss.in"
                     className="text-blue-600 underline"
                   >
-                    mtboss2016@gmail.com
+                    inquiry@mtboss.in
                   </a>
                   . You can also use the “Get a Construction Quote” option on{" "}
                   <a

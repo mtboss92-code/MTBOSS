@@ -62,7 +62,7 @@ export default function Page() {
     url:
       "https://www.MTBOSS.in/residential-construction-company-in-moradabad",
     telephone: "+91-9458410866",
-    email: "MTBOSS2016@gmail.com",
+    email: "inquiry@mtboss.in",
     image:
       "https://www.MTBOSS.in/og-residential-construction-moradabad.jpg",
     priceRange: "₹₹",

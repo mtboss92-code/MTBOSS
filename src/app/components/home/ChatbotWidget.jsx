@@ -204,7 +204,7 @@ export default function ChatbotWidget({ isDarkMode, hideLauncher = false }) {
         {
           role: 'assistant',
           content:
-            'Network connectivity issue. Please connect directly at [+91 94584 10866](https://wa.me/919458410866) or email MTBOSS2016@gmail.com.',
+            'Network connectivity issue. Please connect directly at [+91 94584 10866](https://wa.me/919458410866) or email inquiry@mtboss.in.',
         },
       ]);
     } finally {

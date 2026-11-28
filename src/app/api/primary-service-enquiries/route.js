@@ -6,10 +6,7 @@ import { cleanText, normalizePhone, validateContactFields } from '@/lib/validati
 import { createInitializationGuard } from '@/lib/api-utils';
 import { notifyAdminSubmission } from '@/lib/customer-communications';
 
-const ADMIN_EMAIL =
-  process.env.ADMIN_EMAIL ||
-  process.env.NEXT_PUBLIC_ADMIN_EMAIL ||
-  'MTBOSS2016@gmail.com';
+const ADMIN_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL || 'inquiry@mtboss.in';
 
 export const runtime = 'nodejs';
 

@@ -181,7 +181,7 @@ export default function AgentPage() {
       }
 
       // Email notification
-      await fetch("https://formsubmit.co/ajax/MTBOSS2016@gmail.com", {
+      await fetch("https://formsubmit.co/ajax/inquiry@mtboss.in", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
@@ -754,7 +754,7 @@ export default function AgentPage() {
               Call Now
             </a>
             <a
-              href="mailto:MTBOSS2016@gmail.com"
+              href="mailto:inquiry@mtboss.in"
               className="inline-flex items-center justify-center gap-3 px-8 py-4 border-2 border-white text-white font-black uppercase text-xs tracking-widest hover:bg-white hover:text-zinc-800 transition-all"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

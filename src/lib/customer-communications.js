@@ -267,7 +267,7 @@ export async function deliverReviewConfirmation({ email, name, rating, service }
 
 export async function notifyAdminSubmission({ type, name, phone, email, reference, details = {} }) {
   const adminPhone = process.env.ADMIN_WHATSAPP_NUMBER;
-  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || process.env.ADMIN_EMAIL || 'MTBOSS2016@gmail.com';
+  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'inquiry@mtboss.in';
   const detailLines = Object.entries(details).filter(([, value]) => value !== undefined && value !== null && value !== '').slice(0, 12).map(([key, value]) => `${key}: ${value}`);
   const plainText = `New ${type} - ${companyName}\n\nName: ${name || '-'}\nPhone: ${phone || '-'}\nEmail: ${email || '-'}\nReference: ${reference || '-'}${detailLines.length ? `\n${detailLines.join('\n')}` : ''}\n\nReceived: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
   const jobs = [];
@@ -470,7 +470,7 @@ export async function deliverReturnSubmissionEmails({ order, returnRecord, custo
   }
 
   // 2. Alert to Admin
-  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || process.env.ADMIN_EMAIL || 'MTBOSS2016@gmail.com';
+  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'inquiry@mtboss.in';
   if (adminEmail) {
     const adminHtml = `<!doctype html><html><body style="margin:0;background:#f3f4f6;padding:24px;font-family:Arial,sans-serif;color:#111827">
       <div style="max-width:640px;margin:auto;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">

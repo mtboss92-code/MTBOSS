@@ -586,7 +586,7 @@ const Content = () => {
                   <strong>Phone / WhatsApp:</strong> +91 94584 10866.
                 </li>
                 <li>
-                  <strong>Email:</strong> MTBOSS2016@gmail.com.
+                  <strong>Email:</strong> inquiry@mtboss.in.
                 </li>
                 <li>
                   <strong>Website:</strong>{" "}
@@ -673,10 +673,10 @@ const Content = () => {
                 <li>
                   <strong>Email:</strong>{" "}
                   <a
-                    href="mailto:MTBOSS2016@gmail.com"
+                    href="mailto:inquiry@mtboss.in"
                     className="text-blue-600 underline"
                   >
-                    MTBOSS2016@gmail.com
+                    inquiry@mtboss.in
                   </a>
                 </li>
                 <li>

@@ -487,7 +487,7 @@ const Content = () => {
                   <strong>WhatsApp:</strong> +91 94584 10866
                 </li>
                 <li>
-                  <strong>Email:</strong> mtboss2016@gmail.com
+                  <strong>Email:</strong> inquiry@mtboss.in
                 </li>
                 <li>
                   <strong>Website:</strong> www.mtboss.in

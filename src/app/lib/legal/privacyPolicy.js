@@ -286,7 +286,7 @@ export const privacyPolicy = {
             "Grievance Officer: [__ Full name], [__ Designation]",
             "Email: legal@mtboss.in | Phone: [__ +91 number] | Hours: [Mon to Sat, 10:00 to 18:00 IST]",
             "Address: MTBOSS Construction Private Limited, In front of Dharam Kanta, Vidhya Nagar, Kanth Road, Moradabad, Uttar Pradesh 244001, India",
-            "Support: MTBOSS2016@gmail.com | +91 94584 10866",
+            "Support: inquiry@mtboss.in | +91 94584 10866",
             "We acknowledge within 48 hours and aim to resolve within 30 days. You may also approach the Data Protection Board of India under the DPDP Act.",
           ],
         },

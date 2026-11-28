@@ -49,7 +49,7 @@ const contactPageSchema = {
     '@type': 'GeneralContractor',
     name: 'MTBOSS Construction Private Limited',
     telephone: '+91-9458410866',
-    email: 'MTBOSS2016@gmail.com',
+    email: 'inquiry@mtboss.in',
     // Real addresses milne ke baad, har office ke liye ek "location" object daal denge yahan (LocalBusiness array)
   },
 };

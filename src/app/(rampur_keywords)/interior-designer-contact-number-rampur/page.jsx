@@ -62,7 +62,7 @@ export default function Page() {
     url:
       "https://www.mtboss.in/interior-designer-contact-number-rampur",
     telephone: "+91-9458410866",
-    email: "MTBOSS2016@gmail.com",
+    email: "inquiry@mtboss.in",
     image:
       "https://www.mtboss.in/og-interior-designer-contact-number-rampur.jpg",
     priceRange: "₹₹",
@@ -116,7 +116,7 @@ export default function Page() {
       "@type": "InteriorDesignService",
       name: "MTBOSS Construction Private Limited",
       telephone: "+91-9458410866",
-      email: "MTBOSS2016@gmail.com",
+      email: "inquiry@mtboss.in",
       url: "https://www.mtboss.in",
     },
     areaServed: [
@@ -148,7 +148,7 @@ export default function Page() {
         acceptedAnswer: {
           "@type": "Answer",
           text:
-            "You can call or WhatsApp MTBOSS at +91 94584 10866, or email mtboss2016@gmail.com.",
+            "You can call or WhatsApp MTBOSS at +91 94584 10866, or email inquiry@mtboss.in.",
         },
       },
       {

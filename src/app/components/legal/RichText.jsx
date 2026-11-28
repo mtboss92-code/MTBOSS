@@ -2,7 +2,7 @@ const LINK_RULES = [
   { pattern: "Return, Refund and Cancellation Policy", href: "/return-refund-cancellation-policy" },
   { pattern: "Privacy Policy", href: "/privacy-policy" },
   { pattern: "Terms and Conditions", href: "/terms-and-conditions" },
-  { pattern: "MTBOSS2016@gmail.com", href: "mailto:MTBOSS2016@gmail.com" },
+  { pattern: "inquiry@mtboss.in", href: "mailto:inquiry@mtboss.in" },
   { pattern: "legal@mtboss.in", href: "mailto:legal@mtboss.in" },
   { pattern: "+91 94584 10866", href: "tel:+919458410866" },
   { pattern: "www.mtboss.in", href: "https://www.mtboss.in" },
