@@ -45,6 +45,12 @@ const ensureTable = createInitializationGuard(async () => {
     ADD COLUMN IF NOT EXISTS returns_policy TEXT,
     ADD COLUMN IF NOT EXISTS highlights JSONB DEFAULT '[]'::jsonb`);
   await pool.query(QUALITY_TIER_COLUMN_SQL);
+  await pool.query(`CREATE TABLE IF NOT EXISTS shop_product_vendors (
+    product_id INTEGER NOT NULL REFERENCES supplier_materials(id) ON DELETE CASCADE,
+    vendor_id INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+    assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), assigned_by INTEGER,
+    PRIMARY KEY (product_id, vendor_id)
+  )`);
 });
 
 const unauthorized = () =>
@@ -197,10 +203,22 @@ export async function GET(req) {
       `SELECT id, supplier_id, vendor_id, name, description, quote_price_range, price, unit,
               quantity, image_url, category, subcategory, brand, compare_at_price, is_featured_deal, images, specifications,
               bulk_pricing, available_cities, is_available, quality_tier,
-              COALESCE(faqs, '[]'::jsonb) AS faqs, returns_policy, COALESCE(highlights, '[]'::jsonb) AS highlights, created_at
+              COALESCE(faqs, '[]'::jsonb) AS faqs, returns_policy, COALESCE(highlights, '[]'::jsonb) AS highlights, created_at,
+              EXISTS (
+                SELECT 1 FROM shop_product_vendors assigned
+                JOIN vendors assigned_vendor ON assigned_vendor.id = assigned.vendor_id
+                WHERE assigned.product_id = supplier_materials.id
+                  AND $2 <> '' AND LOWER(TRIM(assigned_vendor.email)) = $2
+              ) AS is_admin_assigned
        FROM supplier_materials
        WHERE supplier_id = $1
-          OR ($2 <> '' AND vendor_id IN (SELECT id FROM vendors WHERE LOWER(email) = $2))
+          OR ($2 <> '' AND vendor_id IN (SELECT id FROM vendors WHERE LOWER(TRIM(email)) = $2))
+          OR EXISTS (
+            SELECT 1 FROM shop_product_vendors assigned
+            JOIN vendors assigned_vendor ON assigned_vendor.id = assigned.vendor_id
+            WHERE assigned.product_id = supplier_materials.id
+              AND $2 <> '' AND LOWER(TRIM(assigned_vendor.email)) = $2
+          )
        ORDER BY created_at DESC, id DESC`,
       [supplier.id, emailParam]
     );

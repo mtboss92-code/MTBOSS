@@ -5,6 +5,7 @@ import Link from "next/link";
 import "./admin-theme.css";
 import { AdminStatusBadge } from "./AdminUI";
 import DashboardNotifications from "./DashboardNotifications";
+import ChangePasswordDialog from "./ChangePasswordDialog";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ACTIVE_ROLE_KEY } from "@/lib/client-session";
 import { isAdminEmail } from "@/lib/admin-email";
@@ -130,6 +131,7 @@ const menuStructure = [
     children: [
       { label: 'Shop Now Manager', tab: 'shop-categories' },
       { label: '+ Add Shop Product', tab: 'shop-products' },
+      { label: 'Assign Vendors', tab: 'assign-vendors' },
       { label: 'Orders History', tab: 'orders-history' },
       { label: 'Shipping Settings', tab: 'shipping-settings' },
       { label: 'Vendor Commission', tab: 'shop-commission-settings' },
@@ -477,6 +479,7 @@ function SidebarNav({ sidebarOpen, closeSidebarOnMobile, isDarkMode, user }) {
 export default function DashboardLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const profileRef = useRef(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
   useEffect(() => {
@@ -770,6 +773,13 @@ export default function DashboardLayout({ children }) {
                   </div>
                   <button
                     type="button"
+                    onClick={() => { setProfileOpen(false); setChangePasswordOpen(true); }}
+                    className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${isDarkMode ? "text-slate-100 hover:bg-white/10" : "text-slate-700 hover:bg-slate-100"}`}
+                  >
+                    Change Password
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => {
                       setProfileOpen(false);
                       handleLogout();
@@ -796,6 +806,7 @@ export default function DashboardLayout({ children }) {
         </div>
         {children}
       </main>
+      <ChangePasswordDialog open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} router={router} />
     </div>
   );
 }

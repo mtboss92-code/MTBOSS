@@ -3,6 +3,8 @@
 import { usePm } from '../../PmContext';
 import pmStyles from '../../pmStyles';
 import { Input, INR, isSameDayIST, today } from '../../shared';
+import { api } from '../../api';
+import { ClientEmailField } from './PartyInvoiceFields';
 
 export default function PartyPaymentsView() {
   const {
@@ -15,7 +17,7 @@ export default function PartyPaymentsView() {
     <>
       <style jsx>{pmStyles}</style>
       <div>
-        <form onSubmit={(e) => submitAction.submit('partyPayment', () => savePartyPayment(e), { successMessage: 'Party payment recorded successfully', onError: setMessage })} className="card" style={{ marginBottom: 16 }}>
+        <form onSubmit={(e) => submitAction.submit('partyPayment', () => savePartyPayment(e), { successMessage: 'Party payment recorded. Receipt status is shown below.', onError: setMessage })} className="card" style={{ marginBottom: 16 }}>
       <h4 style={{ margin: '0 0 12px', fontSize: 15 }}>Record Party Payment (Client Receipts)</h4>
       <div className="grid">
       <Input label="Amount (₹)" name="amount" type="number" step="any" min="1" value={partyPaymentForm.amount} set={setPartyPaymentForm} required />
@@ -36,6 +38,7 @@ export default function PartyPaymentsView() {
       <Input label="Transaction Reference / UPI ID" name="transaction_reference" value={partyPaymentForm.transaction_reference || ''} set={setPartyPaymentForm} placeholder="e.g. UPI ID, UTR number, or bank transaction ID" />
       )}
       <Input label="Note / Reference" name="note" value={partyPaymentForm.note} set={setPartyPaymentForm} />
+      <ClientEmailField />
       </div>
       <p style={{ marginTop: 12, textAlign: 'right' }}>
       <button type="submit" disabled={submitAction.isSubmitting('partyPayment')}>{submitAction.isSubmitting('partyPayment') ? 'Saving…' : 'Record Payment'}</button>
@@ -49,6 +52,9 @@ export default function PartyPaymentsView() {
       <th>Amount</th>
       <th>Mode</th>
       <th>Note</th>
+      <th>Receipt No.</th>
+      <th>Client Email</th>
+      <th>Email Status</th>
       <th style={{ textAlign: 'right' }}>Actions</th>
       </tr>
       </thead>
@@ -61,6 +67,23 @@ export default function PartyPaymentsView() {
         <td>
           {p.note || '—'}
           {p.transaction_reference && <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Ref: {p.transaction_reference}</div>}
+        </td>
+        <td>{p.receipt_number || '—'}</td>
+        <td>{p.client_email || '—'}</td>
+        <td>
+          <span>{p.client_email ? ({ queued: 'Queued', processing: 'Sending', sent: 'Sent', failed: 'Failed', delivered: 'Delivered', bounced: 'Bounced' }[p.email_status] || 'Queued') : 'Not requested'}</span>
+          {p.receipt_email_error && <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 4 }}>{p.receipt_email_error}</div>}
+          {p.client_email && ['failed', 'bounced', 'sent', 'delivered'].includes(p.email_status) && (
+            <button type="button" className="muted" style={{ marginLeft: 6, padding: '3px 6px', fontSize: 11 }} onClick={async () => {
+              const client_email = window.prompt('Recipient email address:', p.client_email || '');
+              if (client_email === null) return;
+              try {
+                const result = await api(`/api/admin/project-management/payments/${p.id}/receipt`, { method: 'POST', body: JSON.stringify({ client_email }) });
+                setMessage(result.sent ? 'Invoice email sent' : (result.error || 'Invoice email could not be sent. Use Retry.'));
+                window.location.reload();
+              } catch (error) { setMessage(error.message); }
+            }}>{['failed', 'bounced'].includes(p.email_status) ? 'Retry' : 'Resend'}</button>
+          )}
         </td>
         <td className="actions" style={{ justifyContent: 'flex-end', display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
           {isSameDayIST(p.created_at || p.payment_date) ? (
@@ -77,6 +100,8 @@ export default function PartyPaymentsView() {
                     mode: p.mode || 'bank',
                     transaction_reference: p.transaction_reference || '',
                     note: p.note || '',
+                    client_email: p.client_email || '',
+                    invoice_details: p.invoice_details || {},
                   });
                   setModalReadOnly(false);
                   setModalError('');
@@ -105,6 +130,8 @@ export default function PartyPaymentsView() {
                     mode: p.mode || 'bank',
                     transaction_reference: p.transaction_reference || '',
                     note: p.note || '',
+                    client_email: p.client_email || '',
+                    invoice_details: p.invoice_details || {},
                   });
                   setModalReadOnly(true);
                   setModalError('');
@@ -123,7 +150,7 @@ export default function PartyPaymentsView() {
       ))}
       {partyPayments.length === 0 && (
       <tr>
-        <td colSpan={5} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
+        <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
           No party payments recorded yet.
         </td>
       </tr>

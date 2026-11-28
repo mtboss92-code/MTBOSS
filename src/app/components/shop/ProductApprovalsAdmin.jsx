@@ -26,6 +26,7 @@ export default function ProductApprovalsAdmin({ isDarkMode }) {
   const [rejecting, setRejecting] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [stats, setStats] = useState({ pending: 0, approved: 0, rejected: 0, total: 0 });
 
   const getAdminHeaders = useCallback((contentType) => {
@@ -64,6 +65,7 @@ export default function ProductApprovalsAdmin({ isDarkMode }) {
       const data = await res.json();
       if (data.success) {
         setProducts(data.data || []);
+        setSelectedIds((current) => current.filter((id) => (data.data || []).some((product) => product.id === id)));
         if (data.stats) {
           setStats(data.stats);
         }
@@ -77,9 +79,55 @@ export default function ProductApprovalsAdmin({ isDarkMode }) {
     }
   }, [filter, searchTerm, getAdminHeaders]);
 
+  const toggleSelected = (id) => {
+    setSelectedIds((current) => current.includes(id) ? current.filter((selectedId) => selectedId !== id) : [...current, id]);
+  };
+
+  const toggleAllSelected = () => {
+    setSelectedIds((current) => current.length === products.length ? [] : products.map((product) => product.id));
+  };
+
+  const handleBulkAction = async (action) => {
+    if (!selectedIds.length || actionLoading) return;
+    let reason = '';
+    if (action === 'reject') {
+      reason = window.prompt('Enter the rejection reason for all selected products:')?.trim() || '';
+      if (reason.length < 3) {
+        setError('A rejection reason of at least 3 characters is required.');
+        return;
+      }
+    }
+    const label = action === 'delete' ? 'archive' : action;
+    if (!window.confirm(`${label[0].toUpperCase()}${label.slice(1)} ${selectedIds.length} selected product(s)?`)) return;
+
+    setActionLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/product-approvals', {
+        method: 'POST',
+        headers: getAdminHeaders('application/json'),
+        body: JSON.stringify({ ids: selectedIds, action, reason }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || `Could not ${label} selected products`);
+      setNotice(data.message || `${selectedIds.length} product(s) updated.`);
+      setSelectedIds([]);
+      await fetchProducts();
+      window.dispatchEvent(new Event('MTBOSSShopProductsUpdated'));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchProducts();
   }, [fetchProducts]);
+
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [filter]);
 
   const openProduct = (product) => {
     setSelectedProduct(product);
@@ -298,6 +346,29 @@ export default function ProductApprovalsAdmin({ isDarkMode }) {
           margin-bottom: 1.25rem;
           flex-wrap: wrap;
         }
+
+        .bulk-actions {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          flex-wrap: wrap;
+          margin-bottom: 1rem;
+        }
+
+        .bulk-btn {
+          border: 0;
+          border-radius: 7px;
+          padding: 0.48rem 0.75rem;
+          color: white;
+          font-weight: 700;
+          cursor: pointer;
+        }
+
+        .bulk-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .bulk-approve { background: #059669; }
+        .bulk-reject { background: #d97706; }
+        .bulk-delete { background: #dc2626; }
+        .bulk-publish { background: #2563eb; }
 
         .filter-tabs {
           display: flex;
@@ -1158,6 +1229,29 @@ export default function ProductApprovalsAdmin({ isDarkMode }) {
             />
           </div>
 
+          {filter === 'pending' && (
+            <div className="bulk-actions">
+              <strong>{selectedIds.length} selected</strong>
+              <button type="button" className="bulk-btn bulk-approve" disabled={!selectedIds.length || actionLoading} onClick={() => handleBulkAction('approve')}>
+                Approve selected
+              </button>
+              <button type="button" className="bulk-btn bulk-reject" disabled={!selectedIds.length || actionLoading} onClick={() => handleBulkAction('reject')}>
+                Reject selected
+              </button>
+              <button type="button" className="bulk-btn bulk-delete" disabled={!selectedIds.length || actionLoading} onClick={() => handleBulkAction('delete')}>
+                Archive selected
+              </button>
+            </div>
+          )}
+          {filter === 'approved' && (
+            <div className="bulk-actions">
+              <strong>{selectedIds.length} selected</strong>
+              <button type="button" className="bulk-btn bulk-publish" disabled={!selectedIds.length || actionLoading} onClick={() => handleBulkAction('publish')}>
+                Publish selected
+              </button>
+            </div>
+          )}
+
           {/* Table */}
           <div className="table-wrap">
             {loading ? (
@@ -1170,6 +1264,9 @@ export default function ProductApprovalsAdmin({ isDarkMode }) {
               <table className="approvals-table">
                 <thead>
                   <tr>
+                    {(filter === 'pending' || filter === 'approved') && (
+                      <th><input type="checkbox" aria-label="Select all products" checked={products.length > 0 && selectedIds.length === products.length} onChange={toggleAllSelected} /></th>
+                    )}
                     <th>Product</th>
                     <th>Category</th>
                     <th>Price / Quote</th>
@@ -1195,6 +1292,11 @@ export default function ProductApprovalsAdmin({ isDarkMode }) {
                         className="clickable-product-row"
                         title="Click to view full product details"
                       >
+                        {(filter === 'pending' || filter === 'approved') && (
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <input type="checkbox" aria-label={`Select ${p.name}`} checked={selectedIds.includes(p.id)} onChange={() => toggleSelected(p.id)} />
+                          </td>
+                        )}
                         <td>
                           <div className="product-cell">
                             {coverImg ? (

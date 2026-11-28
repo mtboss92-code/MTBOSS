@@ -19,6 +19,7 @@ const ProfessionalServicesManager = dynamicManager(() => import('../components/c
 const ProfessionalEnquiriesManager = dynamicManager(() => import('../components/leads/ProfessionalEnquiriesManager'));
 const ShopNowManager = dynamicManager(() => import('../components/shop/ShopNowManager'));
 const ShopProductsManager = dynamicManager(() => import('../components/shop/ShopNowManager').then((m) => m.ShopProductsManager));
+const AssignVendorsManager = dynamicManager(() => import('../components/shop/ShopNowManager').then((m) => m.AssignVendorsManager));
 const PropertiesManager = dynamicManager(() => import('../components/properties/PropertiesManager'));
 const PropertyBookingsManager = dynamicManager(() => import('../components/properties/PropertyBookingsManager'));
 const ProjectsManager = dynamicManager(() => import('../components/projects/ProjectsManager'));
@@ -642,6 +643,7 @@ function AdminDashboard() {
     { id: 'shop-categories', label: 'Shop Now Manager', icon: ShoppingCart },
     { id: 'cashback', label: 'Cashback & Wallet', icon: Wallet },
     { id: 'shop-products', label: '+ Add Shop Product', icon: PlusCircle },
+    { id: 'assign-vendors', label: 'Assign Vendors', icon: Users },
     { id: 'shipping-settings', label: 'Shipping Settings', icon: Truck },
     { id: 'shop-commission-settings', label: 'Vendor Commission', icon: CircleDollarSign },
     { id: 'packages', label: 'Package Approvals', icon: PackageCheck },
@@ -2043,6 +2045,9 @@ function AdminDashboard() {
               key={activeTab}
               isDarkMode={isDarkMode}
             />
+          )}
+          {activeTab === 'assign-vendors' && (
+            <AssignVendorsManager key={activeTab} isDarkMode={isDarkMode} />
           )}
           {activeTab === 'cashback' && <CashbackManager isDarkMode={isDarkMode} />}
           {activeTab === 'shipping-settings' && <ShippingSettingsManager />}

@@ -570,6 +570,27 @@ export async function POST(req) {
         let vendorId = product?.vendor_id ? Number(product.vendor_id) : null;
         const supplierId = product?.supplier_id ? Number(product.supplier_id) : null;
 
+        // Admin can attach an existing catalog product to a vendor without
+        // duplicating the product. Use a requested attached vendor when valid;
+        // otherwise use the first attached vendor as the fulfilment/commission
+        // vendor for this order.
+        if (!vendorId && item.product_id) {
+          try {
+            const requestedVendorId = Number(item.vendor_id || item.vendorId) || null;
+            const assignedVendor = await client.query(
+              `SELECT vendor_id FROM shop_product_vendors
+               WHERE product_id = $1
+                 AND ($2::integer IS NULL OR vendor_id = $2)
+               ORDER BY vendor_id ASC LIMIT 1`,
+              [Number(item.product_id), requestedVendorId]
+            );
+            vendorId = assignedVendor.rows[0] ? Number(assignedVendor.rows[0].vendor_id) : null;
+          } catch (assignmentError) {
+            // The migration may not have been run yet; retain legacy flow.
+            console.warn('Could not resolve attached product vendor:', assignmentError.message);
+          }
+        }
+
         // If vendorId is null but supplierId > 0 (supplier added the product), resolve matching vendor
         if (!vendorId && supplierId && supplierId > 0) {
           try {

@@ -893,8 +893,6 @@ const COLOR_OPTIONS = [
 
 const EMPTY = { name: '', emoji: '🛒', label: '', label_color: 'yellow', price_range: '', unit: '', shipping_charge: 0 };
 
-const SKU_UNITS = ['bag', 'bags', 'pcs', 'kg', 'quintal', 'box', 'bundle', 'cft', 'ton', 'meter', 'set', 'bucket'];
-
 /* ══════════════════════════════════════════════════════════════════════════
    MAIN COMPONENT
 ══════════════════════════════════════════════════════════════════════════ */
@@ -979,6 +977,11 @@ export default function ShopCategoriesManager({ isDarkMode }) {
   const [msg, setMsg]               = useState({ text: '', type: '' });
   const [orderSaving, setOrderSaving] = useState(false);
   const [syncing, setSyncing]         = useState(false);
+  const [units, setUnits]             = useState([]);
+  const [newUnit, setNewUnit]         = useState('');
+  const [unitSaving, setUnitSaving]   = useState(false);
+  const [showUnitsModal, setShowUnitsModal] = useState(false);
+  const [activeHeaderAction, setActiveHeaderAction] = useState('');
 
   const handleSyncNavbar = async () => {
     if (!confirm('Publish the currently saved admin subcategories and Shop Now display groups? Parent navbar categories and products will not be changed.')) {
@@ -1027,11 +1030,52 @@ export default function ShopCategoriesManager({ isDarkMode }) {
     finally { setLoading(false); }
   }, []);
 
+  const loadUnits = useCallback(async () => {
+    try {
+      const res = await fetch('/api/shop-units');
+      const data = await res.json();
+      if (res.ok && data.success) setUnits(data.data || []);
+    } catch (error) {
+      console.error('Could not load shop units', error);
+    }
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadUnits(); }, [loadUnits]);
 
   function flash(text, type = 'success') {
     setMsg({ text, type });
     setTimeout(() => setMsg({ text: '', type: '' }), 3000);
+  }
+
+  async function addUnit(event) {
+    event.preventDefault();
+    const name = newUnit.trim();
+    if (!name) return;
+    setUnitSaving(true);
+    try {
+      const res = await fetch('/api/shop-units', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not add unit');
+      setNewUnit('');
+      await loadUnits();
+      flash(`Unit "${data.data.name}" added.`);
+    } catch (error) { flash(error.message, 'error'); }
+    finally { setUnitSaving(false); }
+  }
+
+  async function removeUnit(unit) {
+    if (!confirm(`Remove unit "${unit.name}"? Existing products and categories will keep their saved unit.`)) return;
+    try {
+      const res = await fetch(`/api/shop-units?id=${unit.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not remove unit');
+      setUnits((current) => current.filter((item) => item.id !== unit.id));
+      flash(`Unit "${unit.name}" removed.`);
+    } catch (error) { flash(error.message, 'error'); }
   }
 
   function applyNavbarPreset(preset) {
@@ -1203,6 +1247,18 @@ export default function ShopCategoriesManager({ isDarkMode }) {
     fontSize: '10px', fontWeight: 700, color: t.sub, textTransform: 'uppercase',
     letterSpacing: '0.07em', display: 'block', marginBottom: '4px',
   };
+  const headerActionStyle = (name) => ({
+    background: activeHeaderAction === name ? t.card : t.accent,
+    color: activeHeaderAction === name ? t.accent : t.accentFg,
+    border: `1px solid ${t.accent}`,
+    borderRadius: '4px',
+    padding: name === 'category' ? '8px 18px' : '8px 16px',
+    cursor: 'pointer',
+    fontSize: '11px',
+    fontWeight: 800,
+    textTransform: 'uppercase',
+    letterSpacing: '0.07em',
+  });
 
   /* ════════════════════════════════════════════════════════════════════════
      RENDER
@@ -1226,6 +1282,27 @@ export default function ShopCategoriesManager({ isDarkMode }) {
       )}
 
       {/* ── FORM VIEW ────────────────────────────────────────────────── */}
+      {showUnitsModal && (
+        <div role="presentation" onMouseDown={() => setShowUnitsModal(false)} style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(15,23,42,.48)', display: 'grid', placeItems: 'center', padding: '16px' }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="shop-units-title" onMouseDown={(event) => event.stopPropagation()} style={{ width: 'min(560px, 100%)', maxHeight: '80vh', overflow: 'auto', background: t.card, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '22px', boxShadow: '0 20px 45px rgba(0,0,0,.25)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'flex-start', marginBottom: '16px' }}>
+              <div><h3 id="shop-units-title" style={{ margin: 0, color: t.text, fontSize: '17px' }}>Manage Product Units</h3><p style={{ margin: '5px 0 0', color: t.sub, fontSize: '12px' }}>These units appear in category and product forms.</p></div>
+              <button type="button" onClick={() => setShowUnitsModal(false)} aria-label="Close unit manager" style={{ border: 'none', background: 'none', color: t.sub, cursor: 'pointer', fontSize: '22px', lineHeight: 1 }}>×</button>
+            </div>
+            <form onSubmit={addUnit} style={{ display: 'flex', gap: '8px', marginBottom: '18px' }}>
+              <input autoFocus className="sc-inp" style={{ ...inp, flex: 1 }} value={newUnit} onChange={(event) => setNewUnit(event.target.value)} placeholder="e.g. litre, sq ft, truck" maxLength={100} />
+              <button type="submit" disabled={unitSaving || !newUnit.trim()} style={{ background: t.accent, color: t.accentFg, border: 'none', borderRadius: '4px', padding: '9px 14px', cursor: unitSaving ? 'wait' : 'pointer', fontSize: '11px', fontWeight: 800, opacity: unitSaving || !newUnit.trim() ? 0.65 : 1, whiteSpace: 'nowrap' }}>{unitSaving ? 'Adding…' : '+ Add Unit'}</button>
+            </form>
+            <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap' }}>
+              {units.map((unit) => <span key={unit.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 9px', border: `1px solid ${t.border}`, borderRadius: '999px', background: t.tagBg, color: t.text, fontSize: '11px', fontWeight: 700 }}>
+                {unit.name}<button type="button" onClick={() => removeUnit(unit)} title={`Remove ${unit.name}`} style={{ padding: 0, border: 'none', background: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '15px', lineHeight: 1 }}>×</button>
+              </span>)}
+              {!units.length && <span style={{ fontSize: '12px', color: t.muted }}>No units available yet.</span>}
+            </div>
+          </section>
+        </div>
+      )}
+
       {view === 'form' && (
         <div>
           {/* header */}
@@ -1302,8 +1379,9 @@ export default function ShopCategoriesManager({ isDarkMode }) {
                     onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
                   >
                     <option value="">Select unit</option>
-                    {SKU_UNITS.map(unit => (
-                      <option key={unit} value={unit}>{unit}</option>
+                    {form.unit && !units.some((unit) => unit.name === form.unit) && <option value={form.unit}>{form.unit}</option>}
+                    {units.map(unit => (
+                      <option key={unit.id} value={unit.name}>{unit.name}</option>
                     ))}
                   </select>
                 </div>
@@ -1443,8 +1521,9 @@ export default function ShopCategoriesManager({ isDarkMode }) {
                               onChange={e => setCityPrices(prev => ({ ...prev, [city]: { ...prev[city], unit: e.target.value } }))}
                             >
                               <option value="">Select unit</option>
-                              {SKU_UNITS.map(unit => (
-                                <option key={unit} value={unit}>{unit}</option>
+                              {vals.unit && !units.some((unit) => unit.name === vals.unit) && <option value={vals.unit}>{vals.unit}</option>}
+                              {units.map(unit => (
+                                <option key={unit.id} value={unit.name}>{unit.name}</option>
                               ))}
                             </select>
                           </div>
@@ -1521,16 +1600,20 @@ export default function ShopCategoriesManager({ isDarkMode }) {
             </div>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               {orderSaving && <span style={{ color: t.muted, fontSize: '11px', fontWeight: 600 }}>Saving order…</span>}
-              <button onClick={load}
-                style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '4px', padding: '8px 16px', color: t.sub, cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+              <button onClick={() => { setActiveHeaderAction('refresh'); load(); }}
+                style={headerActionStyle('refresh')}>
                 ↺ Refresh
               </button>
-              <button onClick={handleSyncNavbar} disabled={syncing}
-                style={{ background: '#2563eb', color: '#ffffff', border: 'none', borderRadius: '4px', padding: '8px 16px', cursor: syncing ? 'wait' : 'pointer', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', opacity: syncing ? 0.7 : 1, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <button onClick={() => { setActiveHeaderAction('sync'); handleSyncNavbar(); }} disabled={syncing}
+                style={{ ...headerActionStyle('sync'), cursor: syncing ? 'wait' : 'pointer', opacity: syncing ? 0.7 : 1, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                 {syncing ? '⏳ Syncing...' : '⚡ Sync Navbar Categories'}
               </button>
-              <button onClick={openAdd}
-                style={{ background: t.accent, color: t.accentFg, border: 'none', borderRadius: '4px', padding: '8px 18px', cursor: 'pointer', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+              <button onClick={() => { setActiveHeaderAction('units'); setShowUnitsModal(true); }}
+                style={headerActionStyle('units')}>
+                + Add Units
+              </button>
+              <button onClick={() => { setActiveHeaderAction('category'); openAdd(); }}
+                style={headerActionStyle('category')}>
                 + Add Category
               </button>
             </div>

@@ -18,6 +18,10 @@ const nextConfig = {
   // This repository has its own lockfile inside a parent workspace. Explicitly
   // setting the tracing root prevents Next from selecting the parent project.
   outputFileTracingRoot: projectRoot,
+  outputFileTracingIncludes: {
+    '/api/admin/project-management/payments/route': ['./src/assets/invoice/**/*'],
+    '/api/admin/project-management/payments/[id]/receipt/route': ['./src/assets/invoice/**/*'],
+  },
   /* config options here */
   allowedDevOrigins: ["10.221.79.102"],
 
@@ -67,6 +71,26 @@ const nextConfig = {
       {
         source: '/construction',
         destination: '/Services/all',
+        permanent: true,
+      },
+      {
+        source: '/legal/mtboss-privacy-policy.pdf',
+        destination: '/documents/mtboss-privacy-policy.pdf',
+        permanent: true,
+      },
+      {
+        source: '/legal/mtboss-return-refund-cancellation-policy.pdf',
+        destination: '/documents/mtboss-return-refund-cancellation-policy.pdf',
+        permanent: true,
+      },
+      {
+        source: '/legal/mtboss-terms-and-conditions.pdf',
+        destination: '/documents/mtboss-terms-and-conditions.pdf',
+        permanent: true,
+      },
+      {
+        source: '/legal/mtboss-trademark-certificate.pdf',
+        destination: '/documents/mtboss-trademark-registration-certificate.pdf',
         permanent: true,
       },
     ];

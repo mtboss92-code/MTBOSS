@@ -3,6 +3,7 @@ import pool from '@/lib/db';
 import { createInitializationGuard } from '@/lib/api-utils';
 import { verifyBearer, getJwtSecret } from '@/lib/auth';
 import jwt from 'jsonwebtoken';
+import { ensurePartyPaymentReceiptSchema } from '@/lib/party-payment-receipts';
 
 export async function requirePmAccess(req, projectId = null) {
   // 1. If explicit Authorization header is passed, prioritize its verified identity
@@ -340,7 +341,10 @@ export const ensureAttendanceShiftsAndOvertimeSchema = createInitializationGuard
 // Migrations are the source of truth. This guarded bootstrap makes fresh Neon
 // previews usable before the deployment migration runner has executed.
 export const ensureProjectManagementSchema = createInitializationGuard(async () => {
-  if (await pmSchemaLooksReady()) return;
+  if (await pmSchemaLooksReady()) {
+    await ensurePartyPaymentReceiptSchema();
+    return;
+  }
 
   await pool.query(`CREATE TABLE IF NOT EXISTS pm_parties (id BIGSERIAL PRIMARY KEY, name VARCHAR(200) NOT NULL, phone VARCHAR(30), email VARCHAR(255), gst_no VARCHAR(30), address TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS pm_projects (id BIGSERIAL PRIMARY KEY, party_id BIGINT NOT NULL REFERENCES pm_parties(id) ON DELETE RESTRICT, name VARCHAR(250) NOT NULL, site_address TEXT, start_date DATE NOT NULL, expected_end_date DATE, contract_value NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (contract_value >= 0), built_up_area NUMERIC(14,2), status VARCHAR(20) NOT NULL DEFAULT 'running' CHECK (status IN ('running','completed','on_hold')), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
@@ -375,6 +379,7 @@ export const ensureProjectManagementSchema = createInitializationGuard(async () 
   await pool.query(`CREATE TABLE IF NOT EXISTS pm_supplier_payments(id BIGSERIAL PRIMARY KEY,project_id BIGINT NOT NULL REFERENCES pm_projects(id) ON DELETE RESTRICT,supplier_id BIGINT NULL REFERENCES suppliers(id) ON DELETE SET NULL,supplier_name TEXT,amount NUMERIC(14,2) NOT NULL CHECK(amount>0),payment_date DATE NOT NULL,mode VARCHAR(50),transaction_reference TEXT,note TEXT,is_deleted BOOLEAN NOT NULL DEFAULT FALSE,created_by TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ)`);
   await pool.query(`ALTER TABLE pm_vendor_payments ADD COLUMN IF NOT EXISTS transaction_reference VARCHAR(255)`);
   await pool.query(`ALTER TABLE pm_party_payments ADD COLUMN IF NOT EXISTS transaction_reference VARCHAR(255)`);
+  await ensurePartyPaymentReceiptSchema();
   await pool.query(`ALTER TABLE pm_labor_payments ADD COLUMN IF NOT EXISTS transaction_reference VARCHAR(255)`);
   await pool.query(`ALTER TABLE pm_supplier_payments ADD COLUMN IF NOT EXISTS transaction_reference TEXT`);
   await pool.query(`ALTER TABLE pm_material_received ADD COLUMN IF NOT EXISTS unit VARCHAR(50)`);

@@ -315,7 +315,7 @@ export default function PartyProjectManagement({ initialScreen = 'parties', init
 
   // Phase 1: Party payments
   const [partyPayments, setPartyPayments] = useState([]);
-  const [partyPaymentForm, setPartyPaymentForm] = useState({ amount: '', payment_date: today(), mode: 'bank', note: '', transaction_reference: '' });
+  const [partyPaymentForm, setPartyPaymentForm] = useState({ amount: '', payment_date: today(), mode: 'bank', note: '', transaction_reference: '', client_email: '', invoice_details: {}, submission_key: '' });
   const [partyPaymentModal, setPartyPaymentModal] = useState(false);
   const [editingPartyPaymentId, setEditingPartyPaymentId] = useState(null);
   const [vendorPaymentModal, setVendorPaymentModal] = useState(false);

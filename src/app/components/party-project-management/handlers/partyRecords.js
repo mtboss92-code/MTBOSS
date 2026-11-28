@@ -117,6 +117,14 @@ export function registerPartyRecords(ctx, h) {
   const savePartyPayment = async (e) => {
     if (e) e.preventDefault();
     try {
+      const email = String(partyPaymentForm.client_email || '').trim();
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        const message = 'Enter a valid client email or clear the field';
+        setPartyPaymentForm((f) => ({ ...f, client_email_error: message }));
+        setModalError(message);
+        throw new Error(message);
+      }
+      setPartyPaymentForm((f) => ({ ...f, client_email_error: '' }));
       if (editingPartyPaymentId) {
         await api(`/api/admin/project-management/payments/${editingPartyPaymentId}`, {
           method: 'PATCH',
@@ -126,22 +134,30 @@ export function registerPartyRecords(ctx, h) {
             mode: partyPaymentForm.mode,
             transaction_reference: partyPaymentForm.transaction_reference,
             note: partyPaymentForm.note,
+            client_email: email,
           }),
         });
         setMessage('Party payment updated successfully');
         setPartyPaymentModal(false);
         setEditingPartyPaymentId(null);
       } else {
+        const submission_key = partyPaymentForm.submission_key || crypto.randomUUID();
+        setPartyPaymentForm((f) => ({ ...f, submission_key }));
         await api('/api/admin/project-management/payments', {
           method: 'POST',
-          body: JSON.stringify({ ...partyPaymentForm, project_id: project.id }),
+          headers: { 'Idempotency-Key': submission_key },
+          body: JSON.stringify({ ...partyPaymentForm, client_email: email, invoice_details: {}, submission_key, project_id: project.id }),
         });
-        setPartyPaymentForm({ amount: '', payment_date: today(), mode: 'bank', note: '', transaction_reference: '' });
+        setPartyPaymentForm({ amount: '', payment_date: today(), mode: 'bank', note: '', transaction_reference: '', client_email: '', invoice_details: {}, submission_key: '' });
         setMessage('Party payment recorded successfully');
         setPartyPaymentModal(false);
       }
       h.refreshProjectData();
     } catch (e) {
+      if (e.field === 'client_email' || /valid client email/i.test(e.message || '')) {
+        setPartyPaymentForm((f) => ({ ...f, client_email_error: e.message }));
+        setModalError(e.message);
+      }
       setMessage(e.message);
       throw e;
     }

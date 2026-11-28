@@ -135,6 +135,17 @@ const ensureTable = createInitializationGuard(async () => {
     notes TEXT,
     created_at TIMESTAMP DEFAULT NOW()
   )`);
+  // A catalog product may be offered by more than one vendor. Keep this
+  // relationship separate from supplier_materials so attaching a vendor never
+  // creates a duplicate catalog product or changes its original owner.
+  await pool.query(`CREATE TABLE IF NOT EXISTS shop_product_vendors (
+    product_id INTEGER NOT NULL REFERENCES supplier_materials(id) ON DELETE CASCADE,
+    vendor_id INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+    assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    assigned_by INTEGER,
+    PRIMARY KEY (product_id, vendor_id)
+  )`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS shop_product_vendors_vendor_idx ON shop_product_vendors(vendor_id)`);
 });
 
 const unauthorized = () => NextResponse.json({ success: false, error: 'Admin access required' }, { status: 401 });

@@ -36,3 +36,9 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
+# Party Payment receipt email
+
+New Party Payments can send a PDF receipt when a staff member enters a client email. Configure SMTP server-side (never expose these values with a `NEXT_PUBLIC_` prefix):
+
+`SMTP_HOST`, `SMTP_PORT` (normally `587`), `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`. `SMTP_REPLY_TO` and `COMPANY_NAME` are optional. The receipt queue records `Failed` with a configuration error until SMTP is configured; staff can correct the address and use **Resend Receipt**. Provider delivery/bounce webhooks are not currently configured, so messages are shown as `Sent` after SMTP acceptance (not `Delivered`).
+
